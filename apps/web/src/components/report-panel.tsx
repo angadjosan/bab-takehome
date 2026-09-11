@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { fmtPass, useAttestation, useReportState, useVerifiedReport, type ReportVerification } from "@/lib/docs";
 import { eqHash } from "@/lib/crypto";
 import { IS_MAINNET } from "@/lib/config";
@@ -101,12 +102,31 @@ export function ReportScores({ v }: { v: Version }) {
           Reviewer’s note
         </h2>
         {r.validator.explanation ? (
-          <blockquote className="border-l-2 border-line-strong pl-4 text-[15px] leading-relaxed text-ink">{r.validator.explanation}</blockquote>
+          <ReviewerNote text={r.validator.explanation} />
         ) : (
           <p className="text-[13px] text-muted">The reviewer’s note was withheld by the output screen.</p>
         )}
         <p className="text-xs text-muted">Written by an AI model that saw the environment inside the TEE, capped at 120 words and screened so it can’t leak tasks. It can be wrong.</p>
       </section>
+    </div>
+  );
+}
+
+/** The validator's note, trimmed to its first three sentences until the reader asks for the rest. */
+function ReviewerNote({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const sentences = text.match(/[^.!?]+(?:[.!?]+|$)\s*/g) ?? [text];
+  const long = sentences.length > 3;
+  return (
+    <div className="space-y-2">
+      <blockquote id="reviewer-note" className="border-l-2 border-line-strong pl-4 text-[15px] leading-relaxed text-ink">
+        {open || !long ? text : sentences.slice(0, 3).join("").trim()}
+      </blockquote>
+      {long && (
+        <button type="button" className="btn btn-sm btn-ghost -ml-2.5" aria-expanded={open} aria-controls="reviewer-note" onClick={() => setOpen((x) => !x)}>
+          {open ? "Show less" : `Read more (${sentences.length - 3} more sentence${sentences.length - 3 === 1 ? "" : "s"})`}
+        </button>
+      )}
     </div>
   );
 }
@@ -345,7 +365,7 @@ function AttestationBlock({ rv }: { rv: ReportVerification }) {
             <span className="text-xs text-muted">
               on-chain roles:{" "}
               {Object.entries(roles)
-                .map(([k, on]) => `${k} ${on ? "✓" : "✗"}`)
+                .map(([k, on]) => `${k}: ${on ? "yes" : "no"}`)
                 .join(" · ")}
             </span>
           )}

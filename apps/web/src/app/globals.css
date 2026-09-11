@@ -170,8 +170,9 @@ select {
   .btn {
     @apply inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-line-strong bg-panel px-3.5 text-sm font-medium whitespace-nowrap text-ink transition-[background-color,border-color,color] duration-150 hover:border-input hover:bg-panel-2 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line-strong disabled:hover:bg-panel;
   }
+  /* primary actions keep a 44px touch target below 640px, whatever size modifier they carry */
   .btn-primary {
-    @apply border-accent-fill bg-accent-fill font-semibold text-accent-ink hover:border-[var(--accent-fill-hover)] hover:bg-[var(--accent-fill-hover)] disabled:hover:border-accent-fill disabled:hover:bg-accent-fill;
+    @apply max-sm:min-h-11 max-sm:px-4 border-accent-fill bg-accent-fill font-semibold text-accent-ink hover:border-[var(--accent-fill-hover)] hover:bg-[var(--accent-fill-hover)] disabled:hover:border-accent-fill disabled:hover:bg-accent-fill;
   }
   .btn-sm {
     @apply h-7 gap-1.5 px-2.5 text-xs;

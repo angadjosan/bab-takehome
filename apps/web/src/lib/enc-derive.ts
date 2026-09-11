@@ -1,8 +1,5 @@
 "use client";
 
-import { hkdf } from "@noble/hashes/hkdf.js";
-import { sha256 } from "@noble/hashes/sha2.js";
-import { x25519 } from "@noble/curves/ed25519.js";
 import { bytesToHex, hexToBytes, type Address, type Hex } from "viem";
 import { useAccount, useSignMessage } from "wagmi";
 import { CHAIN_ID } from "./config";
@@ -24,7 +21,9 @@ export function encKeyMessage(address: Address): string {
 
 const enc = new TextEncoder();
 
-export function encKeyFromSignature(signature: Hex, address: Address): EncKey {
+/** Async so the curve and KDF code only download when a key is actually derived (on Buy / Unlock). */
+export async function encKeyFromSignature(signature: Hex, address: Address): Promise<EncKey> {
+  const [{ hkdf }, { sha256 }, { x25519 }] = await Promise.all([import("@noble/hashes/hkdf.js"), import("@noble/hashes/sha2.js"), import("@noble/curves/ed25519.js")]);
   const sk = hkdf(sha256, hexToBytes(signature), enc.encode("envmarket.buyer-enc.v1"), enc.encode(`${CHAIN_ID}:${address.toLowerCase()}`), 32);
   return { publicKey: bytesToHex(x25519.getPublicKey(sk)), secretKey: bytesToHex(sk), createdAt: Date.now(), label: walletKeyLabel(address) };
 }
@@ -42,7 +41,7 @@ export function useWalletEncKey() {
     if (!address) throw new Error("Connect a wallet first.");
     if (cached && !opts.fresh) return cached;
     const signature = await signMessageAsync({ message: encKeyMessage(address) });
-    const k = encKeyFromSignature(signature, address);
+    const k = await encKeyFromSignature(signature, address);
     add(k);
     return k;
   }

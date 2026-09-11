@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { CopyButton, Notice, PageHeader } from "@/components/ui";
-import { encKeyFromSecret, eqHash, generateEncKey } from "@/lib/crypto";
+import { eqHash } from "@/lib/crypto";
 import { fmtTime, shortHash } from "@/lib/format";
 import { downloadKey, useEncKeys } from "@/lib/keys";
 import { useMarketEvents } from "@/lib/market";
@@ -23,8 +23,9 @@ export default function KeysPage() {
     return m;
   }, [events.data]);
 
-  function doImport() {
+  async function doImport() {
     try {
+      const { encKeyFromSecret } = await import("@/lib/crypto-heavy");
       const k = encKeyFromSecret(imp);
       if (keys.some((x) => eqHash(x.publicKey, k.publicKey))) throw new Error("That key is already saved in this browser.");
       add(k);
@@ -42,7 +43,8 @@ export default function KeysPage() {
         actions={
           <button
             className="btn btn-primary"
-            onClick={() => {
+            onClick={async () => {
+              const { generateEncKey } = await import("@/lib/crypto-heavy");
               const k = generateEncKey();
               add(k);
               downloadKey(k);

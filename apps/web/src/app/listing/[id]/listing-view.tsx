@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { DeploymentGate, TeeMissingNotice } from "@/components/gate";
 import { BuyPanel } from "@/components/buy-panel";
 import { ReportDetails, ReportScores, useReportCheck } from "@/components/report-panel";
@@ -135,9 +135,13 @@ function licenseLine(l: unknown): string | null {
   return null;
 }
 
+/** Claims beyond this many collapse behind a "Show all" button; the hidden ids are named on it. */
+const CLAIMS_SHOWN = 4;
+
 function Claims({ v }: { v: Version }) {
   const q = useDoc(v.uri, v.descriptionHash);
   const d = describe(q.data?.json);
+  const [showAll, setShowAll] = useState(false);
   if (q.isLoading) return <Skeleton className="h-32" />;
   if (q.error)
     return (
@@ -159,14 +163,23 @@ function Claims({ v }: { v: Version }) {
         </Notice>
       )}
       {d.claims.length ? (
-        <ol className="divide-y divide-line border-y border-line">
-          {d.claims.map((c) => (
-            <li key={c.id} className="flex gap-4 py-3 text-sm">
-              <span className="w-8 shrink-0 font-mono text-xs leading-6 text-muted">{c.id}</span>
-              <span className="min-w-0 leading-relaxed text-ink [overflow-wrap:anywhere]">{c.text}</span>
-            </li>
-          ))}
-        </ol>
+        <>
+          <ol id="claims-list" className="divide-y divide-line border-y border-line">
+            {(showAll ? d.claims : d.claims.slice(0, CLAIMS_SHOWN)).map((c) => (
+              <li key={c.id} id={`claim-${c.id}`} className="flex gap-4 py-3 text-sm">
+                <span className="w-8 shrink-0 font-mono text-xs leading-6 text-muted">{c.id}</span>
+                <span className="min-w-0 leading-relaxed text-ink [overflow-wrap:anywhere]">{c.text}</span>
+              </li>
+            ))}
+          </ol>
+          {d.claims.length > CLAIMS_SHOWN && (
+            <button type="button" className="btn btn-sm btn-ghost -ml-2.5" aria-expanded={showAll} aria-controls="claims-list" onClick={() => setShowAll((x) => !x)}>
+              {showAll
+                ? "Show fewer claims"
+                : `Show all ${d.claims.length} claims (${d.claims[CLAIMS_SHOWN].id}–${d.claims[d.claims.length - 1].id} hidden)`}
+            </button>
+          )}
+        </>
       ) : (
         <p className="text-[13px] text-muted">The description lists no claims.</p>
       )}

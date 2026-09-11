@@ -126,17 +126,25 @@ export function RequireWallet({ children, why }: { children: ReactNode; why?: st
   return (
     <>
       {noGas && (
-        <p className="mb-2 text-xs text-warn">
-          This wallet has no ETH for network fees.{" "}
-          {GAS_FAUCET_URL ? (
-            <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="link">
-              Get a little Base Sepolia ETH
-            </a>
-          ) : (
-            "Add a little ETH"
-          )}{" "}
-          first.
-        </p>
+        <div className="mb-3 text-xs" role="status">
+          <p className="text-warn">You need a little test ETH for network fees.</p>
+          <details className="mt-1 text-muted">
+            <summary className="cursor-pointer hover:text-ink">Where to get it</summary>
+            <p className="mt-1 leading-relaxed">
+              {GAS_FAUCET_URL ? (
+                <>
+                  It’s free from a{" "}
+                  <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="link">
+                    {CHAIN_NAME} faucet
+                  </a>
+                  . Send it to this wallet, then come back.
+                </>
+              ) : (
+                `Send a little ${CHAIN_NAME} ETH to this wallet, then come back.`
+              )}
+            </p>
+          </details>
+        </div>
       )}
       {children}
     </>

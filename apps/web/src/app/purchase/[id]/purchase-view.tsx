@@ -32,7 +32,7 @@ import {
 } from "@/components/ui";
 import { marketAbi, tokenAbi } from "@/lib/abi";
 import { deployment, CHAIN_ID } from "@/lib/config";
-import { decryptBundle, encKeyFromSecret, eqHash, listTar, sha256Hex, unwrapBundleKeyAsync, utf8, type TarEntry } from "@/lib/crypto";
+import { eqHash, listTar, sha256Hex, utf8, type TarEntry } from "@/lib/crypto";
 import { describe, useDoc } from "@/lib/docs";
 import { fmtKiB, fmtTime, fmtUsdc, fmtWindow, maskToIndexes, pct, popcount } from "@/lib/format";
 import { downloadBytes, useEncKeys } from "@/lib/keys";
@@ -305,7 +305,8 @@ function useDownload(p: Purchase, v: Version, enabled: boolean) {
       return c.ok;
     };
     try {
-      const dl = await getDelivery(p.id);
+      // HPKE + AES-GCM are only downloaded when someone actually decrypts
+      const [dl, { unwrapBundleKeyAsync, decryptBundle }] = await Promise.all([getDelivery(p.id), import("@/lib/crypto-heavy")]);
       const wh = sha256Hex(dl.wrapperBytes);
       push({ label: "Delivery wrapper hash matches the on-chain wrapperHash", ok: eqHash(wh, p.wrapperHash), detail: <HashValue value={wh} /> });
       const w = dl.wrapper as Record<string, unknown>;
@@ -382,9 +383,10 @@ function DownloadControl({ p, dl, quiet }: { p: Purchase; dl: Download; quiet?: 
             <summary className="cursor-pointer text-muted">Dev tools: import a secret key</summary>
             <form
               className="mt-2 flex gap-2"
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
                 try {
+                  const { encKeyFromSecret } = await import("@/lib/crypto-heavy");
                   const k = encKeyFromSecret(imp);
                   if (!eqHash(k.publicKey, p.buyerEncPubKey)) throw new Error("That secret key belongs to a different purchase.");
                   dl.add(k);
@@ -652,6 +654,33 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
   const enough = ((bal.data as bigint | undefined) ?? 0n) >= q.bond;
   const taskIds = tar ? [...new Set(tar.filter((e) => e.path.startsWith("tasks/")).map((e) => e.path.split("/")[1]).filter(Boolean))].sort() : [];
   const ready = ground > 0 && selected > 0 && !!evidenceBytes && (ground !== 2 || claimSel.length > 0 || !!file || /\bC[1-9][0-9]*\b/.test(evidenceText));
+  // Inline errors appear after the first failed submit; focus then jumps to the first field that needs attention.
+  const [tried, setTried] = useState(false);
+  const errs = {
+    ground: ground === 0 ? "Choose what’s wrong." : null,
+    tasks: selected === 0 ? "Pick at least one task." : null,
+    claims: ground === 2 && claims.length > 0 && !claimSel.length && !file && !/\bC[1-9][0-9]*\b/.test(evidenceText) ? "Pick the claim that’s false, or name it (e.g. C3) in your evidence." : null,
+    evidence: !evidenceBytes ? "Describe what you found, or attach a file." : null,
+  };
+  function trySubmit() {
+    if (ready) return submit();
+    setTried(true);
+    const form = document.getElementById("report-form");
+    const target = errs.ground
+      ? form?.querySelector<HTMLElement>('input[name="ground"]')
+      : errs.tasks
+        ? form?.querySelector<HTMLElement>('input[name="tasks"]:not(:disabled)')
+        : errs.claims
+          ? form?.querySelector<HTMLElement>("[aria-pressed]")
+          : form?.querySelector<HTMLElement>("#dispute-evidence, input[name='evidenceFile']");
+    target?.focus();
+  }
+  const fieldError = (msg: string | null) =>
+    tried && msg ? (
+      <p role="alert" className="mt-1 text-xs text-bad">
+        {msg}
+      </p>
+    ) : null;
 
   /** Evidence goes to the TEE first (it returns sha256 of the stored bytes); that hash goes on-chain. */
   async function submit() {
@@ -680,7 +709,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
   const busyText = stage ? "Submitting…" : open.step === "1/2" ? "Allowing the deposit… (1 of 2)" : open.step === "2/2" ? "Submitting… (2 of 2)" : "Submitting…";
 
   return (
-    <div className="space-y-6">
+    <div id="report-form" className="space-y-6">
       <p className="text-sm text-muted">
         Point to a specific problem in specific tasks. If you’re right, those tasks are refunded, up to {pct(p.refundCapBps)} of the price in total. A weak training result on its own doesn’t
         count.
@@ -688,6 +717,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
 
       <fieldset>
         <legend className="text-sm font-medium text-ink">What’s wrong?</legend>
+        {fieldError(errs.ground)}
         <div className="mt-2 space-y-2">
           {[1, 2, 3].map((g) => (
             <label
@@ -709,6 +739,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
 
       <fieldset>
         <legend className="text-sm font-medium text-ink">Which tasks?</legend>
+        {fieldError(errs.tasks)}
         <p className="mt-1 text-xs text-muted">
           Each task can be refunded once.{taskIds.length === p.taskCount ? " Names come from the files you downloaded." : ""}
         </p>
@@ -740,6 +771,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
 
       <fieldset>
         <legend className="text-sm font-medium text-ink">What did you find?</legend>
+        {fieldError(errs.claims ?? errs.evidence)}
         {ground === 2 && claims.length > 0 && (
           <div className="mt-2">
             <p className="text-xs text-muted">Which of the seller’s numbered claims are false? Reviewers see exactly these claims.</p>
@@ -845,7 +877,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
       </div>
 
       <div className="space-y-2">
-        <button className="btn btn-primary" disabled={!ready || !enough || open.busy || !!stage} onClick={submit}>
+        <button className="btn btn-primary" disabled={!enough || open.busy || !!stage} onClick={trySubmit}>
           {(open.busy || stage) && <Spinner className="h-3.5 w-3.5" />}
           {open.busy || stage ? busyText : `Submit report${selected > 0 ? ` · ${fmtUsdc(q.bond)} deposit` : ""}`}
         </button>

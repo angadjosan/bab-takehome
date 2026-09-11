@@ -10,7 +10,11 @@ import { canonicalJson, encryptFile, generateX25519KeyPair, randomKey, sha256Hex
 
 const WEB = fileURLToPath(new URL('../../../apps/web/', import.meta.url));
 const hasWeb = existsSync(`${WEB}node_modules/@hpke/core`) && existsSync(`${WEB}node_modules/canonicalize`);
-const loadWeb = () => import('../../../apps/web/src/lib/crypto.ts');
+// The web app splits its crypto: light helpers in crypto.ts, HPKE/AES-GCM/X25519 in crypto-heavy.ts (loaded on demand).
+const loadWeb = async () => ({
+  ...(await import('../../../apps/web/src/lib/crypto.ts')),
+  ...(await import('../../../apps/web/src/lib/crypto-heavy.ts')),
+});
 
 describe.skipIf(!hasWeb)('apps/web crypto helpers interoperate with packages/shared', () => {
   it('unwrapBundleKeyAsync (@hpke/core) opens shared EMKW2; decryptBundle opens EMENC1', async () => {

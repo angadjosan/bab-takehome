@@ -54,7 +54,10 @@ export function SiteHeader() {
           {mode === "privy" ? <PrivyWalletButton /> : <WagmiWalletButton />}
         </div>
       </div>
-      <nav aria-label="Primary" className="flex gap-1 overflow-x-auto border-t border-line px-2 md:hidden [scrollbar-width:none]">
+      <nav
+        aria-label="Primary"
+        className="flex gap-1 overflow-x-auto border-t border-line pr-8 pl-2 [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)] md:hidden [scrollbar-width:none]"
+      >
         {NAV.map((n) => (
           <NavLink key={n.href} href={n.href} active={isActive(n.href)} compact>
             {n.label}
