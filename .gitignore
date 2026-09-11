@@ -1,0 +1,25 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Node / Next
+node_modules/
+.next/
+dist/
+
+# Foundry
+out/
+cache/
+contracts/broadcast/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local data
+.data/
+
+# macOS
+.DS_Store
