@@ -39,7 +39,7 @@ import { errMsg, logger } from './log.ts';
 import { llmClient, resolveModels, type ResolvedModels } from './models.ts';
 import { prepareVenv } from './sandbox.ts';
 import { nowIso } from './util.ts';
-import { buildScreeningIndex, buildValidatorInput, collectFiles, runValidator, SCREENING_RULES, validatorPromptHash, VALIDATOR_PROMPT_VERSION, type ValidatorResult } from './validator.ts';
+import { buildScreeningIndex, buildValidatorInput, collectFiles, descriptionClaims, runValidator, SCREENING_RULES, validatorPromptHash, VALIDATOR_PROMPT_VERSION, type ValidatorResult } from './validator.ts';
 
 /** v2: episodes run in the verifiers-based reference harness (v1 was the former TypeScript loop). */
 export const PROTOCOL_ID = 'envmarket.preview.v2';
@@ -432,13 +432,15 @@ async function runFresh(ctx: Ctx, versionId: bigint, upload: UploadRecord, model
     const auditFiles = collectFiles(auditDir, 'audit/');
     const publicTexts = [upload.descriptionHash, upload.descriptionMdHash, upload.manifestHash].map((hh) => (hh ? ctx.blobs.getText(hh) : null)).filter((t): t is string => !!t);
     const idx = buildScreeningIndex({ files: [...payloadFiles, ...auditFiles], taskIds: [...upload.taskIds, ...upload.auditTaskIds], publicTexts });
+    const descriptionJson = ctx.blobs.getText(upload.descriptionHash) ?? '{}';
     const validatorInput = buildValidatorInput({
       files: payloadFiles.filter((f) => !f.path.startsWith('solutions/')),
-      descriptionJson: ctx.blobs.getText(upload.descriptionHash) ?? '{}',
+      descriptionJson,
+      manifestJson: ctx.blobs.getText(upload.manifestHash),
       preflight: { dependencies: upload.preflight.dependencies.ok, graderImports: upload.preflight.imports?.ok, purchased: upload.preflight.purchased, auditTaskCount: upload.auditTaskIds.length, sandbox: upload.preflight.sandbox },
     });
     const client = llmClient(cfg.llm);
-    const validator = await runValidator(models.validator.model ? client : null, models.validator.model, validatorInput, idx, { temperature: 0, seed: cfg.preview.seed, maxTokens: cfg.preview.maxTokens });
+    const validator = await runValidator(models.validator.model ? client : null, models.validator.model, validatorInput, idx, { temperature: 0, seed: cfg.preview.seed, maxTokens: cfg.preview.maxTokens }, descriptionClaims(descriptionJson).map((c) => c.id));
     const inferenceCostUsd = Math.round((episodes.reduce((s, e) => s + (e.usage.costUsd ?? 0), 0) + (validator.private.costUsd ?? 0)) * 1e6) / 1e6;
     return {
       episodes,
@@ -497,7 +499,17 @@ function freshReport(ctx: Ctx, versionId: bigint, terms: VersionTerms, upload: U
         ...models.panel.filter((m) => m.status === 'run' && m.reason).map((m) => ` Model note (${m.requested}): ${m.reason}.`),
         models.validator.reason ? ` Validator note: ${models.validator.reason}.` : '',
       ].join(''),
-    validator: { model: validator.model, promptVersion: validator.promptVersion, promptHash: validator.promptHash, explanation: validator.explanation, screening: validator.screening },
+    validator: {
+      model: validator.model,
+      promptVersion: validator.promptVersion,
+      promptHash: validator.promptHash,
+      claims: validator.claims,
+      overall: validator.overall,
+      skills: validator.skills,
+      quality: validator.quality,
+      notes: validator.notes,
+      screening: validator.screening,
+    },
     jobs: episodes.map((r) => ({ jobId: r.jobId, startedAt: r.startedAt, finishedAt: r.finishedAt, status: r.status === 'infra_failure' ? 'infra_failure' : 'succeeded' })),
     runtime: { imageDigest: upload.imageDigest, sandbox: ctx.sandbox.description, network: 'none' },
     attestation: ctx.attestor.reportBlock(),

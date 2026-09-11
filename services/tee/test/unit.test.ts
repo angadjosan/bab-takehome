@@ -9,7 +9,7 @@ import { DSTACK_KEY_PATH, DSTACK_KEY_PURPOSE, keysFromDstack, keysFromMnemonic, 
 import { rederiveWrappedKey, type DeliveryRecord } from '../src/relay.ts';
 import { BlobStore, PrivateStore } from '../src/store.ts';
 import { mapLimit, RateLimiter } from '../src/util.ts';
-import { buildScreeningIndex, renderExplanation, screenExplanation, validatorPromptHash, type ValidatorOutput } from '../src/validator.ts';
+import { buildScreeningIndex, descriptionClaims, runValidator, screenExplanation, screenValidatorOutput, validatorPromptHash, type ValidatorOutput } from '../src/validator.ts';
 import { termsMismatches } from '../src/preview.ts';
 
 const TEST_MNEMONIC = 'test test test test test test test test test test test junk';
@@ -78,23 +78,58 @@ describe('validator output', () => {
     taskIds: ['T1', 'A1'],
   });
   const clean: ValidatorOutput = {
+    claims: [
+      { id: 'C1', verdict: 'supported', basis: 'task directories match the stated count' },
+      { id: 'C10', verdict: 'contradicted', basis: 'hidden test count below the stated minimum for one task' },
+      { id: 'C4', verdict: 'unverifiable', basis: '' },
+    ],
+    overall: 'partly_matches',
     skills: ['data-structures', 'debugging'],
-    implementationQuality: 'adequate',
-    observations: ['Dependencies are pinned with hashes and the grader runs offline.'],
-    judgments: ['Task difficulty appears modest for strong coding models.'],
-    issues: [{ area: 'determinism', kind: 'observation', text: 'No randomness sources were found.' }],
+    quality: 'medium',
+    notes: 'Dependencies are pinned with hashes and grading runs offline; one coverage claim overstates the tests.',
   };
-  it('renders within 120 words / 1000 bytes and passes screening when clean', () => {
-    const r = renderExplanation(clean);
-    expect(r.text.split(/\s+/).length).toBeLessThanOrEqual(120);
-    expect(new TextEncoder().encode(r.text).length).toBeLessThanOrEqual(1000);
-    expect(screenExplanation(r.text, idx)).toEqual({ passed: true, reasons: [] });
+  it('releases verdicts in claim order and passes clean free text', () => {
+    const r = screenValidatorOutput(clean, idx, ['C1', 'C4', 'C10']);
+    expect(r.screening).toEqual({ passed: true, reasons: [] });
+    expect(r.claims.map((c) => c.id)).toEqual(['C1', 'C4', 'C10']);
+    expect(r.claims.find((c) => c.id === 'C10')).toEqual(clean.claims[1]);
+    expect(r.notes).toBe(clean.notes);
   });
-  it('drops trailing items to respect the caps', () => {
-    const long: ValidatorOutput = { ...clean, observations: Array(3).fill('x '.repeat(90).trim()), judgments: Array(3).fill('y '.repeat(90).trim()) };
-    const r = renderExplanation(long);
-    expect(r.dropped).toBeGreaterThan(0);
-    expect(new TextEncoder().encode(r.text).length).toBeLessThanOrEqual(1000);
+  it('blanks only the failing basis / notes and keeps every verdict', () => {
+    const leaky: ValidatorOutput = {
+      ...clean,
+      claims: [
+        { id: 'C1', verdict: 'supported', basis: 'Task T1 has the LRUCache class.' },
+        { id: 'C10', verdict: 'contradicted', basis: 'one task has too few hidden tests' },
+        { id: 'C99', verdict: 'supported', basis: 'not a seller claim' },
+        { id: 'C1', verdict: 'contradicted', basis: 'duplicate' },
+      ],
+      notes: 'The bug lives in ledgerlite/lru.py near eviction.',
+    };
+    const r = screenValidatorOutput(leaky, idx, ['C1', 'C10']);
+    expect(r.claims).toEqual([
+      { id: 'C1', verdict: 'supported', basis: '' },
+      { id: 'C10', verdict: 'contradicted', basis: 'one task has too few hidden tests' },
+    ]);
+    expect(r.notes).toBe('');
+    expect(r.overall).toBe('partly_matches');
+    expect(r.screening.passed).toBe(false);
+    expect(r.screening.reasons.join(' ')).toMatch(/C1 basis blanked/);
+    expect(r.screening.reasons.join(' ')).toMatch(/notes blanked/);
+    expect(r.screening.reasons.join(' ')).not.toMatch(/LRUCache|T1|lru\.py/);
+  });
+  it('blanks a basis over 12 words', () => {
+    const r = screenValidatorOutput({ ...clean, claims: [{ id: 'C1', verdict: 'supported', basis: 'word '.repeat(13).trim() }] }, idx, ['C1']);
+    expect(r.claims[0]).toEqual({ id: 'C1', verdict: 'supported', basis: '' });
+  });
+  it('withholds everything when the model output is not the approved schema', async () => {
+    const client = { chat: async () => ({ content: '{"verdict":"great"}', model: 'm', usage: {} }) } as never;
+    const r = await runValidator(client, 'm', 'input', idx, { temperature: 0, seed: 1, maxTokens: 10 }, ['C1']);
+    expect(r).toMatchObject({ claims: [], overall: null, quality: null, skills: [], notes: '', screening: { passed: false } });
+  });
+  it('extracts claim ids and text from description.json', () => {
+    expect(descriptionClaims(JSON.stringify({ claims: [{ id: 'C1', category: 'taskCount', text: 'five', check: 'x' }, { id: 'X', text: 'y' }] }))).toEqual([{ id: 'C1', category: 'taskCount', text: 'five' }]);
+    expect(descriptionClaims('not json')).toEqual([]);
   });
   it.each([
     ['task id', 'Task T1 is easy.'],

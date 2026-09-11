@@ -255,7 +255,9 @@ export async function printComparison(ctx: Ctx, rows: ListingRow[]): Promise<voi
   for (const r of rows) {
     console.log(`\nversion ${r.versionId} (${r.environmentVersion}) — attestation ${r.attestation?.kind ?? 'n/a'}; report ${r.reportHash ?? '(none)'}`);
     if (r.report) {
-      console.log(`  validator: ${r.report.validator.model} — "${r.report.validator.explanation}"`);
+      const v = r.report.validator;
+      const note = 'explanation' in v ? `"${v.explanation}"` : `${v.overall ?? 'withheld'}; ${v.claims.map((c) => `${c.id} ${c.verdict}`).join(', ')}${v.notes ? ` — "${v.notes}"` : ''}`;
+      console.log(`  validator: ${v.model} — ${note}`);
       console.log(`  uncertainty: ${r.report.uncertainty}`);
     }
     for (const c of r.checks) console.log(`  ✓ ${c}`);

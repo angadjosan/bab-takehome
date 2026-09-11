@@ -305,7 +305,8 @@ async function preview(versionId: bigint, pkg: PackageResult, reuseOf?: { versio
   check(report.attestation.kind === 'none-local-dev', 'local run is labeled attestation.kind = none-local-dev');
   check(report.runtime.network === 'none' && /docker|linux-root/.test(report.runtime.sandbox), `sandbox recorded: ${report.runtime.sandbox}`);
   for (const m of report.models) log(`   model ${m.requested} → ${m.resolved ?? '-'} [${m.status}] purchased ${m.purchased.solved}/${m.purchased.attempted} (${m.purchased.pass1Rounded ?? '-'}%) audit ${m.audit.solved}/${m.audit.attempted} infra ${m.infraFailures}`);
-  log(`   validator ${report.validator.model}: screening ${report.validator.screening.passed ? 'passed' : 'FAILED ' + report.validator.screening.reasons.join('; ')} — "${report.validator.explanation}"`);
+  const vnote = 'explanation' in report.validator ? report.validator.explanation : `${report.validator.overall}; ${report.validator.claims.map((c) => `${c.id} ${c.verdict}`).join(', ')}`;
+  log(`   validator ${report.validator.model}: screening ${report.validator.screening.passed ? 'passed' : 'FAILED ' + report.validator.screening.reasons.join('; ')} — "${vnote}"`);
   check(report.jobs.length === report.models.reduce((n, m) => n + m.purchased.attempted + m.audit.attempted, 0), 'every scheduled job is listed (none dropped)');
   if (useFireworks) check(report.models.filter((m) => m.status === 'run').length === 3 && report.models.every((m) => m.provider === 'fireworks'), 'all three pinned panel models ran on Fireworks');
   const again = await httpJson('POST', `${TEE}/preview/${versionId}`);

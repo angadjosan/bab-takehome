@@ -163,9 +163,35 @@ describe('report', () => {
     const bad = structuredClone(sampleReport);
     bad.models[0]!.purchased.pass1Rounded = 55;
     expect(() => parseReport(bad)).toThrow(/inconsistent/);
-    const long = structuredClone(sampleReport);
+    const long = structuredClone(sampleReport) as any;
     long.validator.explanation = 'word '.repeat(121);
     expect(() => parseReport(long)).toThrow(/explanation/);
+    // envmarket.validator.v2 blocks parse alongside v1
+    const v2 = structuredClone(sampleReport) as any;
+    v2.validator = {
+      model: 'accounts/fireworks/models/deepseek-v4-pro-0813',
+      promptVersion: 'envmarket.validator.v2',
+      promptHash: h('vp2'),
+      claims: [
+        { id: 'C10', verdict: 'contradicted', basis: 'hidden test count below the stated minimum for one task' },
+        { id: 'C1', verdict: 'supported', basis: '' },
+      ],
+      overall: 'partly_matches',
+      skills: ['debugging'],
+      quality: 'medium',
+      notes: '',
+      screening: { passed: true, reasons: [] },
+    };
+    expect(parseReport(v2).validator).toMatchObject({ promptVersion: 'envmarket.validator.v2' });
+    const v2long = structuredClone(v2);
+    v2long.validator.claims[0].basis = 'word '.repeat(13);
+    expect(() => parseReport(v2long)).toThrow(/basis/);
+    const v2bad = structuredClone(v2);
+    v2bad.validator.claims[0].id = 'T1';
+    expect(() => parseReport(v2bad)).toThrow();
+    const v2withheld = structuredClone(v2);
+    Object.assign(v2withheld.validator, { claims: [], overall: null, skills: [], quality: null, screening: { passed: false, reasons: ['x'] } });
+    expect(parseReport(v2withheld).validator).toMatchObject({ overall: null });
     const kind = structuredClone(sampleReport) as any;
     kind.attestation.kind = 'mock';
     expect(() => parseReport(kind)).toThrow();

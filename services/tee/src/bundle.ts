@@ -481,6 +481,7 @@ export async function processUpload(ctx: Ctx, body: Record<string, any>): Promis
     const validatorInputChars = buildValidatorInput({
       files: collectFiles(payload).filter((f) => !f.path.startsWith('solutions/')),
       descriptionJson: new TextDecoder().decode(descBytes),
+      manifestJson: manifestText,
       preflight: { dependencies: preflight.dependencies.ok, graderImports: preflight.imports?.ok, purchased: preflight.purchased, auditTaskCount: auditTaskIds.length, sandbox: preflight.sandbox },
     }).length;
 

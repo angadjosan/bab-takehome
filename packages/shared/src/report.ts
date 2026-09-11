@@ -60,6 +60,57 @@ export const reportModelSchema = z.strictObject({
   infraFailures: zNonNegInt,
 });
 
+const screeningSchema = z.strictObject({ passed: z.boolean(), reasons: z.array(z.string()) });
+
+/** envmarket.validator.v1: one free-text explanation, withheld whole when screening fails. */
+export const validatorV1Schema = z.strictObject({
+  model: z.string().min(1),
+  promptVersion: z.string().min(1),
+  promptHash: zBytes32,
+  explanation: z.string().refine(explanationWithinLimits, `explanation exceeds ${EXPLANATION_MAX_WORDS} words / ${EXPLANATION_MAX_BYTES} bytes`),
+  screening: screeningSchema,
+});
+
+/**
+ * envmarket.validator.v2: a verdict per seller claim (structured enums always released) plus short
+ * generic free text (basis, notes) that is screened field by field; a failing field is blanked ("").
+ * overall/quality are null only when the validator produced no valid structured output.
+ */
+export const VALIDATOR_PROMPT_VERSION_V2 = 'envmarket.validator.v2';
+export const CLAIM_VERDICTS = ['supported', 'contradicted', 'unverifiable'] as const;
+export const VALIDATOR_OVERALL = ['matches_description', 'partly_matches', 'does_not_match'] as const;
+export const VALIDATOR_QUALITY = ['high', 'medium', 'low'] as const;
+export const CLAIM_ID_RE = /^C[1-9][0-9]?$/;
+export const BASIS_MAX_WORDS = 12;
+export const BASIS_MAX_BYTES = 160;
+export const NOTES_MAX_WORDS = 40;
+export const NOTES_MAX_BYTES = 400;
+export function withinLimits(text: string, maxWords: number, maxBytes: number): boolean {
+  const words = text.trim() === '' ? 0 : text.trim().split(/\s+/).length;
+  return words <= maxWords && new TextEncoder().encode(text).length <= maxBytes;
+}
+
+export const validatorV2Schema = z.strictObject({
+  model: z.string().min(1),
+  promptVersion: z.literal(VALIDATOR_PROMPT_VERSION_V2),
+  promptHash: zBytes32,
+  claims: z
+    .array(
+      z.strictObject({
+        id: z.string().regex(CLAIM_ID_RE),
+        verdict: z.enum(CLAIM_VERDICTS),
+        basis: z.string().refine((s) => withinLimits(s, BASIS_MAX_WORDS, BASIS_MAX_BYTES), `basis exceeds ${BASIS_MAX_WORDS} words / ${BASIS_MAX_BYTES} bytes`),
+      }),
+    )
+    .max(99),
+  overall: z.enum(VALIDATOR_OVERALL).nullable(),
+  skills: z.array(z.string().min(1).max(40)).max(5),
+  quality: z.enum(VALIDATOR_QUALITY).nullable(),
+  notes: z.string().refine((s) => withinLimits(s, NOTES_MAX_WORDS, NOTES_MAX_BYTES), `notes exceed ${NOTES_MAX_WORDS} words / ${NOTES_MAX_BYTES} bytes`),
+  screening: screeningSchema,
+});
+export type ReportValidatorV2 = z.infer<typeof validatorV2Schema>;
+
 export const reportSchema = z.strictObject({
   type: z.literal(REPORT_TYPE),
   versionId: zUintString,
@@ -83,13 +134,7 @@ export const reportSchema = z.strictObject({
   }),
   models: z.array(reportModelSchema).min(1),
   uncertainty: z.string().min(1),
-  validator: z.strictObject({
-    model: z.string().min(1),
-    promptVersion: z.string().min(1),
-    promptHash: zBytes32,
-    explanation: z.string().refine(explanationWithinLimits, `explanation exceeds ${EXPLANATION_MAX_WORDS} words / ${EXPLANATION_MAX_BYTES} bytes`),
-    screening: z.strictObject({ passed: z.boolean(), reasons: z.array(z.string()) }),
-  }),
+  validator: z.union([validatorV2Schema, validatorV1Schema]),
   jobs: z.array(
     z.strictObject({
       jobId: z.string().min(1),
