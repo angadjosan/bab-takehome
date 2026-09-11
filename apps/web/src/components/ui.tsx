@@ -315,6 +315,56 @@ export function Card({ title, subtitle, action, children, className, pad = true,
   );
 }
 
+export function IconChevron({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" className={className} aria-hidden {...stroke}>
+      <path d="M7.5 5l5 5-5 5" />
+    </svg>
+  );
+}
+
+/**
+ * The one place crypto detail lives: a collapsed disclosure with a plain summary line
+ * (e.g. "✓ Verified in your browser · 9 checks"). Hashes, addresses, signatures and tx links go inside.
+ */
+export function Details({ summary, status, children, defaultOpen, id, className }: { summary: ReactNode; status?: "ok" | "bad" | "pending" | "neutral"; children: ReactNode; defaultOpen?: boolean; id?: string; className?: string }) {
+  return (
+    <details id={id} open={defaultOpen} className={cx("group card overflow-hidden", className)}>
+      <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 transition-colors duration-150 select-none hover:bg-panel-2 sm:px-5 [&::-webkit-details-marker]:hidden">
+        {status === "ok" ? (
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ok-soft text-ok">
+            <IconCheck className="h-3 w-3" />
+          </span>
+        ) : status === "bad" ? (
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-bad-soft text-bad">
+            <IconX className="h-3 w-3" />
+          </span>
+        ) : status === "pending" ? (
+          <Spinner className="h-4 w-4 shrink-0 text-muted" />
+        ) : null}
+        <span className="min-w-0 flex-1 text-sm text-ink">{summary}</span>
+        <span className="flex shrink-0 items-center gap-1 text-xs text-muted">
+          <span className="group-open:hidden">Show</span>
+          <span className="hidden group-open:inline">Hide</span>
+          <IconChevron className="h-3.5 w-3.5 transition-transform duration-150 group-open:rotate-90" />
+        </span>
+      </summary>
+      <div className="space-y-6 border-t border-line px-4 py-4 sm:px-5 sm:py-5">{children}</div>
+    </details>
+  );
+}
+
+/** A labelled section inside Details. */
+export function DetailSection({ title, children, hint }: { title: ReactNode; children: ReactNode; hint?: ReactNode }) {
+  return (
+    <section className="min-w-0">
+      <h3 className="section-title">{title}</h3>
+      {hint && <p className="mt-1 max-w-[80ch] text-xs leading-relaxed text-muted">{hint}</p>}
+      <div className="mt-2.5">{children}</div>
+    </section>
+  );
+}
+
 export function Stat({ label, value, hint }: { label: ReactNode; value: ReactNode; hint?: ReactNode }) {
   return (
     <div className="min-w-0">
@@ -352,8 +402,8 @@ export function Notice({ tone = "info", title, children }: { tone?: "info" | "wa
 
 export function Empty({ title, children, action }: { title: ReactNode; children?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="rounded-md border border-dashed border-line-strong px-5 py-10 sm:px-8">
-      <div className="mx-auto max-w-xl">
+    <div className="rounded-md border border-dashed border-line-strong px-5 py-8 sm:px-8 sm:py-10">
+      <div className="max-w-xl">
         <div className="text-sm font-semibold text-ink">{title}</div>
         {children && <div className="mt-2 text-[13px] leading-relaxed text-muted">{children}</div>}
         {action && <div className="mt-4 flex flex-wrap gap-2">{action}</div>}

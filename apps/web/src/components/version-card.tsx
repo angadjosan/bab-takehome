@@ -5,128 +5,134 @@ import { describe, useDoc } from "@/lib/docs";
 import { QUALIFY_THRESHOLD, isZeroHash, useSellerScore, useSellerStake, useVersionStats, type Version, type VersionStats } from "@/lib/market";
 import { fmtUsdc, fmtWindow, shortAddr } from "@/lib/format";
 import { useTokenInfo } from "./providers";
-import { Skeleton, Stars, Verified, cx } from "./ui";
+import { Chip, IconShield, Skeleton, Stars, cx } from "./ui";
 
-export function VersionCard({ v }: { v: Version }) {
+/**
+ * One environment on the browse list: what you get and what it costs, as a single link.
+ * Verification detail lives on the listing page; the row only flags problems.
+ */
+export function VersionRow({ v }: { v: Version }) {
   const doc = useDoc(v.uri, v.descriptionHash);
   const stats = useVersionStats(v.id);
   const token = useTokenInfo();
   const d = describe(doc.data?.json);
   const noReport = isZeroHash(v.reportHash);
+  const descBad = !!doc.error || doc.data?.ok === false;
+  const title = d.title ?? `Environment #${v.id}`;
+  const rating = stats.data && stats.data.ratingCount > 0 ? stats.data.ratingSum / stats.data.ratingCount : null;
   return (
-    <Link href={`/listing/${v.id}`} className="card group flex flex-col p-5 transition hover:border-line-strong hover:shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
-            <span>
-              Listing #{v.listingId.toString()} · v{v.versionNo}
-            </span>
-            {d.environmentType && <span className="badge badge-neutral">{d.environmentType}</span>}
-            {!v.active && <span className="badge badge-warn">inactive</span>}
-          </div>
-          <h3 className="mt-1.5 text-base font-semibold leading-snug group-hover:text-accent">
-            {doc.isLoading ? <Skeleton className="h-5 w-48" /> : d.title ?? `Environment version #${v.id}`}
+    <li>
+      <Link href={`/listing/${v.id}`} className="group flex flex-col gap-3 px-4 py-4 transition-colors duration-150 hover:bg-panel-2 sm:flex-row sm:items-start sm:gap-8 sm:px-5 sm:py-5">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <h3 className="text-[15px] leading-snug font-medium text-ink group-hover:underline group-hover:decoration-line-strong group-hover:underline-offset-[3px]">
+            {doc.isLoading ? <Skeleton className="h-5 w-64" /> : title}
           </h3>
-        </div>
-        <div className="text-right">
-          <div className="text-lg font-semibold tabular-nums">{fmtUsdc(v.price, { symbol: false })}</div>
-          <div className="text-[11px] text-muted">{token.symbol}</div>
-        </div>
-      </div>
-
-      {d.summary && <p className="mt-2 line-clamp-2 text-sm text-muted">{d.summary}</p>}
-
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        <Verified
-          ok={doc.error ? false : doc.data?.ok}
-          pending={doc.isLoading}
-          okText="description sha256 ✓"
-          badText={doc.error ? "description unavailable" : "description sha256 ✗"}
-          title="sha256 of description.json recomputed in your browser and compared with the on-chain descriptionHash"
-        />
-        {noReport ? <span className="badge badge-warn">no signed preview yet</span> : <span className="badge badge-accent">signed TEE preview</span>}
-      </div>
-
-      <div className="mt-4 grid grid-cols-3 gap-3 border-t border-line pt-4 text-sm">
-        <div>
-          <div className="section-title">Tasks</div>
-          <div className="mt-0.5 font-medium tabular-nums">{v.taskCount}</div>
-          <div className="text-[11px] text-muted">+{v.auditTaskCount} audit (not sold)</div>
-        </div>
-        <div>
-          <div className="section-title">Challenge</div>
-          <div className="mt-0.5 font-medium">{fmtWindow(v.challengeWindow)}</div>
-          <div className="text-[11px] text-muted">after key delivery</div>
-        </div>
-        <div>
-          <div className="section-title">Disputes</div>
-          <div className="mt-0.5 font-medium tabular-nums">{stats.data ? stats.data.disputesOpened : "…"}</div>
-          <div className="text-[11px] text-muted">{stats.data ? `${stats.data.disputesUpheld} upheld · ${stats.data.settledCount} settled` : ""}</div>
-        </div>
-      </div>
-
-      {d.skills.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1">
-          {d.skills.slice(0, 6).map((s) => (
-            <span key={s} className="rounded-md bg-panel-2 px-1.5 py-0.5 text-[11px] text-muted">
-              {s}
+          {d.summary && <p className="line-clamp-2 max-w-[70ch] text-[13px] leading-relaxed text-muted">{d.summary}</p>}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-1 text-xs text-muted">
+            <span>
+              <span className="font-mono text-ink tabular-nums">{v.taskCount}</span> tasks
             </span>
-          ))}
+            {d.environmentType && <span>{d.environmentType}</span>}
+            <span>{fmtWindow(v.challengeWindow)} to report problems</span>
+            {rating !== null && (
+              <span className="inline-flex items-center gap-1">
+                <Stars value={rating} size="text-xs" />
+                <span className="font-mono tabular-nums">{rating.toFixed(1)}</span>
+              </span>
+            )}
+            {d.skills.slice(0, 3).map((s) => (
+              <span key={s} className="rounded bg-panel-2 px-1.5 py-0.5 text-[11px] text-muted">
+                {s}
+              </span>
+            ))}
+          </div>
         </div>
-      )}
+        <div className="flex shrink-0 items-center justify-between gap-3 sm:flex-col sm:items-end sm:justify-start sm:gap-2">
+          <div className="font-mono text-base font-medium text-ink tabular-nums">
+            {fmtUsdc(v.price, { symbol: false })} <span className="text-xs font-normal text-muted" translate="no">{token.symbol}</span>
+          </div>
+          <div className="flex flex-wrap justify-end gap-1.5">
+            {!v.active ? (
+              <Chip tone="warn">Not for sale</Chip>
+            ) : noReport ? (
+              <Chip tone="warn">Preview pending</Chip>
+            ) : descBad ? (
+              <Chip tone="bad" title="The description served doesn’t match what the seller committed on-chain">
+                Description changed
+              </Chip>
+            ) : (
+              <Chip tone="ok" title="A TEE-signed preview report is attached and the description matches the seller’s on-chain commitment">
+                <IconShield className="h-3 w-3" /> Verified preview
+              </Chip>
+            )}
+          </div>
+        </div>
+      </Link>
+    </li>
+  );
+}
 
-      <div className="mt-4 space-y-1.5 border-t border-line pt-3 text-xs">
-        <EnvRating stats={stats.data} />
-        <SellerLine seller={v.seller} />
+export function ListingRowSkeleton() {
+  return (
+    <li className="flex flex-col gap-3 px-4 py-5 sm:flex-row sm:gap-8 sm:px-5">
+      <div className="flex-1 space-y-2.5">
+        <Skeleton className="h-5 w-2/3" />
+        <Skeleton className="h-3.5 w-5/6" />
+        <Skeleton className="h-3 w-48" />
       </div>
-    </Link>
+      <div className="space-y-2 sm:w-32">
+        <Skeleton className="ml-auto h-5 w-24" />
+        <Skeleton className="ml-auto h-5 w-28" />
+      </div>
+    </li>
   );
 }
 
 export function EnvRating({ stats, className }: { stats?: VersionStats; className?: string }) {
-  if (!stats) return <div className={cx("text-muted", className)}>Environment rating: …</div>;
-  if (stats.ratingCount === 0) return <div className={cx("text-muted", className)}>Environment rating: No purchaser ratings yet</div>;
+  if (!stats) return <div className={cx("text-muted", className)}>Rating …</div>;
+  if (stats.ratingCount === 0) return <div className={cx("text-muted", className)}>No buyer ratings yet</div>;
   const avg = stats.ratingSum / stats.ratingCount;
   return (
     <div className={cx("flex flex-wrap items-center gap-1.5", className)}>
-      <span className="text-muted">Environment rating:</span>
       <Stars value={avg} size="text-sm" />
-      <span className="font-medium">{avg.toFixed(1)}</span>
+      <span className="font-mono font-medium tabular-nums">{avg.toFixed(1)}</span>
       <span className="text-muted">
-        ({stats.ratingCount} purchaser rating{stats.ratingCount === 1 ? "" : "s"})
+        from {stats.ratingCount} buyer{stats.ratingCount === 1 ? "" : "s"}
       </span>
     </div>
   );
 }
 
-/** "New seller — N/100 transactions · Seller stake: X (reserved Y, available Z)" */
+/** Seller standing in one line: new/eligible, sales count, stake. The address links to the account page. */
 export function SellerLine({ seller, link = false }: { seller: `0x${string}`; link?: boolean }) {
   const stake = useSellerStake(seller);
   const score = useSellerScore(seller);
   const n = score.data?.qualifyingTx;
   return (
-    <div className="text-muted">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted">
+      <span>Sold by</span>
       {link ? (
-        <Link href={`/seller/${seller}`} className="link font-mono">
+        <Link href={`/seller/${seller}`} className="link font-mono" translate="no" title={seller}>
           {shortAddr(seller)}
         </Link>
       ) : (
-        <span className="font-mono">{shortAddr(seller)}</span>
-      )}
-      {" · "}
-      {!score.data ? (
-        "…"
-      ) : score.data.eligible ? (
-        <span className="text-ok">Eligible seller — {n?.toString()} qualifying transactions</span>
-      ) : (
-        <span className="text-warn">
-          New seller — {n?.toString()}/{QUALIFY_THRESHOLD.toString()} transactions
+        <span className="font-mono text-ink" translate="no" title={seller}>
+          {shortAddr(seller)}
         </span>
       )}
+      {!score.data ? (
+        <span>…</span>
+      ) : score.data.eligible ? (
+        <Chip tone="ok">{n?.toString()} completed sales</Chip>
+      ) : (
+        <Chip tone="neutral">
+          New seller · {n?.toString()}/{QUALIFY_THRESHOLD.toString()} sales
+        </Chip>
+      )}
       {stake.data && (
-        <>
-          {" · "}Seller stake: {fmtUsdc(stake.data.total)} (reserved {fmtUsdc(stake.data.reserved, { symbol: false })}, available {fmtUsdc(stake.data.available, { symbol: false })})
-        </>
+        <span>
+          · <span className="font-mono text-ink tabular-nums">{fmtUsdc(stake.data.total)}</span> staked
+        </span>
       )}
     </div>
   );

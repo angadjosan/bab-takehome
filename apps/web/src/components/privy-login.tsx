@@ -3,7 +3,7 @@
 import { usePrivy, useSendTransaction, useWallets } from "@privy-io/react-auth";
 import { useMemo, type ReactNode } from "react";
 import type { Address } from "viem";
-import { CHAIN_ID, CHAIN_NAME } from "@/lib/config";
+import { CHAIN_ID } from "@/lib/config";
 import { SponsorCtx, type Sponsor } from "@/lib/sponsor";
 import { PRIVY_SPONSOR_GAS } from "@/lib/wallet-mode";
 import { Spinner } from "./ui";
@@ -12,19 +12,20 @@ import { Spinner } from "./ui";
 export function PrivyLoginPrompt({ why }: { why?: string }) {
   const { ready, authenticated, login } = usePrivy();
   return (
-    <div className="rounded-lg border border-dashed border-line-strong p-4 text-sm">
-      <p className="text-muted">{why ?? "Log in to continue."}</p>
+    <div className="space-y-3 text-sm">
+      <p className="text-muted">{why ?? "Sign in to continue."}</p>
       {authenticated ? (
-        <p className="mt-3 flex items-center gap-2 text-muted">
-          <Spinner className="h-3.5 w-3.5" /> Connecting your wallet…
+        <p className="flex items-center gap-2 text-muted" aria-live="polite">
+          <Spinner className="h-3.5 w-3.5" /> Setting up your account…
         </p>
       ) : (
-        <button className="btn btn-primary btn-sm mt-3" disabled={!ready} onClick={() => login()}>
-          Log in with email, Google or a wallet
+        <button className="btn btn-primary w-full" disabled={!ready} onClick={() => login()}>
+          Sign in
         </button>
       )}
-      <p className="mt-2 text-xs text-muted">
-        A wallet on {CHAIN_NAME} is created for you when you log in with email or Google{PRIVY_SPONSOR_GAS ? ", and its gas is sponsored" : ""}. You can export its key at any time.
+      <p className="text-xs leading-relaxed text-muted">
+        Use email, Google, or a wallet you already have. Signing in with email or Google creates a wallet for you{PRIVY_SPONSOR_GAS ? " and covers its network fees" : ""}; you can export its key
+        later.
       </p>
     </div>
   );

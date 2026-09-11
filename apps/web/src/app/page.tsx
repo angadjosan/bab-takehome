@@ -3,47 +3,47 @@
 import Link from "next/link";
 import { useMemo } from "react";
 import { DeploymentGate, TeeMissingNotice } from "@/components/gate";
-import { VersionCard } from "@/components/version-card";
-import { Empty, Notice, Skeleton, Stat } from "@/components/ui";
-import { tradeRows, useMarketEvents, useVersions } from "@/lib/market";
-import { fmtUsdc } from "@/lib/format";
-import { CHAIN_NAME } from "@/lib/config";
-
-const FLOW = [
-  { t: "Signed preview", d: "A TEE runs reference models on the sealed environment and signs pass@1 scores + a screened explanation." },
-  { t: "Escrow", d: "You pay into the contract. The seller’s collateral is reserved for your purchase." },
-  { t: "Key delivery", d: "The relay wraps the bundle key to your X25519 key and records a signed receipt on-chain." },
-  { t: "Challenge window", d: "Inspect the full source, tasks, and tests. File a specific, bonded claim before the deadline." },
-  { t: "Disputes", d: "Mechanical claims are rechecked in the TEE; false-description claims go to 3 staked AI jurors." },
-  { t: "Reputation", d: "Settled purchases feed version ratings and money-weighted seller scores." },
-];
+import { ListingRowSkeleton, VersionRow } from "@/components/version-card";
+import { Empty, IconArrowRight, Notice } from "@/components/ui";
+import { tradeRows, useMarketEvents, useMarketParams, useVersions } from "@/lib/market";
+import { fmtUsdc, pct } from "@/lib/format";
 
 export default function Home() {
+  const params = useMarketParams();
+  const cap = params.data ? `up to ${pct(params.data.refundCapBps)} of the price` : "up to a fixed cap";
+  const steps = [
+    { t: "Check the signed preview", d: "A secure enclave (TEE) runs today’s models on the sealed tasks and signs their scores." },
+    { t: "Pay into escrow", d: "The contract holds your payment. The seller is paid when your protection window ends." },
+    { t: "Download and inspect", d: "Your copy is encrypted to you, checked against the listing, and decrypted in your browser." },
+    { t: "Report a problem", d: `Defective tasks are refunded, ${cap}. Staked AI jurors decide disputed descriptions.` },
+  ];
   return (
-    <div className="space-y-8">
-      <section className="pt-4">
-        <p className="section-title">Testnet marketplace · {CHAIN_NAME}</p>
-        <h1 className="mt-2 max-w-3xl text-3xl font-semibold tracking-tight sm:text-4xl">Buy RL environments before you can see inside them.</h1>
-        <p className="mt-3 max-w-3xl text-[15px] leading-relaxed text-muted">
-          Showing an environment’s tasks and hidden tests gives the product away, so buyers here judge a sealed bundle by a preview signed inside a trusted
-          execution environment. Payment sits in on-chain escrow until the decryption key is delivered and a challenge window passes; specific defects can be
-          disputed for bounded refunds, and every settled purchase feeds reputation.
-        </p>
-        <ol className="mt-6 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
-          {FLOW.map((s, i) => (
-            <li key={s.t} className="card p-3">
-              <div className="flex items-center gap-2 text-xs font-semibold">
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent-soft text-[11px] text-accent">{i + 1}</span>
-                {s.t}
-              </div>
-              <p className="mt-1.5 text-xs leading-relaxed text-muted">{s.d}</p>
+    <div className="space-y-16">
+      <section aria-labelledby="hero-title" className="space-y-10">
+        <div className="max-w-3xl space-y-4">
+          <h1 id="hero-title" className="text-3xl font-semibold tracking-tight text-ink sm:text-[40px] sm:leading-[1.1]">
+            Buy RL environments before you can see inside them.
+          </h1>
+          <p className="max-w-[62ch] text-[15px] leading-relaxed text-muted">
+            A seller can’t show you the tasks and tests without giving them away. So each environment here comes with scores from reference models that ran it inside a secure enclave,
+            and your payment waits in escrow until you’ve downloaded it and had time to check it.
+          </p>
+        </div>
+
+        <ol aria-label="How buying works" className="grid gap-x-8 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
+          {steps.map((s, i) => (
+            <li key={s.t} className="border-t border-line-strong pt-4">
+              <div className="font-mono text-[11px] text-accent tabular-nums">{String(i + 1).padStart(2, "0")}</div>
+              <div className="mt-2 text-sm font-medium text-ink">{s.t}</div>
+              <p className="mt-1 text-[13px] leading-relaxed text-muted">{s.d}</p>
             </li>
           ))}
         </ol>
-        <p className="mt-3 text-xs text-muted">
-          A signature identifies who produced a report; it does not prove the report is true, and pass@1 is not proof of training value.{" "}
-          <Link href="/how-it-works" className="link">
-            Read the trust assumptions →
+
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+          <span>Scores show how today’s models do on the tasks. They don’t predict whether training on them will help your model.</span>
+          <Link href="/how-it-works" className="link inline-flex items-center gap-1">
+            What you’re trusting <IconArrowRight className="h-3 w-3" />
           </Link>
         </p>
       </section>
@@ -65,73 +65,65 @@ function Listings() {
     const disputes = events.data.filter((e) => e.eventName === "DisputeOpened").length;
     return { purchases: rows.length, settledVol, disputes };
   }, [events.data]);
+  const count = versions.data?.length;
 
   return (
-    <section className="space-y-4">
+    <section aria-labelledby="listings-title" className="space-y-4">
       <TeeMissingNotice />
-      <div className="card grid grid-cols-2 gap-4 p-5 sm:grid-cols-4">
-        <Stat label="Versions listed" value={versions.data ? versions.data.length : <Skeleton className="h-6 w-10" />} />
-        <Stat label="Purchases" value={totals ? totals.purchases : <Skeleton className="h-6 w-10" />} />
-        <Stat label="Disputes opened" value={totals ? totals.disputes : <Skeleton className="h-6 w-10" />} />
-        <Stat label="Retained volume" value={totals ? fmtUsdc(totals.settledVol) : <Skeleton className="h-6 w-20" />} hint="paid to sellers after settlement" />
-      </div>
 
-      <div className="flex items-end justify-between">
-        <h2 className="text-lg font-semibold">Environments for sale</h2>
-        <Link href="/activity" className="link text-sm">
-          Live activity →
-        </Link>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+        <h2 id="listings-title" className="text-lg font-semibold text-ink">
+          Environments
+          {count !== undefined && count > 0 && <span className="ml-2 font-mono text-sm font-normal text-muted tabular-nums">{count}</span>}
+        </h2>
+        {totals && totals.purchases > 0 && (
+          <p className="text-xs text-muted">
+            <span className="font-mono text-ink tabular-nums">{totals.purchases}</span> purchase{totals.purchases === 1 ? "" : "s"} ·{" "}
+            <span className="font-mono text-ink tabular-nums">{totals.disputes}</span> dispute{totals.disputes === 1 ? "" : "s"} ·{" "}
+            <span className="font-mono text-ink tabular-nums">{fmtUsdc(totals.settledVol)}</span> paid to sellers ·{" "}
+            <Link href="/activity" className="link">
+              Activity
+            </Link>
+          </p>
+        )}
       </div>
 
       {versions.error ? (
-        <Notice tone="bad" title="Could not read listings from the chain">
-          {(versions.error as Error).message.split("\n")[0]}
+        <Notice tone="bad" title="Couldn’t load environments">
+          {(versions.error as Error).message.split("\n")[0]} Reload the page, or check the RPC endpoint if it keeps failing.
         </Notice>
       ) : versions.isLoading ? (
-        <div className="grid gap-4 md:grid-cols-2">
-          <Skeleton className="h-72" />
-          <Skeleton className="h-72" />
-        </div>
+        <ul className="card divide-y divide-line overflow-hidden" aria-busy="true" aria-label="Loading environments…">
+          <ListingRowSkeleton />
+          <ListingRowSkeleton />
+        </ul>
       ) : versions.data && versions.data.length ? (
-        <div className="grid gap-4 md:grid-cols-2">
+        <ul className="card divide-y divide-line overflow-hidden">
           {[...versions.data].reverse().map((v) => (
-            <VersionCard key={v.id.toString()} v={v} />
+            <VersionRow key={v.id.toString()} v={v} />
           ))}
-        </div>
+        </ul>
       ) : (
-        <Empty title="No environments listed yet">
+        <Empty
+          title="No environments for sale yet"
+          action={
+            <>
+              <Link href="/how-it-works" className="btn btn-sm">
+                How it works
+              </Link>
+              <Link href="/jurors" className="btn btn-sm btn-ghost">
+                Become a juror
+              </Link>
+            </>
+          }
+        >
           <p>
-            The market contracts are live on {CHAIN_NAME}. The first environment appears here once the TEE service is running on EigenCompute and a seller’s bundle has a signed
-            preview report attached on-chain.
+            The market is live. An environment shows up here once its seller’s files have been through a signed preview in the TEE, which takes a few minutes of model runs.
           </p>
-          <p className="mt-2">While you wait, you can:</p>
-          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-left">
-            <li>get test tUSDC from the faucet in the bar above (it has no value);</li>
-            <li>
-              stake as a juror on the{" "}
-              <Link href="/jurors" className="link">
-                Jurors page
-              </Link>{" "}
-              if your address is approved;
-            </li>
-            <li>
-              read{" "}
-              <Link href="/how-it-works" className="link">
-                how previews, escrow and disputes work
-              </Link>
-              ;
-            </li>
-            <li>
-              watch the{" "}
-              <Link href="/activity" className="link">
-                live activity feed
-              </Link>
-              .
-            </li>
-          </ul>
+          <p className="mt-2">Meanwhile you can get free test tokens from the bar at the top, or stake as a juror if your address is approved.</p>
         </Empty>
       )}
-      {events.error && <p className="text-xs text-bad">Event history unavailable: {(events.error as Error).message.split("\n")[0]}</p>}
+      {events.error && <p className="text-xs text-bad">Activity totals unavailable: {(events.error as Error).message.split("\n")[0]}</p>}
     </section>
   );
 }

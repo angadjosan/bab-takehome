@@ -33,31 +33,32 @@ export function AccountPanel({ onClose }: { onClose: () => void }) {
   const ethLow = eth.data !== undefined && eth.data.value === 0n;
   return (
     <div className="space-y-2 text-sm">
-      <div className="rounded-lg bg-panel-2 p-2.5 text-xs">
-        <div className="flex justify-between">
-          <span className="text-muted">Wallet balance</span>
-          <span className="font-medium">{bal.data === undefined ? "…" : fmtUsdc(bal.data as bigint)}</span>
+      <div className="rounded bg-panel-2 p-3 text-xs">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-muted">Balance</span>
+          <span className="font-mono text-sm font-medium text-ink tabular-nums">{bal.data === undefined ? "…" : fmtUsdc(bal.data as bigint)}</span>
         </div>
-        <div className="mt-1 flex justify-between">
-          <span className="text-muted">Gas balance</span>
-          <span className={cx("font-medium", ethLow && !PRIVY_SPONSOR_GAS && "text-warn")}>{eth.data === undefined ? "…" : `${Number(formatEther(eth.data.value)).toFixed(4)} ETH`}</span>
-        </div>
-        {ethLow && mode === "privy" && PRIVY_SPONSOR_GAS && <div className="mt-1 text-[11px] text-muted">No ETH needed: gas for your embedded wallet is sponsored.</div>}
-        {ethLow && !(mode === "privy" && PRIVY_SPONSOR_GAS) && GAS_FAUCET_URL && (
-          <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="link mt-1 block text-[11px]">
-            Get Base Sepolia ETH for gas
-          </a>
-        )}
-        {claimable.data !== undefined && (
-          <div className="mt-1 flex items-center justify-between">
-            <span className="text-muted" title="Refunds, returned bonds, seller proceeds and juror rewards are credited here and withdrawn by you (pull payments).">
-              Claimable in market
+        {claimable.data !== undefined && hasClaim && (
+          <div className="mt-1.5 flex items-baseline justify-between gap-3">
+            <span className="text-muted" title="Refunds, returned deposits, sale proceeds and juror rewards wait here until you withdraw them.">
+              Ready to withdraw
             </span>
-            <span className={cx("font-medium", hasClaim && "text-warn")}>{fmtUsdc(claimable.data)}</span>
+            <span className="font-mono font-medium text-warn tabular-nums">{fmtUsdc(claimable.data)}</span>
           </div>
         )}
+        {!(mode === "privy" && PRIVY_SPONSOR_GAS) && (
+          <div className="mt-1.5 flex items-baseline justify-between gap-3">
+            <span className="text-muted">Network fees (ETH)</span>
+            <span className={cx("font-mono tabular-nums", ethLow ? "text-warn" : "text-muted")}>{eth.data === undefined ? "…" : Number(formatEther(eth.data.value)).toFixed(4)}</span>
+          </div>
+        )}
+        {ethLow && !(mode === "privy" && PRIVY_SPONSOR_GAS) && GAS_FAUCET_URL && (
+          <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="link mt-1 block text-[11px]">
+            Get free test ETH for fees
+          </a>
+        )}
         {hasClaim && deployment && (
-          <button className="btn btn-primary btn-sm mt-2 w-full" disabled={withdraw.busy} onClick={() => withdraw.run("Withdraw", { address: deployment!.market, abi: marketAbi, functionName: "withdraw" })}>
+          <button className="btn btn-primary btn-sm mt-3 w-full" disabled={withdraw.busy} onClick={() => withdraw.run("Withdraw", { address: deployment!.market, abi: marketAbi, functionName: "withdraw" })}>
             Withdraw {fmtUsdc(claimable.data)}
           </button>
         )}
@@ -65,24 +66,24 @@ export function AccountPanel({ onClose }: { onClose: () => void }) {
         {token.hasFaucet && deployment && (
           <>
             <button className="btn btn-sm mt-2 w-full" disabled={faucet.busy} onClick={() => faucet.run("Faucet", { address: deployment!.token, abi: tokenAbi, functionName: "faucet" })}>
-              Get test {token.symbol} from the faucet
+              Get test {token.symbol}
             </button>
             <TxStatus state={faucet.state} />
           </>
         )}
-        <p className="mt-2 text-[11px] text-muted">{tokenValueNote()}</p>
+        <p className="mt-2 text-[11px] leading-relaxed text-muted">{tokenValueNote()}</p>
       </div>
-      <div className="flex flex-col">
-        <Link href={`/seller/${address}`} className="rounded-md px-1 py-1.5 hover:bg-panel-2" onClick={onClose}>
-          My purchases & seller dashboard
+      <nav aria-label="Account" className="flex flex-col">
+        <Link href={`/seller/${address}`} className="rounded px-1.5 py-1.5 transition-colors duration-150 hover:bg-panel-2" onClick={onClose}>
+          Purchases and sales
         </Link>
-        <Link href="/jurors" className="rounded-md px-1 py-1.5 hover:bg-panel-2" onClick={onClose}>
+        <Link href="/jurors" className="rounded px-1.5 py-1.5 transition-colors duration-150 hover:bg-panel-2" onClick={onClose}>
           Juror stake
         </Link>
-        <Link href="/keys" className="rounded-md px-1 py-1.5 hover:bg-panel-2" onClick={onClose}>
-          My encryption keys
+        <Link href="/keys" className="rounded px-1.5 py-1.5 transition-colors duration-150 hover:bg-panel-2" onClick={onClose}>
+          Delivery keys
         </Link>
-      </div>
+      </nav>
     </div>
   );
 }

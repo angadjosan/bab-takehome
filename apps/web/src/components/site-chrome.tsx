@@ -4,12 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useAccount, useChainId, useConnect, useDisconnect, useReadContract, useSwitchChain } from "wagmi";
-import { CHAIN_ID, CHAIN_NAME, deployment, TEE_URL, addressUrl, IS_MAINNET, GAS_FAUCET_URL } from "@/lib/config";
+import { CHAIN_ID, CHAIN_NAME, deployment, IS_MAINNET, GAS_FAUCET_URL } from "@/lib/config";
 import { tokenAbi } from "@/lib/abi";
 import { BURNER_CONNECTOR_ID } from "@/lib/burner";
 import { fmtTime, fmtUsdc, shortAddr } from "@/lib/format";
 import { useClaimable } from "@/lib/market";
-import { tokenValueNote } from "@/lib/token";
 import { PRIVY_SPONSOR_GAS } from "@/lib/wallet-mode";
 import { BurnerForm, BurnerSwitcher } from "./burner-ui";
 import { PrivyWalletButton } from "./privy-wallet";
@@ -19,11 +18,10 @@ import { cx, IconExternal } from "./ui";
 import { AccountPanel } from "./wallet-panel";
 
 const NAV = [
-  { href: "/", label: "Marketplace" },
+  { href: "/", label: "Browse" },
   { href: "/activity", label: "Activity" },
   { href: "/jurors", label: "Jurors" },
-  { href: "/keys", label: "My Keys" },
-  { href: "/how-it-works", label: "How It Works" },
+  { href: "/how-it-works", label: "How it works" },
 ];
 
 export function SiteHeader() {
@@ -40,54 +38,32 @@ export function SiteHeader() {
         </Link>
         <nav aria-label="Primary" className="hidden h-full items-stretch gap-1 md:flex">
           {NAV.map((n) => (
-            <Link
-              key={n.href}
-              href={n.href}
-              aria-current={isActive(n.href) ? "page" : undefined}
-              className={cx(
-                "relative flex items-center px-2.5 text-[13px] transition-colors duration-150",
-                isActive(n.href)
-                  ? "font-medium text-ink after:absolute after:inset-x-2.5 after:-bottom-px after:h-0.5 after:bg-accent"
-                  : "text-muted hover:text-ink",
-              )}
-            >
+            <NavLink key={n.href} href={n.href} active={isActive(n.href)}>
               {n.label}
-            </Link>
+            </NavLink>
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-2">
-          <span
-            className="hidden h-7 items-center gap-2 rounded-md border border-line px-2.5 font-mono text-[11px] text-muted sm:inline-flex"
-            title={deployment ? `Contracts deployed on chain ${CHAIN_ID}` : `No deployment for chain ${CHAIN_ID}`}
-          >
-            <span aria-hidden className={cx("h-1.5 w-1.5 rounded-full", deployment ? "bg-ok" : "bg-warn")} />
-            {CHAIN_NAME}
-            {IS_MAINNET && <span className="font-semibold text-warn uppercase">mainnet</span>}
-            {devTools && <span className="border-l border-line pl-2 text-accent uppercase">dev tools</span>}
-          </span>
+          {devTools && (
+            <span className="hidden h-7 items-center rounded-md border border-line px-2 font-mono text-[11px] text-accent uppercase sm:inline-flex" title={`Burner keys enabled · chain ${CHAIN_ID}`}>
+              Dev tools
+            </span>
+          )}
           {mode === "privy" ? <PrivyWalletButton /> : <WagmiWalletButton />}
         </div>
       </div>
       <nav aria-label="Primary" className="flex gap-1 overflow-x-auto border-t border-line px-2 md:hidden [scrollbar-width:none]">
         {NAV.map((n) => (
-          <Link
-            key={n.href}
-            href={n.href}
-            aria-current={isActive(n.href) ? "page" : undefined}
-            className={cx(
-              "relative flex h-10 items-center px-2.5 text-[13px] whitespace-nowrap",
-              isActive(n.href) ? "font-medium text-ink after:absolute after:inset-x-2.5 after:-bottom-px after:h-0.5 after:bg-accent" : "text-muted",
-            )}
-          >
+          <NavLink key={n.href} href={n.href} active={isActive(n.href)} compact>
             {n.label}
-          </Link>
+          </NavLink>
         ))}
       </nav>
       {!IS_MAINNET && <TestnetBanner />}
       {!privyConfigured && !devTools && (
-        <div className="border-t border-line bg-panel">
+        <div className="border-t border-line">
           <div className="mx-auto max-w-6xl px-4 py-1.5 text-xs text-muted sm:px-6">
-            Email / Google login (Privy) is not configured for this deployment: set <code className="font-mono text-ink">NEXT_PUBLIC_PRIVY_APP_ID</code> (see apps/web/README.md). Browser wallets still work.
+            Email and Google sign-in are off for this deployment (set <code className="font-mono text-ink">NEXT_PUBLIC_PRIVY_APP_ID</code>). Browser wallets still work.
           </div>
         </div>
       )}
@@ -95,10 +71,25 @@ export function SiteHeader() {
   );
 }
 
+function NavLink({ href, active, compact, children }: { href: string; active: boolean; compact?: boolean; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      aria-current={active ? "page" : undefined}
+      className={cx(
+        "relative flex items-center px-2.5 text-[13px] whitespace-nowrap transition-colors duration-150",
+        compact && "h-10",
+        active ? "font-medium text-ink after:absolute after:inset-x-2.5 after:-bottom-px after:h-0.5 after:bg-accent" : "text-muted hover:text-ink",
+      )}
+    >
+      {children}
+    </Link>
+  );
+}
+
 /**
- * Always-visible testnet strip: what the token is worth (nothing), the TestUSDC faucet for the
- * connected wallet (rate-limited on-chain; shows when it can be used again), and where to get
- * Base Sepolia ETH for gas (unless gas is sponsored).
+ * Always-visible test-mode strip: the token is worth nothing, the faucet for the connected wallet
+ * (rate-limited on-chain; shows when it can be used again), and test ETH for gas unless gas is sponsored.
  */
 function TestnetBanner() {
   const { address, isConnected } = useAccount();
@@ -119,42 +110,36 @@ function TestnetBanner() {
   return (
     <div className="border-t border-line bg-panel">
       <div className="mx-auto flex min-h-9 max-w-6xl flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-1.5 text-xs sm:px-6">
-        <span className="inline-flex items-center gap-2">
-          <span className="badge badge-warn font-mono tracking-wide uppercase">Testnet</span>
-          <span className="text-muted">
-            {CHAIN_NAME} · <span translate="no">{token.symbol}</span> has no value
+        <span className="inline-flex items-center gap-2 text-muted">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warn" />
+          <span>
+            <span className="font-medium text-ink">Test market.</span> <span translate="no">{token.symbol}</span> is a test token with no value.
           </span>
         </span>
         {deployment &&
           token.hasFaucet &&
           (isConnected ? (
-            <span className="flex flex-wrap items-center gap-2">
+            <span className="flex flex-wrap items-center gap-2" aria-live="polite">
               <button className="btn btn-sm" disabled={faucet.busy || coolingDown} onClick={() => faucet.run("Faucet", { address: deployment!.token, abi: tokenAbi, functionName: "faucet" })}>
-                Get Test {token.symbol}
+                Get test {token.symbol}
               </button>
-              {coolingDown && <span className="text-muted">Faucet used; available again {fmtTime(waitUntil)}</span>}
+              {coolingDown && <span className="text-muted">Next top-up after {fmtTime(waitUntil)}</span>}
               <TxStatus state={faucet.state} />
             </span>
           ) : (
-            <span className="text-muted">
-              {mode === "privy" ? "Log in (top right)" : "Connect a wallet"} to get test {token.symbol} from the faucet.
-            </span>
+            <span className="text-muted">{mode === "privy" ? "Sign in" : "Connect a wallet"} to get free test {token.symbol}.</span>
           ))}
-        {sponsored ? (
-          <span className="text-muted">Gas is sponsored for wallets created at login.</span>
-        ) : (
-          GAS_FAUCET_URL && (
-            <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1 text-muted">
-              Base Sepolia ETH for gas <IconExternal className="h-3 w-3" />
-            </a>
-          )
+        {!sponsored && GAS_FAUCET_URL && (
+          <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-muted underline decoration-line-strong underline-offset-[3px] hover:text-ink hover:decoration-accent">
+            Test ETH for fees <IconExternal className="h-3 w-3" />
+          </a>
         )}
       </div>
     </div>
   );
 }
 
-/** A sealed box: an outlined square whose corner is filled in the accent — the bundle you buy without opening. */
+/** A sealed box: an outlined square whose corner is filled in the accent. */
 function Logo() {
   return (
     <svg viewBox="0 0 20 20" className="h-5 w-5 shrink-0" aria-hidden>
@@ -200,7 +185,7 @@ function WagmiWalletButton() {
   if (!mounted)
     return (
       <button className="btn btn-sm opacity-0" aria-hidden tabIndex={-1}>
-        Connect Wallet
+        Connect wallet
       </button>
     );
 
@@ -212,28 +197,23 @@ function WagmiWalletButton() {
     <div className="relative" ref={ref}>
       {!isConnected ? (
         <button className="btn btn-primary btn-sm" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)} disabled={isPending}>
-          {isPending ? "Connecting…" : "Connect Wallet"}
+          {isPending ? "Connecting…" : "Connect wallet"}
         </button>
       ) : wrongChain ? (
         <button className="btn btn-sm border-warn text-warn" onClick={() => switchChain({ chainId: CHAIN_ID })} disabled={switching}>
-          {switching ? "Switching…" : `Switch to ${CHAIN_NAME}`}
+          {switching ? "Switching…" : "Switch network"}
         </button>
       ) : (
-        <button className="btn btn-sm" aria-haspopup="menu" aria-expanded={open} aria-label={`Account ${address}${hasClaim ? ", funds to withdraw" : ""}`} onClick={() => setOpen((o) => !o)}>
+        <button className="btn btn-sm" aria-haspopup="menu" aria-expanded={open} aria-label={`Account menu${hasClaim ? ", you have funds to withdraw" : ""}`} onClick={() => setOpen((o) => !o)}>
           <span aria-hidden className={cx("h-1.5 w-1.5 rounded-full", hasClaim ? "bg-warn" : "bg-ok")} />
-          <span className="font-mono" translate="no">
-            {shortAddr(address)}
-          </span>
-          {bal !== undefined && <span className="hidden border-l border-line pl-2 font-mono text-muted tabular-nums sm:inline">{fmtUsdc(bal as bigint)}</span>}
+          <span className="font-mono tabular-nums">{bal !== undefined ? fmtUsdc(bal as bigint) : shortAddr(address)}</span>
         </button>
       )}
       {open && (
         <div className="absolute right-0 z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] overscroll-contain rounded-md bg-panel p-2 [box-shadow:var(--overlay-shadow)]">
           {!isConnected ? (
             <>
-              <p className="px-2 pt-1 pb-2 text-xs text-muted">
-                Connect a wallet on {CHAIN_NAME}. Browsing is read-only; a wallet is only needed to buy, dispute, finalize, rate, or withdraw.
-              </p>
+              <p className="px-2 pt-1 pb-2 text-xs leading-relaxed text-muted">Browsing needs no wallet. You need one to buy, report a problem, release a payment, rate, or withdraw.</p>
               {uniq.map((c) => (
                 <button
                   key={c.uid}
@@ -263,7 +243,7 @@ function WagmiWalletButton() {
             </>
           ) : (
             <div className="space-y-2 p-1 text-sm">
-              <div>
+              <div className="px-1">
                 <div className="text-xs text-muted">Connected with {connector?.name}</div>
                 <div className="font-mono text-xs [overflow-wrap:anywhere]" translate="no">
                   {address}
@@ -301,67 +281,26 @@ function WagmiWalletButton() {
 }
 
 export function SiteFooter() {
-  useTokenInfo();
+  const token = useTokenInfo();
   return (
     <footer className="border-t border-line pb-[env(safe-area-inset-bottom)]">
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 text-xs text-muted sm:grid-cols-3 sm:px-6">
-        <div className="space-y-2">
-          <div className="section-title text-ink">RL Environment Market</div>
-          <p className="leading-relaxed">
-            Running on {CHAIN_NAME} (chain {CHAIN_ID}). {tokenValueNote()}
-          </p>
-          <p>
-            <Link href="/how-it-works" className="link">
-              Trust assumptions &amp; what is real
-            </Link>
-          </p>
-        </div>
-        <div className="space-y-2">
-          <div className="section-title text-ink">Contracts</div>
-          {deployment ? (
-            <>
-              <FooterAddr label="EnvMarket" addr={deployment.market} />
-              <FooterAddr label="Payment token" addr={deployment.token} />
-              <div>
-                Events indexed from block <span className="font-mono tabular-nums">{deployment.startBlock.toString()}</span>
-              </div>
-            </>
-          ) : (
-            <div>Not deployed on this chain yet.</div>
-          )}
-        </div>
-        <div className="space-y-2">
-          <div className="section-title text-ink">TEE Service</div>
-          {TEE_URL ? (
-            <a href={`${TEE_URL}/health`} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1 font-mono [overflow-wrap:anywhere]" translate="no">
-              {TEE_URL} <IconExternal className="h-3 w-3 shrink-0" />
-            </a>
-          ) : (
-            <div>
-              <code className="font-mono">NEXT_PUBLIC_TEE_URL</code> not configured.
-            </div>
-          )}
-          <p className="leading-relaxed">Every value on this site is read live from the chain or the TEE service and checked in your browser; nothing is simulated.</p>
-        </div>
+      <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 text-xs text-muted sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <p className="leading-relaxed">
+          <span className="font-medium text-ink">RL Environment Market</span> · test market on {CHAIN_NAME}, <span translate="no">{token.symbol}</span> has no value. Every number
+          here is read live from the chain or the TEE and checked in your browser.
+        </p>
+        <nav aria-label="Footer" className="flex shrink-0 gap-4">
+          <Link href="/how-it-works" className="hover:text-ink">
+            What you’re trusting
+          </Link>
+          <Link href="/how-it-works#deployment" className="hover:text-ink">
+            Contracts
+          </Link>
+          <Link href="/keys" className="hover:text-ink">
+            Delivery keys
+          </Link>
+        </nav>
       </div>
     </footer>
-  );
-}
-
-function FooterAddr({ label, addr }: { label: string; addr: string }) {
-  const u = addressUrl(addr);
-  return (
-    <div className="flex items-center justify-between gap-3 sm:justify-start">
-      <span>{label}</span>
-      {u ? (
-        <a className="link inline-flex items-center gap-1 font-mono" href={u} target="_blank" rel="noreferrer" translate="no" title={addr}>
-          {shortAddr(addr)} <IconExternal className="h-3 w-3" />
-        </a>
-      ) : (
-        <span className="font-mono" translate="no" title={addr}>
-          {shortAddr(addr)}
-        </span>
-      )}
-    </div>
   );
 }
