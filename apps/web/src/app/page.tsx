@@ -4,9 +4,12 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { DeploymentGate, TeeMissingNotice } from "@/components/gate";
 import { ListingRowSkeleton, VersionRow } from "@/components/version-card";
-import { Empty, IconArrowRight, Notice } from "@/components/ui";
+import { Empty, IconExternal, Notice } from "@/components/ui";
 import { tradeRows, useMarketEvents, useMarketParams, useVersions } from "@/lib/market";
 import { fmtUsdc, pct } from "@/lib/format";
+
+/** The full trust model lives in the repository README; the app keeps short disclosures inline. */
+const TRUST_MODEL_URL = "https://github.com/angadjosan/bab-takehome#readme";
 
 export default function Home() {
   const params = useMarketParams();
@@ -40,11 +43,12 @@ export default function Home() {
           ))}
         </ol>
 
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-          <span>Scores show how today’s models do on the tasks. They don’t predict whether training on them will help your model.</span>
-          <Link href="/how-it-works" className="link inline-flex items-center gap-1">
-            What you’re trusting <IconArrowRight className="h-3 w-3" />
-          </Link>
+        <p className="max-w-[80ch] text-xs leading-relaxed text-muted">
+          Scores show how today’s models do on the tasks. They don’t predict whether training on them will help your model. The enclave operator, the model provider and
+          the AI jurors are all trusted parties.{" "}
+          <a href={TRUST_MODEL_URL} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1">
+            Read the full trust model <IconExternal className="h-3 w-3" />
+          </a>
         </p>
       </section>
 
@@ -108,9 +112,9 @@ function Listings() {
           title="No environments for sale yet"
           action={
             <>
-              <Link href="/how-it-works" className="btn btn-sm">
-                How it works
-              </Link>
+              <a href={TRUST_MODEL_URL} target="_blank" rel="noreferrer" className="btn btn-sm">
+                Read the trust model <IconExternal className="h-3 w-3" />
+              </a>
               <Link href="/jurors" className="btn btn-sm btn-ghost">
                 Become a juror
               </Link>

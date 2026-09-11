@@ -14,15 +14,17 @@ import { BurnerForm, BurnerSwitcher } from "./burner-ui";
 import { PrivyWalletButton } from "./privy-wallet";
 import { useTokenInfo, useWalletMode } from "./providers";
 import { useTx, TxStatus } from "./tx";
-import { cx, IconExternal } from "./ui";
+import { AddressLink, cx, IconExternal } from "./ui";
 import { AccountPanel } from "./wallet-panel";
 
 const NAV = [
   { href: "/", label: "Browse" },
   { href: "/activity", label: "Activity" },
   { href: "/jurors", label: "Jurors" },
-  { href: "/how-it-works", label: "How it works" },
 ];
+
+/** The full trust model lives in the repository README; the app keeps short disclosures inline. */
+const TRUST_MODEL_URL = "https://github.com/angadjosan/bab-takehome#readme";
 
 export function SiteHeader() {
   const path = usePathname();
@@ -289,16 +291,28 @@ export function SiteFooter() {
           <span className="font-medium text-ink">RL Environment Market</span> · test market on {CHAIN_NAME}, <span translate="no">{token.symbol}</span> has no value. Every number
           here is read live from the chain or the TEE and checked in your browser.
         </p>
-        <nav aria-label="Footer" className="flex shrink-0 gap-4">
-          <Link href="/how-it-works" className="hover:text-ink">
-            What you’re trusting
-          </Link>
-          <Link href="/how-it-works#deployment" className="hover:text-ink">
-            Contracts
-          </Link>
+        <nav aria-label="Footer" className="flex shrink-0 flex-wrap items-start gap-x-4 gap-y-2">
+          <a href={TRUST_MODEL_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-ink">
+            Trust model <IconExternal className="h-3 w-3" />
+          </a>
           <Link href="/keys" className="hover:text-ink">
             Delivery keys
           </Link>
+          {deployment && (
+            <details className="group">
+              <summary className="cursor-pointer list-none hover:text-ink [&::-webkit-details-marker]:hidden">Contracts</summary>
+              <div className="mt-2 space-y-1">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Market</span>
+                  <AddressLink address={deployment.market} />
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>Payment token</span>
+                  <AddressLink address={deployment.token} />
+                </div>
+              </div>
+            </details>
+          )}
         </nav>
       </div>
     </footer>

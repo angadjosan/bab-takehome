@@ -39,9 +39,9 @@ blur overlays. Amber appears only on the primary button, focus rings and active 
 ## Typography
 
 - **UI:** IBM Plex Sans 400/500/600 (next/font, `--font-plex-sans`)
-- **Data:** JetBrains Mono (`--font-jetbrains-mono`) for amounts, counts, hashes, addresses, eyebrow labels
-- Rejected: Orbitron + Exo 2 (sci-fi cliché for a trust product)
-- Scale: 11 (mono label) · 12 · 13 · 14 (body) · 15 (lead) · 20 · 28 · 40 (home h1). Sentence case.
+- **Data:** JetBrains Mono (`--font-jetbrains-mono`) for amounts, counts, hashes and addresses only
+- Rejected: Orbitron + Exo 2 (sci-fi cliché for a trust product); tracked all-caps mono eyebrow labels (template tell)
+- Scale: 12 (labels) · 13 · 14 (body) · 15 (lead) · 20 · 28 · 40 (home h1). Sentence case everywhere.
 - `tabular-nums` on every number that sits in a column or updates live.
 
 ## Spacing, shape, depth

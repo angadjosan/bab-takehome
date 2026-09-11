@@ -101,7 +101,9 @@ and observer.
 - `/jurors` — approved juror pool with total/locked/free stake and eligibility; deposit/withdraw your stake; seats you were drawn for
 - `/activity` — every market event with explorer links
 - `/keys` — buyer X25519 encryption keys held in this browser
-- `/how-it-works` — trust assumptions, what is and isn't proven, live parameters
+
+Trust disclosures live where they apply (a one-line note on each screen plus a collapsed Details
+panel with the evidence); the footer links to the repository README for the full trust model.
 
 Claimable balances (refunds, returned bonds, seller proceeds, juror rewards; pull payments) show in
 the wallet menu and as a banner with a **Withdraw** button.

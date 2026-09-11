@@ -51,8 +51,9 @@ default; light applies under `prefers-color-scheme: light`. Contrast was measure
 | `accent-fill` + `accent-ink` | `#f59e0b` + `#0b0e13` | same | 9.0 / 8.5 |
 | `ok` `warn` `bad` `info` | `#34d399` `#fb923c` `#f87171` `#60a5fa` | `#047857` `#c2410c` `#b91c1c` `#1d4ed8` | all ≥ 4.8 |
 
-- **Type:** Plex Sans 400/500/600, JetBrains Mono; sizes 11 (mono label), 12, 13, 14 (body),
-  15 (lead), 18, 28, 40 (home h1). Headings use `text-wrap: balance`.
+- **Type:** Plex Sans 400/500/600 for all text, labels included (sentence case, no tracked
+  all-caps eyebrows); JetBrains Mono only for amounts, counts, hashes and addresses. Sizes 12
+  (labels), 13, 14 (body), 15 (lead), 18, 28, 40 (home h1). Headings use `text-wrap: balance`.
 - **Space:** 4px grid; 16px card padding (20px from `sm`); 48–64px between page sections.
 - **Radius:** 6px for cards, buttons and inputs; 4px for chips.
 - **Focus:** one 2px `:focus-visible` outline in the accent everywhere; a skip link; `scroll-margin-top`
@@ -85,7 +86,10 @@ carry their own labels.
   the current state; receipts and checks go in Details.
 - **Dispute**: plain summary of the claim, a stage tracker, your jury seat as the primary action if you
   hold one; seeds, hashes and addresses go in Details.
-- **Account, Jurors, Activity, Delivery keys, How it works**: same primitives, plain labels.
+- **Account, Jurors, Activity, Delivery keys**: same primitives, plain labels.
+- **Trust model**: no separate page. Each screen carries a one-line disclosure where it matters
+  (what scores don't prove, who you're trusting), the Details panels hold the evidence, and the
+  footer links to the repository README for the full model.
 
 The generated design system from the ui-ux-pro-max skill, with the curation decisions, is in
 `design-system/rl-env-market/MASTER.md`. Screenshots are in `docs/screenshots/`.

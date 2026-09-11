@@ -161,9 +161,9 @@ select {
   .card-pad {
     @apply p-4 sm:p-5;
   }
-  /* mono eyebrow label: section titles, table headers, stat labels */
+  /* small label for section titles, stat labels and form groups: sentence case, same family as body */
   .section-title {
-    @apply font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-muted;
+    @apply text-xs font-medium text-muted;
   }
 
   /* buttons */
@@ -229,7 +229,7 @@ select {
     @apply w-full border-collapse text-[13px] tabular-nums;
   }
   .data-table > thead > tr > th {
-    @apply border-b border-line px-3 py-2 text-left align-bottom font-mono text-[11px] font-medium tracking-[0.06em] whitespace-nowrap text-muted uppercase first:pl-4 last:pr-4;
+    @apply border-b border-line px-3 py-2 text-left align-bottom text-xs font-medium whitespace-nowrap text-muted first:pl-4 last:pr-4;
   }
   .data-table > tbody > tr > td {
     @apply border-b border-line px-3 py-2.5 align-middle first:pl-4 last:pr-4;
