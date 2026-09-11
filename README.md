@@ -52,7 +52,10 @@ Testnet: the token is TestUSDC and **has no value**. The stakes, bonds and colla
 - **Fireworks sees task text.** Inference runs outside the attested boundary. During previews, Fireworks sees task statements, workspace files and, for the validator, environment source. During disputes, the jurors' provider sees case excerpts. Production would move inference inside the boundary.
 - **One TEE signer holds three roles.** The same KMS-derived key is runner, relay and verifier. If it is compromised, it can sign false reports, false deliveries and false findings. The contract caps the damage at the 50% refund cap plus penalties; it cannot reach escrow or balances directly.
 - **The owner key sets roles.** The deployer can change params for future purchases, set the runner, relay and verifier, approve jurors and withdraw the treasury and reserve. It cannot touch escrow, collateral, bonds, stakes or claimable balances. Ownership transfer is single-step, with no multisig.
-- **The jurors are three processes I run.** They are allowlisted, use different model families (one shares the GLM family with the panel, which is disclosed) and are not independent. With only three jurors, a round-2 panel can never fill, so a failed round falls back to "no refund, seller paid".
+- **The jurors are three identities I run, as Vercel Functions.** They are allowlisted, use different model families (one shares the GLM family with the panel, which is disclosed) and are not independent. With only three jurors, a round-2 panel can never fill, so a failed round falls back to "no refund, seller paid".
+  - *Where they run.* [`services/jurors-vercel`](services/jurors-vercel/README.md) runs them on Vercel Workflow, with one durable run per dispute. A dispute wakes the run, and a daily cron sweeps for anything missed. `services/jurors` is the same logic as local processes, for anvil and dev.
+  - *Keys.* The three juror keys and the Fireworks key are Vercel *sensitive* env vars in that project only (the public web project never holds them). They cannot be read back, but Vercel and anyone who can deploy the project can use them.
+  - *Vote secrets.* Each salt is derived from the juror's key (HMAC), so no store has to be trusted or kept alive to reveal. The verdict and commitment are recorded in Vercel's workflow event log before the commit transaction, so project members can see a verdict before the reveal.
 - **Juror randomness is weak.** The seed is `blockhash(selectionBlock)` plus `prevrandao`. On OP-stack chains, prevrandao is the L1 origin's value and is known ahead of time, and the sequencer produces the blockhash. Each juror keeper calls `selectJurors` at the first valid block to shrink the grinding window. Production needs a VRF.
 - **A delivery receipt records a key, not a usable one.** A bad key can be disputed as *broken*, but that relies on the verifier.
 
@@ -106,6 +109,7 @@ Tests:
 | `packages/shared`, `agents`, `services/jurors`, `services/tee` | `npm install && npm test && npm run typecheck` |
 | `services/tee` | `npm run e2e` (anvil e2e with real preview; `E2E_BROKEN_VARIANT=1` adds an upheld mechanical dispute) |
 | `services/jurors` | `npm run integration` (anvil commit-reveal round) |
+| `services/jurors-vercel` | `npm test && npm run build` (planner, workflow loop vs a simulated EnvMarket, salt/commitment vs `cast`, vendor sync) |
 | `apps/web` | `npm run build && npm run lint` |
 | `seller-workspace/*` | `scripts/verify.sh --docker` (reference solutions pass, starting states fail, offline) |
 
@@ -116,6 +120,7 @@ contracts/          Foundry: EnvMarket (+ Views module via delegatecall), TestUS
 packages/shared/    TS library: canonical tar, commitments/Merkle, HPKE key wrap, EIP-712, schemas, LLM client, ABI
 services/tee/       The TEE service (Phala Cloud dstack; EigenCompute supported): upload checks, paid previews, key relay, mechanical verifier, evidence
 services/jurors/    Three AI juror agents: keeper, case-packet fetch, rubric, commit-reveal, rationale publishing
+services/jurors-vercel/  The same jurors on Vercel Functions + Workflow (what the live market uses): wake/health/cron routes, one durable run per dispute
 harness/            envmarket_coding: reference harness on Prime Intellect verifiers 0.3.1 (usable in vf-eval / prime-rl)
 agents/             Seller and buyer agent CLIs (package, list, buy, decrypt, inspect claims, dispute), e2e orchestrator
 apps/web/           Next.js app with Privy: listings, signed reports, buy/decrypt, disputes, jurors, reputation
