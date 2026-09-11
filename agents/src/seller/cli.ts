@@ -17,7 +17,7 @@ import { parseUnits } from 'viem';
 import { loadCtx, marketRead, sellerStake, signer, sleep, tokenInfo, fmt } from '../common/ctx.ts';
 import { sellerVersionDir, sellerWorkspace } from '../common/paths.ts';
 import { TeeClient } from '../common/tee.ts';
-import { keeperTick, listVersion, previewAndAttach, readState, uploadVersion, depositCollateral } from './actions.ts';
+import { keeperTick, listVersion, payPreview, previewAndAttach, readState, uploadVersion, depositCollateral, withdrawPreviewFees } from './actions.ts';
 import { packageEnvironment, parseDescriptionLoose } from './package.ts';
 
 function workspaceVersion(ws: string): string {
@@ -114,14 +114,37 @@ program
   .option('--once', 'single pass')
   .option('--interval <sec>', 'poll interval', '15')
   .option('--no-withdraw', 'do not withdraw proceeds')
+  .option('--ops', 'also withdraw released preview fees for the fee recipient (operator key)')
   .action(async (o) => {
     const ctx = loadCtx();
     for (;;) {
-      const r = await keeperTick(ctx, { withdraw: o.withdraw });
+      const r = await keeperTick(ctx, { withdraw: o.withdraw, ops: !!o.ops });
       console.log(`[keeper] finalized [${r.finalized.join(',')}] refunded [${r.refunded.join(',')}] withdrew ${r.withdrawn}`);
       if (o.once) break;
       await sleep(Number(o.interval) * 1000);
     }
+  });
+
+program
+  .command('pay-preview')
+  .description('escrow the TEE-quoted preview fee on-chain (requestPreview); preview does this automatically')
+  .option('--version <v>')
+  .option('--version-id <id>')
+  .action(async (o) => {
+    const ctx = loadCtx();
+    const id = o.versionId ? BigInt(o.versionId) : BigInt(readState(versionDir(o)).versionId ?? '0');
+    if (id === 0n) throw new Error('not listed yet; run `list`');
+    const r = await payPreview(ctx, id, new TeeClient());
+    console.log(`fee=${r.fee} quoteHash=${r.quoteHash} (${r.source})`);
+  });
+
+program
+  .command('ops-withdraw')
+  .description('preview-fee recipient (operator/deployer key) withdraws released preview fees')
+  .action(async () => {
+    const ctx = loadCtx();
+    const n = await withdrawPreviewFees(ctx);
+    console.log(n === 0n ? 'nothing withdrawn' : `withdrew ${await fmt(ctx, n)}`);
   });
 
 program.command('status').action(async () => {

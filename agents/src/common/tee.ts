@@ -101,6 +101,11 @@ export class TeeClient {
     return this.req('POST', '/seller/upload', body);
   }
 
+  /** Signed preview quote: {quote, quoteHash = sha256(canonicalJson(quote)), signature (EIP-191 over the raw hash)}. */
+  previewQuote(versionId: bigint): Promise<any> {
+    return this.req('GET', `/preview/quote/${versionId}`);
+  }
+
   preview(versionId: bigint): Promise<any> {
     return this.req('POST', `/preview/${versionId}`);
   }

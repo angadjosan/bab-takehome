@@ -1,17 +1,20 @@
 /** Seller agent actions: upload to the TEE, list on-chain, collateral, preview/attach, keeper. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { parseEventLogs, type Address, type Hex, type TransactionReceipt } from 'viem';
+import { parseEventLogs, recoverMessageAddress, type Address, type Hex, type TransactionReceipt } from 'viem';
 import {
   PurchaseState,
   UPLOAD_KEYWRAP_INFO,
+  canonicalJson,
   encryptFile,
   randomKey,
+  sha256Hex,
   toBase64,
   wrapKey,
 } from '@envmarket/shared';
 import {
   approveExact,
+  balanceOf,
   chainNow,
   fmt,
   getPurchase,
@@ -24,7 +27,7 @@ import {
 } from '../common/ctx.ts';
 import { readJson, writeJson } from '../common/paths.ts';
 import { verifyReport } from '../common/report.ts';
-import { TeeClient, fetchVerified } from '../common/tee.ts';
+import { TeeClient, TeeHttpError, fetchVerified } from '../common/tee.ts';
 import { readKeys, readListingInput, readSalts, type ListingInput } from './package.ts';
 
 export interface SellerState {
@@ -49,6 +52,7 @@ export function writeState(dir: string, s: SellerState): void {
 
 const log = (m: string) => console.log(`[seller] ${m}`);
 const eq = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+const ZERO32 = `0x${'00'.repeat(32)}` as Hex;
 
 export function eventsOf(ctx: Ctx, receipt: TransactionReceipt, eventName: string): any[] {
   return parseEventLogs({ abi: ctx.abi, logs: receipt.logs, eventName } as never).map((l: any) => l.args);
@@ -221,6 +225,7 @@ export async function depositCollateral(ctx: Ctx, amount: bigint): Promise<void>
  * on-chain runner authorization + bindings, then attach it on-chain if the TEE did not.
  */
 export async function previewAndAttach(ctx: Ctx, versionId: bigint, tee = new TeeClient(), dir?: string): Promise<{ reportHash: Hex; attachedBy: 'seller' | 'tee' | 'already' }> {
+  await payPreview(ctx, versionId, tee);
   log(`requesting preview for version ${versionId} (TEE runs the reference panel + validator; this can take minutes)`);
   const res = await tee.preview(versionId);
   let version = await getVersion(ctx, versionId);
@@ -230,25 +235,127 @@ export async function previewAndAttach(ctx: Ctx, versionId: bigint, tee = new Te
   for (const m of vr.report.models) {
     log(`  model ${m.requested} → ${m.resolved ?? '(unavailable)'} [${m.status}] purchased pass@1 ${m.purchased.pass1Rounded ?? 'n/a'}% (${m.purchased.solved}/${m.purchased.attempted}), audit ${m.audit.pass1Rounded ?? 'n/a'}%`);
   }
-  // A non-zero reportHash at this point was submitted by the TEE itself (res.attachTx) or earlier.
-  let attachedBy: 'seller' | 'tee' | 'already' = res.attachTx ? 'tee' : 'already';
-  version = await getVersion(ctx, versionId);
-  if (version.reportHash === `0x${'00'.repeat(32)}`) {
-    // The TEE may be submitting attachReport itself; give it a moment, then submit (anyone may).
-    for (let i = 0; i < 5 && version.reportHash === `0x${'00'.repeat(32)}`; i++) {
-      await new Promise((r) => setTimeout(r, 1500));
-      version = await getVersion(ctx, versionId);
+  // The TEE submits attachReport itself when it can (res.attachTx). Wait for that transaction
+  // instead of guessing with a timer, and treat a lost race (ReportAlreadyAttached) as success when
+  // the hash that landed on-chain is the one we verified. Anyone may submit; the runner signature
+  // is what the contract checks.
+  const ZERO = `0x${'00'.repeat(32)}`;
+  let attachedBy: 'seller' | 'tee' | 'already' = 'already';
+  if (res.attachTx) {
+    try {
+      await ctx.read.publicClient.waitForTransactionReceipt({ hash: res.attachTx as Hex, timeout: 120_000 });
+    } catch (e) {
+      log(`TEE attach tx ${res.attachTx} not confirmed (${(e as Error).message.split('\n')[0]}); checking chain state`);
     }
-    if (version.reportHash === `0x${'00'.repeat(32)}`) {
+  }
+  version = await getVersion(ctx, versionId);
+  for (let i = 0; i < 5 && version.reportHash === ZERO && !res.attachTx; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    version = await getVersion(ctx, versionId);
+  }
+  if (version.reportHash === ZERO) {
+    try {
       await marketWrite(ctx, signer(ctx, 'seller'), 'attachReport', [versionId, vr.reportHash, res.signature], 'seller.attachReport');
       attachedBy = 'seller';
-    } else attachedBy = 'tee';
-  }
+    } catch (e) {
+      version = await getVersion(ctx, versionId);
+      if (!eq(version.reportHash, vr.reportHash)) throw e;
+      log('the TEE attached the report concurrently (seller attach not needed)');
+      attachedBy = 'tee';
+    }
+  } else if (res.attachTx) attachedBy = 'tee';
   version = await getVersion(ctx, versionId);
   if (!eq(version.reportHash, vr.reportHash)) throw new Error(`on-chain reportHash ${version.reportHash} != verified ${vr.reportHash}`);
   log(`report ${vr.reportHash} attached on-chain (by ${attachedBy})`);
   if (dir) writeState(dir, { ...readState(dir), reportHash: vr.reportHash });
   return { reportHash: vr.reportHash, attachedBy };
+}
+
+// ------------------------------------------------------------------------------------ preview fee
+
+export interface PreviewPayment {
+  fee: bigint;
+  quoteHash: Hex;
+  source: 'tee-quote' | 'min-fee-fallback' | 'already-paid';
+}
+
+/**
+ * Seller-paid preview: escrow the TEE's quoted inference fee on-chain (`requestPreview`) before the
+ * TEE will run the preview; `attachReport` requires it and releases the fee to the operator. The
+ * quote is verified before paying: sha256(canonicalJson(quote)) == quoteHash, EIP-191 signature by
+ * quote.signer, signer is an authorized runner on-chain, bound to this chain/market/version/bundle,
+ * not expired. Fallback (isolated here): a TEE without GET /preview/quote → pay minPreviewFee() with
+ * quoteHash 0. Idempotent: an outstanding paid request is reused.
+ */
+export async function payPreview(ctx: Ctx, versionId: bigint, tee = new TeeClient()): Promise<PreviewPayment> {
+  const [paidFee, paidAt, paidQuote, , reclaimed] = await marketRead<[bigint, bigint, Hex, boolean, boolean]>(ctx, 'previewInfo', [versionId]);
+  if (paidAt !== 0n && !reclaimed) {
+    log(`preview for version ${versionId} already paid (${await fmt(ctx, paidFee)}, quote ${paidQuote.slice(0, 10)}…)`);
+    return { fee: paidFee, quoteHash: paidQuote, source: 'already-paid' };
+  }
+  const minFee = await marketRead<bigint>(ctx, 'minPreviewFee');
+  const floor = reclaimed && paidFee > minFee ? paidFee : minFee; // contract rule after a reclaim
+  const version = await getVersion(ctx, versionId);
+  let fee = floor;
+  let quoteHash = ZERO32;
+  let source: PreviewPayment['source'] = 'min-fee-fallback';
+  let issued: { quote: Record<string, any>; quoteHash: string; signature: Hex } | null = null;
+  try {
+    issued = await tee.previewQuote(versionId);
+  } catch (e) {
+    if (!(e instanceof TeeHttpError && e.status === 404)) throw e;
+    log(`TEE has no /preview/quote endpoint: paying minPreviewFee ${await fmt(ctx, minFee)} with quoteHash 0`);
+  }
+  if (issued) {
+    const q = issued.quote;
+    const h = sha256Hex(canonicalJson(q));
+    if (!eq(h, issued.quoteHash)) throw new Error(`preview quote hash ${issued.quoteHash} != sha256(canonical quote) ${h}`);
+    const by = await recoverMessageAddress({ message: { raw: h }, signature: issued.signature });
+    if (!eq(by, String(q.signer))) throw new Error(`quote signature by ${by}, but quote.signer is ${q.signer}`);
+    if (!(await marketRead<boolean>(ctx, 'isRunner', [by]))) throw new Error(`quote signer ${by} is not an authorized runner`);
+    if (String(q.versionId) !== versionId.toString() || Number(q.chainId) !== ctx.chainId || !eq(String(q.market), ctx.market) || !eq(String(q.bundleHash), version.bundleHash)) {
+      throw new Error('preview quote is not bound to this chain/market/version/bundle');
+    }
+    if (Number(q.validUntil) < Math.floor(Date.now() / 1000)) throw new Error('preview quote expired');
+    const quoted = BigInt(q.feeUsdc);
+    fee = quoted > floor ? quoted : floor;
+    quoteHash = h as Hex;
+    source = 'tee-quote';
+    log(`TEE quote ${h.slice(0, 10)}…: ${q.cached ? 'cached report (no episodes)' : `${q.episodes} episodes`} on ${Array.isArray(q.models) ? q.models.join(', ') : '?'} + validator ${q.validatorModel}, est. $${q.estimatedCostUsd} → fee ${await fmt(ctx, quoted)} (market min ${await fmt(ctx, minFee)}); signed by runner ${by}`);
+  }
+  const c = signer(ctx, 'seller');
+  const bal = await balanceOf(ctx, c.account.address);
+  if (bal < fee) throw new Error(`seller balance ${await fmt(ctx, bal)} < preview fee ${await fmt(ctx, fee)}`);
+  if (fee > 0n) await approveExact(ctx, c, fee, 'seller.approve(previewFee)');
+  await marketWrite(ctx, c, 'requestPreview', [versionId, fee, quoteHash], 'seller.requestPreview');
+  log(`preview fee ${await fmt(ctx, fee)} escrowed (${source}); released to the TEE operator only when a report is attached, reclaimable by the seller after the timeout otherwise`);
+  return { fee, quoteHash, source };
+}
+
+/** Deposit only the shortfall so `available` stake covers `needed` (e.g. one sale's collateral). */
+export async function ensureCollateral(ctx: Ctx, needed: bigint): Promise<bigint> {
+  const me = signer(ctx, 'seller').account.address;
+  const s = await sellerStake(ctx, me);
+  if (s.available >= needed) return 0n;
+  const top = needed - s.available;
+  log(`available stake ${await fmt(ctx, s.available)} < ${await fmt(ctx, needed)} per sale: depositing ${await fmt(ctx, top)}`);
+  await depositCollateral(ctx, top);
+  return top;
+}
+
+/** Ops: the preview-fee recipient (default: deployer/operator) pulls its released preview fees. */
+export async function withdrawPreviewFees(ctx: Ctx): Promise<bigint> {
+  const recipient = await marketRead<Address>(ctx, 'previewFeeRecipient');
+  const bal = await marketRead<bigint>(ctx, 'claimable', [recipient]);
+  if (bal === 0n) return 0n;
+  const role = (['deployer', 'runner', 'seller'] as const).find((r) => ctx.cfg.keys[r] && ctx.cfg.roleAddresses[r] && eq(ctx.cfg.roleAddresses[r]!, recipient));
+  if (!role) {
+    log(`preview-fee recipient ${recipient} has ${await fmt(ctx, bal)} claimable; its key is not configured here (it calls withdraw() itself)`);
+    return 0n;
+  }
+  await marketWrite(ctx, signer(ctx, role), 'withdraw', [], `${role}.withdraw(previewFees)`);
+  log(`preview-fee recipient ${role} ${recipient} withdrew ${await fmt(ctx, bal)}`);
+  return bal;
 }
 
 // ------------------------------------------------------------------------------------ keeper
@@ -264,7 +371,7 @@ export interface KeeperResult {
  * window has passed (permissionless), apply the timeout refund to undelivered ones (also
  * permissionless; it is the protocol rule), then withdraw the seller's pull-payment balance.
  */
-export async function keeperTick(ctx: Ctx, opts: { withdraw?: boolean; who?: 'seller' } = {}): Promise<KeeperResult> {
+export async function keeperTick(ctx: Ctx, opts: { withdraw?: boolean; who?: 'seller'; ops?: boolean } = {}): Promise<KeeperResult> {
   const c = signer(ctx, opts.who ?? 'seller');
   const me = c.account.address as Address;
   const ids = await marketRead<bigint[]>(ctx, 'listPurchaseIdsBySeller', [me]);
@@ -288,5 +395,6 @@ export async function keeperTick(ctx: Ctx, opts: { withdraw?: boolean; who?: 'se
       log(`withdrew ${await fmt(ctx, bal)} of proceeds`);
     }
   }
+  if (opts.ops) await withdrawPreviewFees(ctx);
   return out;
 }

@@ -46,7 +46,7 @@ import { sellerVersionDir, sellerWorkspace } from '../src/common/paths.ts';
 import { TeeClient } from '../src/common/tee.ts';
 import { browse, buy, openDispute, parseTaskMask, printComparison, rate, receive, waitForState, withdraw, type Who } from '../src/buyer/actions.ts';
 import { disputePlan, inspectPurchase } from '../src/buyer/inspect.ts';
-import { depositCollateral, keeperTick, listVersion, previewAndAttach, uploadVersion } from '../src/seller/actions.ts';
+import { ensureCollateral, keeperTick, listVersion, previewAndAttach, uploadVersion, withdrawPreviewFees } from '../src/seller/actions.ts';
 import { packageEnvironment, parseDescriptionLoose } from '../src/seller/package.ts';
 
 const args = new Set(process.argv.slice(2));
@@ -76,6 +76,9 @@ const collateral = units(env.LISTING_COLLATERAL ?? (onAnvil ? '100' : '0.5'));
 const params = await marketRead<Record<string, any>>(ctx, 'params');
 const jurorStake = BigInt(params.jurorStake);
 const bondCapNeed = BigInt(params.bondCap);
+const minPreviewFee = await marketRead<bigint>(ctx, 'minPreviewFee');
+// an upheld dispute slashes caseFee + penalty from the seller's stake; top-ups cover it before later sales
+const slashMargin = BigInt(params.caseFee) + (price * BigInt(params.penaltyBps)) / 10000n;
 
 banner(`EnvMarket end-to-end on chain ${ctx.chainId} · market ${ctx.market} · token ${t.symbol} ${ctx.token}`);
 console.log(`TEE ${tee.base}: signer ${teeSigner} · attestation ${health.attestation.kind}${health.attestation.kind === 'none-local-dev' ? ' (LOCAL DEV — no hardware attestation; operator can read plaintext)' : ''}`);
@@ -84,7 +87,7 @@ console.log(`listing terms: price ${await fmt(ctx, price)}, collateral ${await f
 
 step('actors and funding');
 const needs: Record<string, bigint> = {
-  seller: collateral * 3n,
+  seller: collateral + slashMargin * 2n + minPreviewFee * 4n,
   buyer: price + bondCapNeed,
   buyer2: price * 2n,
   juror1: jurorStake,
@@ -164,7 +167,7 @@ if (!args.has('--skip-package') || !fs.existsSync(path.join(vdir, 'listing-input
 }
 await uploadVersion(vdir, tee);
 const { versionId } = await listVersion(ctx, vdir);
-await depositCollateral(ctx, collateral * 3n);
+await ensureCollateral(ctx, collateral);
 await previewAndAttach(ctx, versionId, tee, vdir);
 
 // ------------------------------------------------------------------------------------ buyer A
@@ -239,6 +242,7 @@ if (disputeId !== null) {
 
 banner('BUYER2: buy → receive → no dispute → anyone finalizes after the challenge window');
 const budgetB = units(env.BUYER2_BUDGET ?? formatUnits(price, t.decimals));
+await ensureCollateral(ctx, collateral);
 const B = await buy(ctx, 'buyer2', versionId, price, { budget: budgetB });
 await receive(ctx, 'buyer2', B.purchaseId);
 const pB = await getPurchase(ctx, B.purchaseId);
@@ -258,6 +262,7 @@ if (args.has('--timeout-refund')) {
   banner('OPTIONAL: pre-delivery timeout refund');
   // buyer2 registers an unusable (low-order) X25519 key: the relay cannot wrap a key to it,
   // so no delivery receipt is ever recorded; after the delivery window anyone applies the refund.
+  await ensureCollateral(ctx, collateral);
   const c = signer(ctx, 'buyer2');
   const lowOrder = `0x01${'00'.repeat(31)}` as Hex;
   await send(c, { address: ctx.token, abi: erc20Abi as never, functionName: 'approve', args: [ctx.market, price], label: 'buyer2.approve(price)' });
@@ -275,6 +280,10 @@ if (args.has('--timeout-refund')) {
 }
 
 // ------------------------------------------------------------------------------------ summary
+
+step('operator: the preview-fee recipient pulls the released preview fee');
+const opsFees = await withdrawPreviewFees(ctx);
+if (opsFees === 0n) console.log('  (nothing to withdraw)');
 
 banner('REPUTATION');
 const seller = addr('seller');
@@ -322,8 +331,9 @@ console.log(`  sum        ${formatUnits(sumB, t.decimals).padStart(14)} → ${fo
 const [esc, col, bonds, jst, tre, res, cl] = await Promise.all(
   ['totalEscrow', 'totalCollateral', 'totalBonds', 'totalJurorStake', 'treasury', 'reserve', 'totalClaimable'].map((f) => marketRead<bigint>(ctx, f)),
 );
-const buckets = esc! + col! + bonds! + jst! + tre! + res! + cl!;
-console.log(`  market balance ${formatUnits(after.market!, t.decimals)} = escrow ${formatUnits(esc!, t.decimals)} + collateral ${formatUnits(col!, t.decimals)} + bonds ${formatUnits(bonds!, t.decimals)} + juror stake ${formatUnits(jst!, t.decimals)} + treasury ${formatUnits(tre!, t.decimals)} + reserve ${formatUnits(res!, t.decimals)} + claimable ${formatUnits(cl!, t.decimals)} = ${formatUnits(buckets, t.decimals)}`);
+const pfees = await marketRead<bigint>(ctx, 'totalPreviewFees').catch(() => 0n); // escrowed, unattached previews (0 if no such view)
+const buckets = esc! + col! + bonds! + jst! + tre! + res! + cl! + pfees;
+console.log(`  market balance ${formatUnits(after.market!, t.decimals)} = escrow ${formatUnits(esc!, t.decimals)} + collateral ${formatUnits(col!, t.decimals)} + bonds ${formatUnits(bonds!, t.decimals)} + juror stake ${formatUnits(jst!, t.decimals)} + treasury ${formatUnits(tre!, t.decimals)} + reserve ${formatUnits(res!, t.decimals)} + claimable ${formatUnits(cl!, t.decimals)} + preview-fee escrow ${formatUnits(pfees, t.decimals)} = ${formatUnits(buckets, t.decimals)}`);
 const ok = sumA === sumB && supplyBefore === supplyAfter && buckets === after.market;
 console.log(ok ? '\n✔ conserved: every token is accounted for (gas is paid in ETH only)' : '\n✘ CONSERVATION CHECK FAILED');
 process.exit(ok ? 0 : 1);
