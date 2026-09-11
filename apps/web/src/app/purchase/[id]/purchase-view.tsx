@@ -34,6 +34,7 @@ import { marketAbi, tokenAbi } from "@/lib/abi";
 import { deployment, CHAIN_ID } from "@/lib/config";
 import { eqHash, listTar, sha256Hex, utf8, type TarEntry } from "@/lib/crypto";
 import { describe, useDoc } from "@/lib/docs";
+import { wakeJurors } from "@/lib/jurors";
 import { fmtKiB, fmtTime, fmtUsdc, fmtWindow, maskToIndexes, pct, popcount } from "@/lib/format";
 import { downloadBytes, useEncKeys } from "@/lib/keys";
 import { useWalletEncKey } from "@/lib/enc-derive";
@@ -702,6 +703,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
     const logs = parseEventLogs({ abi: marketAbi, logs: r.logs, eventName: "DisputeOpened" as never });
     const did = (logs[0] as { args?: { disputeId?: bigint } } | undefined)?.args?.disputeId;
     if (did === undefined) return;
+    if (ground === 2) wakeJurors(did); // FalseDescription: start the AI jurors now
     if (!file) saveLocalEvidence(did, evidenceText);
     router.push(`/dispute/${did}`);
   }
