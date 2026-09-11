@@ -29,14 +29,28 @@ export interface JurorLlm extends ProviderSettings {
 }
 
 /**
- * Default juror families: three distinct families, none shared with the GLM/Kimi/Qwen reference
- * panel, so jurors do not inherit the preview panel's base-model errors.
+ * Pinned Fireworks juror models (docs/BUILD_SPEC.md "Deployment target", verified 2026-09-10).
+ * Used when the provider is Fireworks and the id is listed by GET /models; otherwise the newest
+ * model of the juror's fallback family is resolved.
  */
+export const PINNED_FIREWORKS_MODELS: Record<number, string> = {
+  1: 'accounts/fireworks/models/deepseek-v4p1-flash',
+  2: 'accounts/fireworks/models/gpt-oss-120b',
+  3: 'accounts/fireworks/models/glm-5p2',
+};
+/** Fallback families (three distinct families). */
 export const DEFAULT_FAMILIES: Record<number, string[]> = {
   1: ['deepseek'],
-  2: ['llama'],
-  3: ['gpt-oss'],
+  2: ['gpt-oss'],
+  3: ['glm'],
 };
+/** Reference-panel families: a juror in one of these shares a base family with the panel (disclosed). */
+export const PANEL_FAMILIES = ['glm', 'kimi', 'qwen'];
+
+export function sharesPanelFamily(modelId: string): boolean {
+  const s = (modelId.split('/').pop() ?? modelId).toLowerCase();
+  return PANEL_FAMILIES.some((f) => s.startsWith(f));
+}
 /**
  * Local Ollama preferences per juror (first installed model that answers a probe wins). Local
  * installs rarely have three families, so local runs record reduced model diversity.
@@ -67,8 +81,8 @@ export async function pickWorkingLocalModel(client: LlmClient, prefs: string[]):
   }
   throw new Error(`no working local model (${failures.join('; ') || 'none installed'}); set JUROR{n}_MODEL or FIREWORKS_API_KEY`);
 }
-/** Never used for jurors: non-chat variants and the reference-panel families. */
-export const JUROR_MODEL_EXCLUDE = /(guard|vision|embed|rerank|whisper|audio|image|tts|ocr|flux|-vl(-|$)|glm|kimi|qwen)/i;
+/** Never used for jurors: non-chat / non-text variants. */
+export const JUROR_MODEL_EXCLUDE = /(guard|vision|embed|rerank|whisper|audio|image|tts|ocr|flux|-vl(-|$))/i;
 
 type Env = Record<string, string | undefined>;
 const pick = (env: Env, ...keys: string[]) => {
@@ -113,6 +127,10 @@ export async function resolveJurorLlm(index: number, env: Env, opts: { models?: 
   }
   const families = familiesFor(index, env);
   const models = opts.models ?? (await client.listModels());
+  const pinned = p.kind === 'fireworks' && !env[`JUROR${index}_FAMILY`] ? PINNED_FIREWORKS_MODELS[index] : undefined;
+  if (pinned && models.some((m) => m.id === pinned)) {
+    return { ...p, requested: `pinned:${pinned}`, model: pinned, client: client.with({ model: pinned }) };
+  }
   const model = chooseModel(models, families);
   if (!model) throw new Error(`no chat model in families [${families.join(', ')}] at ${p.baseUrl}; set JUROR${index}_MODEL`);
   return { ...p, requested: `family:${families.join('|')}`, model, client: client.with({ model }) };

@@ -31,7 +31,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { commitmentOf, prepareCommit, VERDICT_CODE } from './commit.ts';
 import { decide } from './decide.ts';
 import { EvidenceError, fetchCasePacket } from './evidence.ts';
-import { resolveJurorLlm, type JurorLlm } from './llm.ts';
+import { resolveJurorLlm, sharesPanelFamily, type JurorLlm } from './llm.ts';
 import { MarketIO, ZERO32, type DisputeView, type SeatView } from './market.ts';
 import { buildRationaleDoc, publishRationale, putBlob } from './publish.ts';
 import { loadRubric, sha256Hex, type Rubric } from './rubric.ts';
@@ -450,6 +450,7 @@ export class Juror {
       juror: this.me.toLowerCase(),
       operator: e[`JUROR${n}_OPERATOR`] ?? e.JUROR_OPERATOR ?? 'EnvMarket demo operator (controlled juror identity)',
       model: { provider: llm.kind, baseUrl: llm.baseUrl, requested: llm.requested, resolved: llm.model },
+      sharesBaseFamilyWithReferencePanel: sharesPanelFamily(llm.model),
       promptVersion: this.rubric.version,
       promptHash: this.rubric.hash,
       expertise: e[`JUROR${n}_EXPERTISE`] ?? 'software environments; reading RL environment descriptions against mechanical evidence',
