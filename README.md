@@ -85,6 +85,16 @@ The preview measures how today's reference models score on the environment. A bu
 
 Other known gaps: a buyer can keep a copy after a partial refund (only the cap and the bond limit this); the juror pool is thin; appeals to 7 jurors aren't built; reward hacking is out of scope for previews and disputes.
 
+## Sell an environment
+
+Lay your environment out like [seller-workspace/humanevalfix-8](seller-workspace/humanevalfix-8): `listing/description.json`, `listing/manifest.template.json`, `src/`, `tasks/<id>/{task.json,tests/,…}`, `grader/`, `requirements.lock`, `IMAGE_DIGEST`, and optionally `audit-tasks/`. Put the seller wallet's key in the repo-root `.env` as `SELLER_PK`. The wallet needs a little Base Sepolia ETH, plus tUSDC from the app's faucet for collateral and the preview fee. Then run:
+
+```bash
+./sell.sh path/to/my-env --price 100 --collateral 100   # add --dry-run to check and package only
+```
+
+The script checks the folder, then packages and encrypts it on your machine; plaintext leaves only encrypted to the TEE's key. It uploads to the attested TEE, which rechecks every commitment and runs a sandboxed preflight. Then it lists on Base Sepolia (a new version of your existing listing if you already sell this environment) and tops up collateral if your free stake is short. Finally it pays the TEE's preview quote, waits for the signed report to be attached on-chain, and prints the listing link. Re-running resumes where it stopped.
+
 ## Run it yourself
 
 Requirements: Node 22, Foundry, Docker (sandbox for seller code), Python 3.12 with `uv` (harness), and a repo-root `.env` built from [.env.example](.env.example). It needs `DEPLOYER/SELLER/BUYER/BUYER2/RUNNER/RELAY/VERIFIER/JUROR1-3` `_PK`/`_ADDR`, `BUYER_ENC_SK/PK`, `BUYER2_ENC_SK/PK`, `FIREWORKS_API_KEY`, and `CHAIN_ID` plus `BASE_SEPOLIA_RPC` for testnet.

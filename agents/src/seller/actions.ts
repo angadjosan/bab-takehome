@@ -165,15 +165,63 @@ export async function checkTermsAgainstParams(ctx: Ctx, li: ListingInput): Promi
   if (collateral < required) throw new Error(`collateral ${collateral} < required ${required} (caseFee + penaltyBps of price)`);
 }
 
-export async function listVersion(ctx: Ctx, dir: string, opts: { uri?: string } = {}): Promise<{ versionId: bigint; listingId: bigint }> {
+/**
+ * The seller's most recent listing of the same environment (same name before '@' in the
+ * environmentVersion of its description.json, fetched by hash from the version's uri), or null.
+ */
+export async function findListingFor(ctx: Ctx, environmentVersion: string, versionIds?: bigint[]): Promise<{ listingId: bigint; versionId: bigint; environmentVersion: string } | null> {
+  const name = environmentVersion.split('@')[0];
+  const me = signer(ctx, 'seller').account.address as Address;
+  const ids = versionIds ?? (await marketRead<bigint[]>(ctx, 'listVersionIdsBySeller', [me]));
+  for (const id of [...ids].reverse()) {
+    const ov = (await getVersion(ctx, id)) as unknown as Record<string, any>;
+    try {
+      const bytes = await fetchVerified(`${String(ov.uri).replace(/\/?$/, '/')}${String(ov.descriptionHash).slice(2)}`, ov.descriptionHash as Hex);
+      const ev = String(JSON.parse(new TextDecoder().decode(bytes)).environmentVersion ?? '');
+      if (ev.split('@')[0] === name) return { listingId: BigInt(ov.listingId), versionId: id, environmentVersion: ev };
+    } catch {
+      /* description unreachable: not a match we can confirm */
+    }
+  }
+  return null;
+}
+
+export async function listVersion(
+  ctx: Ctx,
+  dir: string,
+  opts: { uri?: string; listingId?: bigint; reuseListing?: boolean } = {},
+): Promise<{ versionId: bigint; listingId: bigint }> {
   const li = readListingInput(dir);
   const st = readState(dir);
   if (st.versionId) {
+    const onchain = await getVersion(ctx, BigInt(st.versionId));
+    if (!eq(onchain.bundleHash, li.versionInput.bundleHash)) {
+      throw new Error(`${stateFile(dir)} says version ${st.versionId}, but that version on market ${ctx.market} has a different bundleHash (state from another deployment?); move ${dir} aside and package again`);
+    }
     log(`already listed as version ${st.versionId}`);
     return { versionId: BigInt(st.versionId), listingId: BigInt(st.listingId ?? 0) };
   }
   const uri = opts.uri ?? st.uri;
   if (!uri) throw new Error('no blob base URL: run `upload` first (or pass --uri)');
+  // A listing tx that landed after the local state write failed: same bundleHash already on-chain.
+  const me = signer(ctx, 'seller').account.address as Address;
+  const mine = await marketRead<bigint[]>(ctx, 'listVersionIdsBySeller', [me]);
+  for (const id of [...mine].reverse()) {
+    const ov = (await getVersion(ctx, id)) as unknown as Record<string, any>;
+    if (eq(String(ov.bundleHash), li.versionInput.bundleHash)) {
+      log(`this bundle is already listed as listing ${ov.listingId} version ${id} (recovered)`);
+      writeState(dir, { ...st, uri, versionId: id.toString(), listingId: String(ov.listingId) });
+      return { versionId: id, listingId: BigInt(ov.listingId) };
+    }
+  }
+  let existingListing = opts.listingId;
+  if (existingListing === undefined && opts.reuseListing) {
+    const found = await findListingFor(ctx, li.environmentVersion, mine);
+    if (found) {
+      existingListing = found.listingId;
+      log(`you already list ${found.environmentVersion} as listing ${found.listingId} (latest version ${found.versionId}): adding this as a new version of it`);
+    }
+  }
   await checkTermsAgainstParams(ctx, li);
   const v = li.versionInput;
   const input = {
@@ -194,7 +242,10 @@ export async function listVersion(ctx: Ctx, dir: string, opts: { uri?: string } 
     uri,
   };
   const c = signer(ctx, 'seller');
-  const sent = await marketWrite(ctx, c, 'createListing', [input], 'seller.createListing');
+  const sent =
+    existingListing === undefined
+      ? await marketWrite(ctx, c, 'createListing', [input], 'seller.createListing')
+      : await marketWrite(ctx, c, 'newVersion', [existingListing, input], 'seller.newVersion');
   const created = eventsOf(ctx, sent.receipt, 'VersionCreated')[0];
   if (!created) throw new Error('no VersionCreated event');
   const versionId = BigInt(created.versionId);

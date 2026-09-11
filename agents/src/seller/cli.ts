@@ -17,8 +17,8 @@ import { parseUnits } from 'viem';
 import { loadCtx, marketRead, sellerStake, signer, sleep, tokenInfo, fmt } from '../common/ctx.ts';
 import { sellerVersionDir, sellerWorkspace } from '../common/paths.ts';
 import { TeeClient } from '../common/tee.ts';
-import { keeperTick, listVersion, payPreview, previewAndAttach, readState, uploadVersion, depositCollateral, withdrawPreviewFees } from './actions.ts';
-import { packageEnvironment, parseDescriptionLoose } from './package.ts';
+import { keeperTick, listVersion, payPreview, previewAndAttach, readState, uploadVersion, depositCollateral, ensureCollateral, withdrawPreviewFees } from './actions.ts';
+import { packageEnvironment, parseDescriptionLoose, readListingInput } from './package.ts';
 
 function workspaceVersion(ws: string): string {
   const f = [path.join(ws, 'listing', 'description.json'), path.join(ws, 'description.json')].find((p) => fs.existsSync(p));
@@ -78,9 +78,22 @@ program
   .command('list')
   .option('--version <v>')
   .option('--uri <url>', 'override the blob base URL recorded on-chain')
+  .option('--listing-id <id>', 'add this as a new version of your existing listing (newVersion)')
+  .option('--reuse-listing', 'if you already list this environment (same name before @), add a new version to that listing')
   .action(async (o) => {
-    const r = await listVersion(loadCtx(), versionDir(o), { uri: o.uri });
-    console.log(`versionId=${r.versionId}`);
+    const r = await listVersion(loadCtx(), versionDir(o), { uri: o.uri, listingId: o.listingId ? BigInt(o.listingId) : undefined, reuseListing: !!o.reuseListing });
+    console.log(`listingId=${r.listingId} versionId=${r.versionId}`);
+  });
+
+program
+  .command('ensure-collateral')
+  .description("deposit only the shortfall so the seller's free stake covers one sale of this version")
+  .option('--version <v>')
+  .action(async (o) => {
+    const ctx = loadCtx();
+    const need = BigInt(readListingInput(versionDir(o)).versionInput.collateral);
+    const topped = await ensureCollateral(ctx, need);
+    console.log(topped === 0n ? `[seller] free stake already covers the ${await fmt(ctx, need)} reserved per sale` : `[seller] deposited ${await fmt(ctx, topped)} of collateral`);
   });
 
 program
