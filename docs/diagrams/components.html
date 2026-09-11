@@ -4,108 +4,108 @@
 <style>
   html, body { margin: 0; background: #fff; }
   svg { display: block; }
-  text { font-family: "STIX Two Text", "Times New Roman", serif; fill: #000; }
+  text { font-family: "STIX Two Text", "Times New Roman", serif; fill: #1f2430; }
   .b { font-size: 16px; }
+  .f { font-size: 14px; }
   .s { font-size: 13px; }
   .e { font-size: 13px; }
   .g { font-size: 13px; letter-spacing: 0.02em; }
-  .box { fill: #fff; stroke: #000; stroke-width: 1; }
-  .grp { fill: #efefef; stroke: none; }
-  .ln { fill: none; stroke: #000; stroke-width: 1; }
 </style>
 <svg width="1400" height="680" viewBox="0 0 1400 680" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <marker id="a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,1 L10,5 L0,9 z" fill="#000"/>
-    </marker>
+  <marker id="mD" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#3b4252"/></marker>
+  <marker id="mM" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#c28a1e"/></marker>
+  <marker id="mE" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#2d6cc0"/></marker>
+  <symbol id="i-chip" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2.5v3.5M12 2.5v3.5M15 2.5v3.5M9 18v3.5M12 18v3.5M15 18v3.5M2.5 9h3.5M2.5 12h3.5M2.5 15h3.5M18 9h3.5M18 12h3.5M18 15h3.5"/></g></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></g></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3l1.9 5.1L18 10l-5.1 1.9L11 17l-1.9-5.1L4 10l5.1-1.9z"/><path d="M19 15v5M16.5 17.5h5"/></g></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></g></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 17a8.5 8.5 0 1 1 17 0"/><path d="M12 17l4.5-6M6.5 11.5l1 .8M12 8.5v1.2M17.5 11.5l-1 .8"/><circle cx="12" cy="17" r="1.3" fill="currentColor"/></g></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="12" r="4"/><path d="M11.5 12H21M18 12v3.5M21 12v2.5"/></g></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></g></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></g></symbol>
+  <symbol id="i-scale" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16l3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1z"/><path d="M2 16l3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1z"/><path d="M7 21h10M12 3v18M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></g></symbol>
+  <symbol id="i-cube" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></g></symbol>
+  <symbol id="i-coin" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M14.8 9.2c-.5-.9-1.5-1.4-2.8-1.4-1.6 0-2.7.8-2.7 2 0 2.8 5.6 1.5 5.6 4.3 0 1.2-1.1 2.1-2.8 2.1-1.3 0-2.4-.6-2.9-1.5M12 6v1.8M12 16.2V18"/></g></symbol>
   </defs>
-
-  <!-- groups -->
-  <rect class="grp" x="220" y="80" width="300" height="480"/>
-  <text class="g" x="234" y="101">EigenCompute TEE (Intel TDX)</text>
-  <rect class="grp" x="1040" y="80" width="330" height="580"/>
-  <text class="g" x="1054" y="101">Base Sepolia</text>
-
-  <!-- TEE <-> chain buses -->
-  <path class="ln" d="M460,80 V34 H1300 V120" marker-end="url(#a)"/>
-  <text class="e" x="880" y="27" text-anchor="middle">signed preview report, delivery receipt, dispute findings (EIP-712)</text>
-  <path class="ln" d="M1180,120 V64 H495 V80" marker-end="url(#a)"/>
-  <text class="e" x="838" y="57" text-anchor="middle">events: preview paid, purchase funded, dispute opened</text>
-
-  <!-- inference provider -->
-  <rect class="box" x="20" y="240" width="130" height="56"/>
-  <text class="b" x="85" y="263" text-anchor="middle">Fireworks</text>
-  <text class="s" x="85" y="282" text-anchor="middle">model inference</text>
-  <path class="ln" d="M250,268 H150" marker-start="url(#a)" marker-end="url(#a)"/>
-  <text class="e" x="200" y="261" text-anchor="middle">model calls</text>
-
-  <!-- TEE boxes -->
-  <rect class="box" x="250" y="120" width="240" height="56"/>
-  <text class="b" x="370" y="143" text-anchor="middle">Encrypted storage</text>
-  <text class="s" x="370" y="162" text-anchor="middle">bundles, audit set, evidence</text>
-
-  <path class="ln" d="M370,176 V240" marker-end="url(#a)"/>
-  <text class="e" x="380" y="212">committed inputs</text>
-
-  <rect class="box" x="250" y="240" width="240" height="56"/>
-  <text class="b" x="370" y="263" text-anchor="middle">Verification runner</text>
-  <text class="s" x="370" y="282" text-anchor="middle">reference panel + validator</text>
-
-  <rect class="box" x="250" y="350" width="240" height="56"/>
-  <text class="b" x="370" y="373" text-anchor="middle">Key relay</text>
-  <text class="s" x="370" y="392" text-anchor="middle">wraps key to buyer</text>
-
-  <rect class="box" x="250" y="470" width="240" height="56"/>
-  <text class="b" x="370" y="493" text-anchor="middle">Mechanical verifier</text>
-  <text class="s" x="370" y="512" text-anchor="middle">rebuild, rerun, sign findings</text>
-
-  <!-- actors -->
-  <rect class="box" x="720" y="120" width="160" height="110"/>
-  <text class="b" x="800" y="172" text-anchor="middle">Seller</text>
-  <text class="s" x="800" y="191" text-anchor="middle">or seller agent</text>
-
-  <rect class="box" x="720" y="250" width="160" height="170"/>
-  <text class="b" x="800" y="332" text-anchor="middle">Buyer</text>
-  <text class="s" x="800" y="351" text-anchor="middle">or buyer agent</text>
-
-  <rect class="box" x="720" y="460" width="160" height="80"/>
-  <text class="b" x="800" y="497" text-anchor="middle">Jurors</text>
-  <text class="s" x="800" y="516" text-anchor="middle">3 staked AI agents</text>
-
-  <!-- TEE <-> actors -->
-  <path class="ln" d="M720,150 H490" marker-end="url(#a)"/>
-  <text class="e" x="605" y="143" text-anchor="middle">encrypted bundle</text>
-  <path class="ln" d="M490,268 H720" marker-end="url(#a)"/>
-  <text class="e" x="605" y="261" text-anchor="middle">signed preview report</text>
-  <path class="ln" d="M490,378 H720" marker-end="url(#a)"/>
-  <text class="e" x="605" y="371" text-anchor="middle">ciphertext + buyer-encrypted key</text>
-  <path class="ln" d="M490,498 H720" marker-end="url(#a)"/>
-  <text class="e" x="605" y="491" text-anchor="middle">case evidence</text>
-
-  <!-- actors <-> chain -->
-  <path class="ln" d="M880,148 H1070" marker-end="url(#a)"/>
-  <text class="e" x="975" y="141" text-anchor="middle">hashes, terms, collateral</text>
-  <path class="ln" d="M880,184 H1070" marker-end="url(#a)"/>
-  <text class="e" x="975" y="177" text-anchor="middle">preview fee</text>
-  <path class="ln" d="M1070,216 H880" marker-end="url(#a)"/>
-  <text class="e" x="975" y="209" text-anchor="middle">proceeds (withdraw)</text>
-
-  <path class="ln" d="M880,290 H1070" marker-end="url(#a)"/>
-  <text class="e" x="975" y="283" text-anchor="middle">payment (buy)</text>
-  <path class="ln" d="M880,330 H1070" marker-end="url(#a)"/>
-  <text class="e" x="975" y="323" text-anchor="middle">dispute + bond</text>
-  <path class="ln" d="M1070,370 H880" marker-end="url(#a)"/>
-  <text class="e" x="975" y="363" text-anchor="middle">refund (withdraw)</text>
-
-  <path class="ln" d="M880,486 H1070" marker-end="url(#a)"/>
-  <text class="e" x="975" y="479" text-anchor="middle">stake, commit / reveal votes</text>
-  <path class="ln" d="M1070,520 H880" marker-end="url(#a)"/>
-  <text class="e" x="975" y="513" text-anchor="middle">rewards (withdraw)</text>
-
-  <!-- contract -->
-  <rect class="box" x="1070" y="120" width="270" height="420"/>
-  <text class="b" x="1205" y="156" text-anchor="middle">EnvMarket contract</text>
-  <line class="ln" x1="1110" y1="172" x2="1300" y2="172"/>
+  <rect x="220" y="80" width="300" height="480" rx="6" fill="#efedfb" stroke="none"/>
+  <use href="#i-chip" x="232" y="88" width="17" height="17" style="color:#5b50c8"/>
+  <text class="g" x="255" y="101" fill="#3f36a0">EigenCompute TEE (Intel TDX)</text>
+  <rect x="1040" y="80" width="330" height="580" rx="6" fill="#e9f1fb" stroke="none"/>
+  <use href="#i-link" x="1052" y="88" width="17" height="17" style="color:#2d6cc0"/>
+  <text class="g" x="1075" y="101" fill="#1f4f94">Base Sepolia</text>
+  <path d="M460,80 V34 H1300 V120" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <text class="e" x="880" y="27" text-anchor="middle" fill="#1f2430">signed preview report, delivery receipt, dispute findings (EIP-712)</text>
+  <path d="M1180,120 V64 H495 V80" fill="none" stroke="#2d6cc0" stroke-width="1.1" stroke-dasharray="5 4" marker-end="url(#mE)"/>
+  <text class="e" x="838" y="57" text-anchor="middle" fill="#1f4f94">events: preview paid, purchase funded, dispute opened</text>
+  <rect x="20" y="226" width="130" height="84" rx="3" fill="#fdeee2" stroke="#e39a62" stroke-width="1"/>
+  <use href="#i-sparkle" x="73" y="233" width="24" height="24" style="color:#d0692a"/>
+  <text class="b" x="85" y="276" text-anchor="middle">Fireworks</text>
+  <text class="s" x="85" y="295" text-anchor="middle">model inference</text>
+  <path d="M250,268 H150" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)" marker-start="url(#mD)"/>
+  <text class="e" x="200" y="261" text-anchor="middle" fill="#1f2430">model calls</text>
+  <rect x="250" y="120" width="240" height="56" rx="3" fill="#fff" stroke="#8b82dc" stroke-width="1"/>
+  <use href="#i-lock" x="262" y="137" width="22" height="22" style="color:#5b50c8"/>
+  <text class="b" x="382" y="143" text-anchor="middle">Encrypted storage</text>
+  <text class="s" x="382" y="162" text-anchor="middle">bundles, audit set, evidence</text>
+  <rect x="250" y="240" width="240" height="56" rx="3" fill="#fff" stroke="#8b82dc" stroke-width="1"/>
+  <use href="#i-gauge" x="262" y="257" width="22" height="22" style="color:#5b50c8"/>
+  <text class="b" x="382" y="263" text-anchor="middle">Verification runner</text>
+  <text class="s" x="382" y="282" text-anchor="middle">reference panel + validator</text>
+  <rect x="250" y="350" width="240" height="56" rx="3" fill="#fff" stroke="#8b82dc" stroke-width="1"/>
+  <use href="#i-key" x="262" y="367" width="22" height="22" style="color:#5b50c8"/>
+  <text class="b" x="382" y="373" text-anchor="middle">Key relay</text>
+  <text class="s" x="382" y="392" text-anchor="middle">wraps key to buyer</text>
+  <rect x="250" y="470" width="240" height="56" rx="3" fill="#fff" stroke="#8b82dc" stroke-width="1"/>
+  <use href="#i-wrench" x="262" y="487" width="22" height="22" style="color:#5b50c8"/>
+  <text class="b" x="382" y="493" text-anchor="middle">Mechanical verifier</text>
+  <text class="s" x="382" y="512" text-anchor="middle">rebuild, rerun, sign findings</text>
+  <path d="M370,176 V240" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <text class="e" x="380" y="212" fill="#1f2430">committed inputs</text>
+  <rect x="720" y="120" width="160" height="110" rx="3" fill="#f8f4ee" stroke="#a08a6e" stroke-width="1"/>
+  <use href="#i-user" x="787" y="138" width="26" height="26" style="color:#7a6247"/>
+  <text class="b" x="800" y="187" text-anchor="middle">Seller</text>
+  <text class="s" x="800" y="206" text-anchor="middle">or seller agent</text>
+  <rect x="720" y="250" width="160" height="170" rx="3" fill="#f8f4ee" stroke="#a08a6e" stroke-width="1"/>
+  <use href="#i-user" x="787" y="298" width="26" height="26" style="color:#7a6247"/>
+  <text class="b" x="800" y="346" text-anchor="middle">Buyer</text>
+  <text class="s" x="800" y="365" text-anchor="middle">or buyer agent</text>
+  <rect x="720" y="460" width="160" height="80" rx="3" fill="#eaf5ee" stroke="#6db48a" stroke-width="1"/>
+  <use href="#i-scale" x="789" y="467" width="22" height="22" style="color:#2f7d4f"/>
+  <text class="b" x="800" y="507" text-anchor="middle">Jurors</text>
+  <text class="s" x="800" y="525" text-anchor="middle">3 staked AI agents</text>
+  <path d="M720,150 H490" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <text class="e" x="605" y="143" text-anchor="middle" fill="#1f2430">encrypted bundle</text>
+  <path d="M490,268 H720" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <text class="e" x="605" y="261" text-anchor="middle" fill="#1f2430">signed preview report</text>
+  <path d="M490,378 H720" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <text class="e" x="605" y="371" text-anchor="middle" fill="#1f2430">ciphertext + buyer-encrypted key</text>
+  <path d="M490,498 H720" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <text class="e" x="605" y="491" text-anchor="middle" fill="#1f2430">case evidence</text>
+  <path d="M880,146 H1070" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <text class="e" x="975" y="139" text-anchor="middle" fill="#1f2430">hashes, terms</text>
+  <path d="M880,180 H1070" fill="none" stroke="#c28a1e" stroke-width="1.1" marker-end="url(#mM)"/>
+  <text class="e" x="975" y="173" text-anchor="middle" fill="#8a5a10">collateral, preview fee</text>
+  <path d="M1070,214 H880" fill="none" stroke="#c28a1e" stroke-width="1.1" marker-end="url(#mM)"/>
+  <text class="e" x="975" y="207" text-anchor="middle" fill="#8a5a10">proceeds (withdraw)</text>
+  <path d="M880,285 H1070" fill="none" stroke="#c28a1e" stroke-width="1.1" marker-end="url(#mM)"/>
+  <text class="e" x="975" y="278" text-anchor="middle" fill="#8a5a10">payment (buy)</text>
+  <path d="M880,320 H1070" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <text class="e" x="975" y="313" text-anchor="middle" fill="#1f2430">dispute claim</text>
+  <path d="M880,355 H1070" fill="none" stroke="#c28a1e" stroke-width="1.1" marker-end="url(#mM)"/>
+  <text class="e" x="975" y="348" text-anchor="middle" fill="#8a5a10">dispute bond</text>
+  <path d="M1070,390 H880" fill="none" stroke="#c28a1e" stroke-width="1.1" marker-end="url(#mM)"/>
+  <text class="e" x="975" y="383" text-anchor="middle" fill="#8a5a10">refund (withdraw)</text>
+  <path d="M880,478 H1070" fill="none" stroke="#c28a1e" stroke-width="1.1" marker-end="url(#mM)"/>
+  <text class="e" x="975" y="471" text-anchor="middle" fill="#8a5a10">stake</text>
+  <path d="M880,506 H1070" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <text class="e" x="975" y="499" text-anchor="middle" fill="#1f2430">commit / reveal votes</text>
+  <path d="M1070,532 H880" fill="none" stroke="#c28a1e" stroke-width="1.1" marker-end="url(#mM)"/>
+  <text class="e" x="975" y="525" text-anchor="middle" fill="#8a5a10">rewards (withdraw)</text>
+  <rect x="1070" y="120" width="270" height="420" rx="3" fill="#fff" stroke="#6b9ada" stroke-width="1"/>
+  <use href="#i-cube" x="1090" y="142" width="21" height="21" style="color:#2d6cc0"/>
+  <text class="b" x="1217" y="158" text-anchor="middle">EnvMarket contract</text>
+  <path d="M1110,174 H1300" fill="none" stroke="#6b9ada" stroke-width="1.1"/>
   <text class="s" x="1205" y="206" text-anchor="middle">listings, versions, report hashes</text>
   <text class="s" x="1205" y="244" text-anchor="middle">preview-fee escrow</text>
   <text class="s" x="1205" y="282" text-anchor="middle">purchase escrow</text>
@@ -114,9 +114,15 @@
   <text class="s" x="1205" y="396" text-anchor="middle">juror stakes, commit–reveal, tally</text>
   <text class="s" x="1205" y="434" text-anchor="middle">reputation</text>
   <text class="s" x="1205" y="472" text-anchor="middle">claimable balances, withdraw()</text>
-
-  <path class="ln" d="M1205,540 V590" marker-start="url(#a)" marker-end="url(#a)"/>
-  <text class="e" x="1215" y="569">token transfers</text>
-  <rect class="box" x="1105" y="590" width="200" height="44"/>
-  <text class="b" x="1205" y="617" text-anchor="middle">Test USDC (no value)</text>
+  <path d="M1205,540 V590" fill="none" stroke="#c28a1e" stroke-width="1.1" marker-end="url(#mM)" marker-start="url(#mM)"/>
+  <text class="e" x="1215" y="569" fill="#8a5a10">token transfers</text>
+  <rect x="1090" y="590" width="230" height="44" rx="3" fill="#fff" stroke="#6b9ada" stroke-width="1"/>
+  <use href="#i-coin" x="1102" y="601" width="22" height="22" style="color:#c28a1e"/>
+  <text class="b" x="1217" y="617" text-anchor="middle">Test USDC (no value)</text>
+  <path d="M30,630 H72" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <text class="e" x="82" y="634" fill="#1f2430">data and signatures</text>
+  <path d="M240,630 H282" fill="none" stroke="#c28a1e" stroke-width="1.1" marker-end="url(#mM)"/>
+  <text class="e" x="292" y="634" fill="#8a5a10">money (USDC)</text>
+  <path d="M410,630 H452" fill="none" stroke="#2d6cc0" stroke-width="1.1" stroke-dasharray="5 4" marker-end="url(#mE)"/>
+  <text class="e" x="462" y="634" fill="#1f4f94">on-chain events</text>
 </svg>

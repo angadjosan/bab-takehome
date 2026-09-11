@@ -61,7 +61,7 @@ These are proposed state names for the existing purchase flow. Each purchase fre
 - Each purchase settles once. A timely dispute blocks normal finalization, and each defect can receive its allowed remedy only once.
 - Public chain data contains commitments and outcomes. Plaintext tasks, private logs, and decryption keys stay off-chain with controlled access.
 
-The proposed demo uses one marketplace contract plus mock USDC on Base Sepolia. It trusts the runner, report signer, delivery relay, and controlled juror processes. Offline Docker does not hide plaintext from its host; hardware attestation is mocked. Production adds the full attested execution boundary described in the verification section. Neither a signature nor attestation proves training value or a juror’s correctness.
+The demo uses one marketplace contract plus Test USDC (no value) on Base Sepolia. The runner, report signer, delivery relay, and mechanical verifier run in an EigenCompute TEE (Intel TDX) with real attestation; the juror processes run outside it and are trusted. Model inference goes to Fireworks, outside the attested boundary (see the verification section). Production moves inference inside that boundary. Neither a signature nor attestation proves training value or a juror’s correctness.
 
 This is a build plan, not a claim that anything has been deployed.
 
@@ -151,7 +151,7 @@ The runner verifies the committed bundle, then runs the fixed reference panel un
 
 The production design uses a trusted execution environment (TEE): hardware intended to keep private computation hidden from the host operator. Its protection must cover the CPU, model-hosting GPUs, device links, keys, runner, and output checks. A protected CPU attached to an unprotected GPU leaves model execution exposed.
 
-Provision encrypted inputs through controlled host interfaces before execution. The execution sandbox has no network connection; only approved results leave afterward. Browser tasks must use a local simulated app or recorded fixtures. Hosted model APIs, live websites, and hosted LLM graders do not fit this baseline. A local LLM grader must declare its model, cost, and randomness.
+Provision encrypted inputs through controlled host interfaces before execution. The execution sandbox has no network connection; only approved results leave afterward. Browser tasks must use a local simulated app or recorded fixtures. Hosted model APIs, live websites, and hosted LLM graders do not fit this baseline. The current implementation makes one disclosed exception: reference and validator models run on Fireworks, which sees task text. A local LLM grader must declare its model, cost, and randomness.
 
 Ordinary software gives the operator access to plaintext. Docker does not change that. More ordinary operators create more parties with access. Production protection depends on verified hardware measurements, fresh attestation, signing-key binding, revocation checks, platform policy, isolation, and correct key handling. Hardware compromise remains possible. The original research cites [TEE.fail](https://tee.fail/) for memory-interposition attacks and forged attestation using extracted keys; this does not mean every deployment is compromised.
 

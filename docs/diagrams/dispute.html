@@ -1,93 +1,103 @@
-<!-- Dispute resolution paths for docs/RL_ENV_MARKET.md. Rendered to dispute.png at 1300x385, scale 2. -->
+<!-- Dispute resolution paths for docs/RL_ENV_MARKET.md. Rendered to dispute.png at 1330x385, scale 2. -->
 <meta charset="utf-8">
 <title>Dispute paths</title>
 <style>
   html, body { margin: 0; background: #fff; }
   svg { display: block; }
-  text { font-family: "STIX Two Text", "Times New Roman", serif; fill: #000; }
+  text { font-family: "STIX Two Text", "Times New Roman", serif; fill: #1f2430; }
   .b { font-size: 16px; }
   .f { font-size: 14px; }
   .s { font-size: 13px; }
+  .e { font-size: 13px; }
   .g { font-size: 13px; letter-spacing: 0.02em; }
-  .box { fill: #fff; stroke: #000; stroke-width: 1; }
-  .grp { fill: #efefef; stroke: none; }
-  .ln { fill: none; stroke: #000; stroke-width: 1; }
 </style>
-<svg width="1300" height="385" viewBox="0 35 1300 385" xmlns="http://www.w3.org/2000/svg">
+<svg width="1330" height="385" viewBox="0 35 1330 385" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <marker id="a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,1 L10,5 L0,9 z" fill="#000"/>
-    </marker>
+  <marker id="mD" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#3b4252"/></marker>
+  <symbol id="i-flag" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4h12l-2.5 4L17 12H5"/></g></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5L21.5 20h-19z"/><path d="M12 10v4.5"/><circle cx="12" cy="17.3" r=".7" fill="currentColor"/></g></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 17a8.5 8.5 0 1 1 17 0"/><path d="M12 17l4.5-6M6.5 11.5l1 .8M12 8.5v1.2M17.5 11.5l-1 .8"/><circle cx="12" cy="17" r="1.3" fill="currentColor"/></g></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/></g></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></g></symbol>
+  <symbol id="i-scale" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16l3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1z"/><path d="M2 16l3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1z"/><path d="M7 21h10M12 3v18M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></g></symbol>
+  <symbol id="i-dice" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="15" cy="15" r="1.2" fill="currentColor"/></g></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></g></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12c3-6 17-6 20 0-3 6-17 6-20 0z"/><circle cx="12" cy="12" r="3"/></g></symbol>
+  <symbol id="i-cube" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></g></symbol>
   </defs>
-
-  <!-- open -->
-  <rect class="box" x="20" y="170" width="180" height="80"/>
-  <text class="f" x="110" y="196" text-anchor="middle">openDispute()</text>
+  <rect x="20" y="170" width="180" height="80" rx="3" fill="#fbeaee" stroke="#d27a8e" stroke-width="1"/>
+  <use href="#i-flag" x="32" y="181" width="20" height="20" style="color:#be4b63"/>
+  <text class="f" x="120" y="196" text-anchor="middle" fill="#9b2f47">openDispute()</text>
   <text class="s" x="110" y="216" text-anchor="middle">ground, disputed tasks,</text>
   <text class="s" x="110" y="234" text-anchor="middle">evidence hash, bond</text>
-
-  <!-- spine -->
-  <path class="ln" d="M200,210 H250"/>
-  <path class="ln" d="M250,85 V330"/>
-  <path class="ln" d="M250,85 H300" marker-end="url(#a)"/>
-  <path class="ln" d="M250,165 H300" marker-end="url(#a)"/>
-  <path class="ln" d="M250,330 H300" marker-end="url(#a)"/>
-
-  <!-- grounds -->
-  <rect class="box" x="300" y="63" width="190" height="44"/>
-  <text class="b" x="395" y="90" text-anchor="middle">Broken / hash mismatch</text>
-  <rect class="box" x="300" y="143" width="190" height="44"/>
-  <text class="b" x="395" y="170" text-anchor="middle">Preview not reproducible</text>
-  <rect class="box" x="300" y="308" width="190" height="44"/>
-  <text class="b" x="395" y="335" text-anchor="middle">False description</text>
-
-  <!-- verifier -->
-  <rect class="box" x="570" y="55" width="230" height="140"/>
-  <text class="b" x="685" y="96" text-anchor="middle">Mechanical verifier</text>
-  <text class="s" x="685" y="115" text-anchor="middle">in the EigenCompute TEE (Intel TDX)</text>
-  <text class="s" x="685" y="145" text-anchor="middle">rebuild, rerun hidden tests,</text>
-  <text class="s" x="685" y="163" text-anchor="middle">or rerun the reference panel</text>
-  <path class="ln" d="M490,85 H570" marker-end="url(#a)"/>
-  <path class="ln" d="M490,165 H570" marker-end="url(#a)"/>
-
-  <!-- jurors -->
-  <rect class="grp" x="550" y="262" width="390" height="118"/>
-  <text class="g" x="564" y="284">3 staked AI jurors, chosen with on-chain randomness</text>
-  <rect class="box" x="565" y="306" width="100" height="50"/>
-  <text class="f" x="615" y="328" text-anchor="middle">select</text>
-  <text class="s" x="615" y="346" text-anchor="middle">random seats</text>
-  <rect class="box" x="695" y="306" width="100" height="50"/>
-  <text class="f" x="745" y="328" text-anchor="middle">commit</text>
-  <text class="s" x="745" y="346" text-anchor="middle">vote hash</text>
-  <rect class="box" x="825" y="306" width="100" height="50"/>
-  <text class="f" x="875" y="328" text-anchor="middle">reveal</text>
-  <text class="s" x="875" y="346" text-anchor="middle">vote + salt</text>
-  <path class="ln" d="M490,330 H565" marker-end="url(#a)"/>
-  <path class="ln" d="M665,330 H695" marker-end="url(#a)"/>
-  <path class="ln" d="M795,330 H825" marker-end="url(#a)"/>
-
-  <!-- to settlement -->
-  <path class="ln" d="M800,125 H1040" marker-end="url(#a)"/>
-  <text class="f" x="920" y="117" text-anchor="middle">resolveMechanical()</text>
-  <text class="s" x="920" y="142" text-anchor="middle">verifier-signed finding</text>
-  <path class="ln" d="M925,330 H1040" marker-end="url(#a)"/>
-  <text class="f" x="982" y="322" text-anchor="middle">tallyDispute()</text>
-  <text class="s" x="982" y="347" text-anchor="middle">majority</text>
-
-  <!-- settlement -->
-  <rect class="box" x="1040" y="55" width="240" height="345"/>
-  <text class="b" x="1160" y="88" text-anchor="middle">Settlement</text>
-  <text class="s" x="1160" y="107" text-anchor="middle">EnvMarket, once per purchase</text>
-  <line class="ln" x1="1070" y1="122" x2="1250" y2="122"/>
-  <text class="f" x="1160" y="152" text-anchor="middle">upheld</text>
-  <text class="s" x="1160" y="171" text-anchor="middle">refund confirmed tasks,</text>
-  <text class="s" x="1160" y="188" text-anchor="middle">capped at 50% of price;</text>
-  <text class="s" x="1160" y="205" text-anchor="middle">bond returned</text>
-  <text class="f" x="1160" y="240" text-anchor="middle">rejected</text>
-  <text class="s" x="1160" y="259" text-anchor="middle">seller paid; bond covers</text>
-  <text class="s" x="1160" y="276" text-anchor="middle">case fee, rest to reserve</text>
-  <text class="f" x="1160" y="311" text-anchor="middle">timeout or no quorum</text>
-  <text class="s" x="1160" y="330" text-anchor="middle">bond returned, no refund</text>
-  <line class="ln" x1="1070" y1="350" x2="1250" y2="350"/>
-  <text class="s" x="1160" y="378" text-anchor="middle">payouts collected with withdraw()</text>
+  <path d="M200,210 H250" fill="none" stroke="#3b4252" stroke-width="1.1"/>
+  <path d="M250,85 V330" fill="none" stroke="#3b4252" stroke-width="1.1"/>
+  <path d="M250,85 H300" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <rect x="300" y="63" width="220" height="44" rx="3" fill="#fff" stroke="#d27a8e" stroke-width="1"/>
+  <use href="#i-alert" x="312" y="74" width="21" height="21" style="color:#be4b63"/>
+  <text class="b" x="422" y="90" text-anchor="middle">Broken / hash mismatch</text>
+  <path d="M250,165 H300" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <rect x="300" y="143" width="220" height="44" rx="3" fill="#fff" stroke="#d27a8e" stroke-width="1"/>
+  <use href="#i-gauge" x="312" y="154" width="21" height="21" style="color:#be4b63"/>
+  <text class="b" x="422" y="170" text-anchor="middle">Preview not reproducible</text>
+  <path d="M250,330 H300" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <rect x="300" y="308" width="220" height="44" rx="3" fill="#fff" stroke="#d27a8e" stroke-width="1"/>
+  <use href="#i-file" x="312" y="319" width="21" height="21" style="color:#be4b63"/>
+  <text class="b" x="422" y="335" text-anchor="middle">False description</text>
+  <rect x="600" y="55" width="230" height="140" rx="3" fill="#efedfb" stroke="#8b82dc" stroke-width="1"/>
+  <use href="#i-wrench" x="614" y="81" width="21" height="21" style="color:#5b50c8"/>
+  <text class="b" x="727" y="96" text-anchor="middle">Mechanical verifier</text>
+  <text class="s" x="715" y="115" text-anchor="middle" fill="#3f36a0">in the EigenCompute TEE (Intel TDX)</text>
+  <text class="s" x="715" y="145" text-anchor="middle">rebuild, rerun hidden tests,</text>
+  <text class="s" x="715" y="163" text-anchor="middle">or rerun the reference panel</text>
+  <path d="M520,85 H600" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <path d="M520,165 H600" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <rect x="580" y="262" width="382" height="118" rx="6" fill="#eaf5ee" stroke="none"/>
+  <use href="#i-scale" x="592" y="270" width="18" height="18" style="color:#2f7d4f"/>
+  <text class="g" x="616" y="284" fill="#24613d">3 staked AI jurors, chosen with on-chain randomness</text>
+  <rect x="595" y="306" width="100" height="50" rx="3" fill="#fff" stroke="#6db48a" stroke-width="1"/>
+  <use href="#i-dice" x="603" y="313" width="17" height="17" style="color:#2f7d4f"/>
+  <text class="f" x="653" y="328" text-anchor="middle">select</text>
+  <text class="s" x="645" y="346" text-anchor="middle">random seats</text>
+  <rect x="725" y="306" width="100" height="50" rx="3" fill="#fff" stroke="#6db48a" stroke-width="1"/>
+  <use href="#i-lock" x="733" y="313" width="17" height="17" style="color:#2f7d4f"/>
+  <text class="f" x="783" y="328" text-anchor="middle">commit</text>
+  <text class="s" x="775" y="346" text-anchor="middle">vote hash</text>
+  <rect x="855" y="306" width="100" height="50" rx="3" fill="#fff" stroke="#6db48a" stroke-width="1"/>
+  <use href="#i-eye" x="863" y="313" width="17" height="17" style="color:#2f7d4f"/>
+  <text class="f" x="913" y="328" text-anchor="middle">reveal</text>
+  <text class="s" x="905" y="346" text-anchor="middle">vote + salt</text>
+  <path d="M520,330 H595" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <path d="M695,330 H725" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <path d="M825,330 H855" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <path d="M830,125 H1070" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <text class="f" x="950" y="117" text-anchor="middle" fill="#1f2430">resolveMechanical()</text>
+  <text class="s" x="950" y="142" text-anchor="middle">verifier-signed finding</text>
+  <path d="M955,330 H1070" fill="none" stroke="#3b4252" stroke-width="1.1" marker-end="url(#mD)"/>
+  <text class="f" x="1018" y="322" text-anchor="middle" fill="#1f2430">tallyDispute()</text>
+  <text class="s" x="1018" y="347" text-anchor="middle">majority</text>
+  <rect x="1070" y="55" width="240" height="345" rx="3" fill="#e9f1fb" stroke="#6b9ada" stroke-width="1"/>
+  <use href="#i-cube" x="1136" y="73" width="20" height="20" style="color:#2d6cc0"/>
+  <text class="b" x="1202" y="88" text-anchor="middle">Settlement</text>
+  <text class="s" x="1190" y="107" text-anchor="middle" fill="#1f4f94">EnvMarket, once per purchase</text>
+  <path d="M1100,122 H1280" fill="none" stroke="#6b9ada" stroke-width="1.1"/>
+  <text class="f" x="1190" y="152" text-anchor="middle">upheld</text>
+  <text class="s" x="1190" y="171" text-anchor="middle">refund confirmed tasks,</text>
+  <text class="s" x="1190" y="188" text-anchor="middle">capped at 50% of price;</text>
+  <text class="s" x="1190" y="205" text-anchor="middle">bond returned</text>
+  <text class="f" x="1190" y="240" text-anchor="middle">rejected</text>
+  <text class="s" x="1190" y="259" text-anchor="middle">seller paid; bond covers</text>
+  <text class="s" x="1190" y="276" text-anchor="middle">case fee, rest to reserve</text>
+  <text class="f" x="1190" y="311" text-anchor="middle">timeout or no quorum</text>
+  <text class="s" x="1190" y="330" text-anchor="middle">bond returned, no refund</text>
+  <path d="M1100,350 H1280" fill="none" stroke="#6b9ada" stroke-width="1.1"/>
+  <text class="s" x="1190" y="378" text-anchor="middle">payouts collected with withdraw()</text>
+  <rect x="24" y="292" width="18" height="13" rx="2" fill="#fbeaee" stroke="#d27a8e" stroke-width="1"/>
+  <text class="s" x="50" y="303">dispute claim</text>
+  <rect x="24" y="316" width="18" height="13" rx="2" fill="#efedfb" stroke="#8b82dc" stroke-width="1"/>
+  <text class="s" x="50" y="327">TEE service</text>
+  <rect x="24" y="340" width="18" height="13" rx="2" fill="#eaf5ee" stroke="#6db48a" stroke-width="1"/>
+  <text class="s" x="50" y="351">AI jurors</text>
+  <rect x="24" y="364" width="18" height="13" rx="2" fill="#e9f1fb" stroke="#6b9ada" stroke-width="1"/>
+  <text class="s" x="50" y="375">on-chain (Base Sepolia)</text>
 </svg>
