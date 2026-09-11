@@ -1,7 +1,7 @@
 /** HTTP API (Hono). See README for the full contract. */
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
-import { sha256Hex } from '@envmarket/shared';
+import { KEYWRAP_MAGIC, sha256Hex, UPLOAD_KEYWRAP_INFO } from '@envmarket/shared';
 import { processUpload, UploadError } from './bundle.ts';
 import type { Ctx } from './context.ts';
 import { casePacket, storeEvidence } from './evidence.ts';
@@ -88,7 +88,13 @@ export function buildApp(ctx: Ctx, watcher: Watcher | null): Hono {
       inference: { provider: ctx.cfg.llm.provider, baseUrl: ctx.cfg.llm.baseUrl, keyConfigured: !!ctx.cfg.llm.apiKey || ctx.cfg.llm.provider === 'ollama' },
       submitTxs: ctx.cfg.submitTxs,
       watcher: watcher?.status() ?? null,
-      uploadKeyWrap: { format: 'EMKW1', recipient: 'encPubKey', hkdfSalt: 'sha256(encryptedBundle)', info: 'envmarket.upload.v1' },
+      uploadKeyWrap: {
+        format: KEYWRAP_MAGIC,
+        scheme: 'shared wrapKey (EMKW2 = HPKE RFC 9180 base mode: DHKEM(X25519, HKDF-SHA256) / HKDF-SHA256 / AES-256-GCM)',
+        recipient: 'encPubKey',
+        aad: 'sha256(encryptedBundle)',
+        info: UPLOAD_KEYWRAP_INFO,
+      },
     }),
   );
 

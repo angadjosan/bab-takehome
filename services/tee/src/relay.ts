@@ -2,7 +2,8 @@
  * Key-delivery relay.
  *
  * On `Purchased`: build the buyer-specific wrapper (canonical JSON, shared schema), wrap K_bundle
- * to the buyer's X25519 key (EMKW1, HKDF salt = wrapperHash), persist the delivery record BEFORE
+ * to the buyer's X25519 key (shared wrapKey: EMKW2 = HPKE, aad = wrapperHash; a stored ephemeral
+ * key makes the blob re-derivable byte-for-byte), persist the delivery record BEFORE
  * sending anything, sign DeliveryReceipt and submit recordDelivery before the deadline. Restarts
  * are idempotent: an existing record is reused byte-for-byte, and on-chain state is checked first.
  *
@@ -10,7 +11,7 @@
  * on-chain with the same wrapperHash and wrappedKeyHash.
  */
 import { x25519 } from '@noble/curves/ed25519.js';
-import { buildDeliveryWrapper, bytesToHex, fromBase64, randomBytes, sha256Hex, signDeliveryReceipt, toBase64, wrapKey } from '@envmarket/shared';
+import { buildDeliveryWrapper, bytesToHex, fromBase64, KEYWRAP_INFO, KEYWRAP_MAGIC, randomBytes, sha256Hex, signDeliveryReceipt, toBase64, wrapKey } from '@envmarket/shared';
 import type { Hex } from 'viem';
 import { loadUpload } from './bundle.ts';
 import { domainOf, requireChain, type Ctx } from './context.ts';
@@ -183,6 +184,6 @@ export async function serveDelivery(ctx: Ctx, purchaseId: bigint): Promise<Recor
     relay: ctx.keys.account.address,
     deliveredTx: rec.tx,
     challengeDeadline: p.challengeDeadline.toString(),
-    keywrap: { format: 'EMKW1', hkdfSalt: 'wrapperHash', info: 'envmarket.keywrap.v1' },
+    keywrap: { format: KEYWRAP_MAGIC, aad: 'wrapperHash', info: KEYWRAP_INFO, unwrap: 'shared unwrapKey({ blob, recipientSecretKey, wrapperHash })' },
   };
 }

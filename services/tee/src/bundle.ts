@@ -5,8 +5,9 @@
  * POST /seller/upload body (JSON; binary fields base64):
  *   encryptedBundle   EMENC1(K_bundle, canonical tar)              → ciphertextHash
  *   encryptedAudit    EMENC1(K_audit, canonical tar of audit-tasks/)
- *   wrappedBundleKey  EMKW1 to the TEE X25519 key (/health encPubKey), HKDF salt = ciphertextHash,
- *                     info = "envmarket.upload.v1" ("envmarket.keywrap.v1" also accepted)
+ *   wrappedBundleKey  shared wrapKey (EMKW2 = HPKE) to the TEE X25519 key (/health encPubKey),
+ *                     wrapperHash (HPKE aad) = ciphertextHash, info = "envmarket.upload.v1"
+ *                     ("envmarket.keywrap.v1" also accepted)
  *   wrappedAuditKey   same, same salt (sha256 of the audit ciphertext also accepted)
  *   encryptedSalts    EMENC1(K_audit, salts.json)  — or EMENC1(K_salts) with `wrappedSaltsKey`
  *   wrappedSaltsKey?  optional EMKW1 of K_salts (same salt/info rules)

@@ -18,6 +18,7 @@ import {
   encryptFile,
   fromBase64,
   indicesFromMask,
+  KEYWRAP_MAGIC,
   parseDescription,
   randomKey,
   sha256Hex,
@@ -227,7 +228,7 @@ export async function casePacket(ctx: Ctx, disputeId: bigint, body: Record<strin
     const salt = sha256Hex(message);
     return {
       encrypted: true,
-      format: 'EMENC1 packet; key EMKW1-wrapped to encPubKey with HKDF salt = sha256(challenge message), info envmarket.keywrap.v1',
+      format: `EMENC1 packet; key ${KEYWRAP_MAGIC}-wrapped (shared wrapKey) to encPubKey with wrapperHash = sha256(challenge message), info envmarket.keywrap.v1`,
       salt,
       wrappedKey: toBase64(wrapKey({ key: k, recipientPublicKey: encPubKey, wrapperHash: salt })),
       ciphertext: toBase64(encryptFile(k, new TextEncoder().encode(packetJson))),

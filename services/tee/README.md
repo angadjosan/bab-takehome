@@ -24,7 +24,7 @@ tests, grading and signing. It does not protect model inference. Local dev mode
 | `harness.ts` | The real LLM agent harness: one pass@1 episode per (model, task). |
 | `validator.ts` | Fixed versioned prompt, bounded JSON schema, 120-word / 1000-byte render, output screening. |
 | `preview.ts` | `POST /preview/:versionId`: on-chain terms must match the upload. Runs the panel and the validator, builds `report.json`, signs `PreviewReport`, submits `attachReport`. |
-| `relay.ts` | On `Purchased`: build the wrapper, wrap `K_bundle` to `buyerEncPubKey` (EMKW1, salt = wrapperHash), persist, sign `DeliveryReceipt`, then submit `recordDelivery`. |
+| `relay.ts` | On `Purchased`: build the wrapper, wrap `K_bundle` to `buyerEncPubKey` (EMKW2, aad = wrapperHash), persist, sign `DeliveryReceipt`, then submit `recordDelivery`. |
 | `verifier.ts` | On `DisputeOpened` (ground 1 or 3): recheck, rebuild and rerun, publish findings JSON, sign `MechanicalFinding`, submit `resolveMechanical`. |
 | `evidence.ts` | Evidence upload for buyers and case packets for seated jurors (EIP-191 challenge). |
 | `watcher.ts` | Polls `getLogs` from `START_BLOCK` with a persisted cursor. Handlers are idempotent and read on-chain state first. |
@@ -47,7 +47,7 @@ tests, grading and signing. It does not protect model inference. Local dev mode
 | `GET /preview-cache` | Public metadata of cached runs: key, bundleHash, models, original run and attestation kind. |
 | `GET /reports/:versionId` | The signed report. Returns 202 `{status:"running"}` while running and 500 `{status:"failed"}` on failure. |
 | `POST /preview/:versionId/attach` | Submits `attachReport` for a stored report (for `SUBMIT_TXS=0` runs or a failed attach). |
-| `GET /deliveries/:purchaseId` | `{wrapper (canonical JSON), wrapperHash, wrappedKey (base64 EMKW1), wrappedKeyHash, ciphertextUrl, bundleHash, relay, deliveredTx}`. Served only when the purchase is Delivered on-chain with the same `wrapperHash` and `wrappedKeyHash`. |
+| `GET /deliveries/:purchaseId` | `{wrapper (canonical JSON), wrapperHash, wrappedKey (base64 EMKW2), wrappedKeyHash, ciphertextUrl, bundleHash, relay, deliveredTx}`. Served only when the purchase is Delivered on-chain with the same `wrapperHash` and `wrappedKeyHash`. |
 | `POST /evidence-upload` | Body `{content}` \| `{base64}` \| any JSON object. Returns `{evidenceHash}`, the sha256 of the stored bytes; pass it to `openDispute`. Stored privately. |
 | `POST /evidence/:disputeId` | Body `{juror, message, signature, encPubKey?}`. `message` = shared `evidenceAuthMessage(...)`, EIP-191-signed by the juror. Returns `{packet, packetHash, packetSignature}`, or the packet encrypted to `encPubKey`. |
 | `GET /findings/:disputeId` | The public findings JSON; its sha256 is the on-chain `findingsHash`. |
@@ -58,7 +58,7 @@ tests, grading and signing. It does not protect model inference. Local dev mode
 {
   "encryptedBundle":  "<EMENC1(K_bundle, canonical tar)>",
   "encryptedAudit":   "<EMENC1(K_audit, canonical tar of audit-tasks/)>",
-  "wrappedBundleKey": "<EMKW1 to /health encPubKey; HKDF salt = sha256(encryptedBundle); info 'envmarket.upload.v1'>",
+  "wrappedBundleKey": "<EMKW2 to /health encPubKey; HPKE aad = sha256(encryptedBundle); info 'envmarket.upload.v1'>",
   "wrappedAuditKey":  "<same, same salt>",
   "encryptedSalts":   "<EMENC1(K_audit, salts.json)>",        // or EMENC1(K_salts) plus "wrappedSaltsKey"
   "publicDocs": { "description.json": "<text>", "description.md": "<text>", "manifest.json": "<text>", "license": {"base64": "…"} },
