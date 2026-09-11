@@ -22,9 +22,9 @@ export function BuyPanel({ v }: { v: Version }) {
   const stake = useSellerStake(v.seller);
   const blockers: string[] = [];
   if (!v.active) blockers.push("The seller has paused sales of this version.");
-  if (isZeroHash(v.reportHash)) blockers.push("The preview is still running. You can buy once its signed results are attached.");
+  if (isZeroHash(v.reportHash)) blockers.push("No signed preview report is attached yet.");
   if (stake.data && stake.data.available < v.collateral)
-    blockers.push(`The seller’s free deposit (${fmtUsdc(stake.data.available)}) doesn’t cover the ${fmtUsdc(v.collateral)} each sale holds back for refunds.`);
+    blockers.push(`The seller’s available stake (${fmtUsdc(stake.data.available)}) is below the ${fmtUsdc(v.collateral)} collateral each sale reserves.`);
   if (address && address.toLowerCase() === v.seller.toLowerCase()) blockers.push("This is your own listing.");
 
   if (blockers.length)
@@ -132,7 +132,7 @@ function BuyAction({ v }: { v: Version }) {
 
       <label className="flex cursor-pointer items-start gap-2.5 text-[13px] leading-relaxed text-muted">
         <input type="checkbox" name="terms" className="mt-1 shrink-0 accent-[var(--accent-fill)]" checked={termsAck} onChange={(e) => setTermsAck(e.target.checked)} />
-        <span>I understand the preview doesn’t guarantee training value, and refunds after delivery are capped.</span>
+        <span>I accept the terms above.</span>
       </label>
 
       <button className="btn btn-primary h-10 w-full" disabled={!enoughFunds || !termsAck || busy} onClick={doBuy}>

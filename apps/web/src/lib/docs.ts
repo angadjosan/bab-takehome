@@ -43,33 +43,24 @@ export function useDoc(uri: string | undefined, hash: Hex | undefined) {
 
 export type Claim = { id: string; text: string; category?: string; check?: string };
 
+const str = (o: Record<string, unknown>, k: string) => (typeof o[k] === "string" && o[k] ? (o[k] as string) : undefined);
+
+/**
+ * Reads envmarket.description.v1 (packages/shared/src/description.ts) by its exact field names:
+ * title, summary, environmentType, environmentVersion, claims[{id, text, category, check}].
+ * No fallbacks to other keys. The schema has no skills field, so `skills` is always [].
+ */
 export function describe(json: Record<string, unknown> | null | undefined) {
   const j = json ?? {};
-  const s = (k: string[]) => {
-    for (const x of k) if (typeof j[x] === "string" && j[x]) return j[x] as string;
-    return undefined;
-  };
-  const arr = (k: string[]) => {
-    for (const x of k) if (Array.isArray(j[x])) return j[x] as unknown[];
-    return [];
-  };
-  const claims: Claim[] = arr(["claims"]).map((c, i) => {
-    if (typeof c === "string") return { id: `C${i + 1}`, text: c };
-    const o = c as Record<string, unknown>;
-    return {
-      id: String(o.id ?? o.number ?? `C${i + 1}`),
-      text: String(o.text ?? o.claim ?? JSON.stringify(c)),
-      category: typeof o.category === "string" ? o.category : undefined,
-      check: typeof o.check === "string" ? o.check : undefined,
-    };
-  });
-  const skills = arr(["skills", "targetSkills", "skillTags", "tags"]).map((x) => (typeof x === "string" ? x : String((x as Record<string, unknown>).name ?? x)));
+  const claims: Claim[] = (Array.isArray(j.claims) ? (j.claims as unknown[]) : [])
+    .filter((c): c is Record<string, unknown> => !!c && typeof c === "object" && !Array.isArray(c))
+    .map((o) => ({ id: String(o.id ?? ""), text: String(o.text ?? ""), category: str(o, "category"), check: str(o, "check") }));
   return {
-    title: s(["title", "name"]),
-    summary: s(["summary", "tagline", "shortDescription", "description"]),
-    environmentType: s(["environmentType"]),
-    environmentVersion: s(["environmentVersion", "version"]),
-    skills,
+    title: str(j, "title"),
+    summary: str(j, "summary"),
+    environmentType: str(j, "environmentType"),
+    environmentVersion: str(j, "environmentVersion"),
+    skills: [] as string[],
     claims,
     raw: j,
   };
