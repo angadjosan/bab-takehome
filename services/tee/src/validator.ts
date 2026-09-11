@@ -136,8 +136,11 @@ export function buildScreeningIndex(corpus: ScreeningCorpus): ScreeningIndex {
   for (const f of corpus.files) {
     for (const g of grams(tokens(f.text), N)) ngrams.add(g);
     paths.add(f.path);
-    // distinctive snake_case path segments only (e.g. test_hidden, visible_tests); not generic names like "pytest"
-    for (const seg of f.path.split('/')) if (seg.includes('_') && seg.replace(/\.[a-z]+$/, '').length >= 4) identifiers.add(seg.replace(/\.[a-z]+$/, ''));
+    // distinctive snake_case path segments of task content only (e.g. test_hidden, visible_tests);
+    // bundle metadata file names (IMAGE_DIGEST, requirements.lock) are not secrets
+    if (/^(tasks|solutions|audit)\//.test(f.path)) {
+      for (const seg of f.path.split('/')) if (seg.includes('_') && seg.replace(/\.[a-z]+$/, '').length >= 4) identifiers.add(seg.replace(/\.[a-z]+$/, ''));
+    }
     if (f.path.endsWith('.py')) {
       for (const m of f.text.matchAll(/\b(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)/g)) {
         const id = m[1]!;

@@ -21,7 +21,7 @@ import * as path from 'node:path';
 import { sha256Hex } from '@envmarket/shared';
 import type { ServiceConfig } from './config.ts';
 import type { Ctx } from './context.ts';
-import { usageCostUsd } from './cost.ts';
+import { tokenBudgetFor, usageCostUsd } from './cost.ts';
 import { errMsg, logger } from './log.ts';
 import { NETDENY, scratchDir, type SandboxInfo } from './sandbox.ts';
 
@@ -59,6 +59,7 @@ export interface HarnessRecord {
   score: number;
   termination?: string | null;
   stopCondition?: string | null;
+  tokenBudgetExhausted?: boolean;
   actions?: Array<{ type: string; path?: string; ok: boolean }>;
   llmCalls?: number;
   usage?: { prompt: number; completion: number };
@@ -100,7 +101,7 @@ export interface EpisodeResult {
   llmCalls: number;
   servedModels: string[];
   usage: { promptTokens: number; completionTokens: number; cachedPromptTokens: number; costUsd: number | null };
-  /** retained for record compatibility; the harness has no cumulative token stop (always false) */
+  /** the harness stopped the episode at its per-episode token cap (termination token_budget; counts as failed) */
   tokenBudgetExceeded: boolean;
   seedSent: boolean;
   startedAt: string;
@@ -235,6 +236,11 @@ export async function runHarness(
     '--bundle', a.payloadDir, '--split', a.split, '--audit-dir', a.auditDir,
     ...(a.tasks?.length ? ['--tasks', a.tasks.join(',')] : []),
     ...a.models.flatMap((m) => ['--model', m]),
+    // docs/PREVIEW_COST.md per-episode bound (fullBudgetIn:fullBudgetOut), enforced by the harness
+    ...a.models.flatMap((m) => {
+      const b = tokenBudgetFor(m);
+      return b ? ['--max-episode-tokens', `${m}=${b.in}:${b.out}`] : [];
+    }),
     '--seed', String(p.seed), '--temperature', String(p.temperature), '--max-tokens', String(p.maxTokens),
     '--action-budget', String(p.actionBudget), '--time-budget', String(p.episodeTimeSec), '--concurrency', String(Math.max(1, a.concurrency)),
     ...sandboxArgs(ctx.sandbox), '--venv', a.venv, '--work-dir', path.join(scratch, 'work'),
@@ -290,7 +296,7 @@ export function toEpisodeResult(rec: HarnessRecord, meta: EpisodeMeta): EpisodeR
     llmCalls: rec.llmCalls ?? 0,
     servedModels: rec.servedModels ?? [],
     usage,
-    tokenBudgetExceeded: false,
+    tokenBudgetExceeded: !!rec.tokenBudgetExhausted || rec.termination === 'token_budget',
     seedSent: rec.seedSent ?? true,
     startedAt: rec.startedAt,
     finishedAt: rec.finishedAt,

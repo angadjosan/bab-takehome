@@ -45,6 +45,29 @@ log = logging.getLogger("envmarket_coding")
 MAX_IDLE_TURNS = 3
 EXTRA_MODEL_CALLS = 6  # model calls allowed beyond the action budget (submit, recoveries)
 TOOL_RESULT_MAX_CHARS = 12_000
+MIN_COMPLETION_TOKENS = 256  # a call with less output room than this is not started
+PROMPT_CHARS_PER_TOKEN = 3  # conservative estimate for the next prompt (measured ~3.5)
+
+
+class TokenBudgetExhausted(vf.Error):
+    """The next model call could push the episode past its token cap: the episode ends (not infra)."""
+
+
+def parse_token_caps(specs: list[str] | None) -> dict[str, dict[str, int | None]]:
+    """--max-episode-tokens values: "N" (prompt+completion total), "IN:OUT" (separate caps), each
+    optionally prefixed "MODEL=" to apply to one model only; comma-separated or repeated."""
+    caps: dict[str, dict[str, int | None]] = {}
+    for spec in specs or []:
+        for part in (p.strip() for p in spec.split(",")):
+            if not part:
+                continue
+            model, value = part.rsplit("=", 1) if "=" in part else ("*", part)
+            if ":" in value:
+                i, o = value.split(":", 1)
+                caps[model.strip()] = {"in": int(i), "out": int(o), "total": None}
+            else:
+                caps[model.strip()] = {"in": None, "out": None, "total": int(value)}
+    return caps
 STEP_TIMEOUT_SEC = 180
 RESET_TIMEOUT_SEC = 180
 TIMEOUT_GRACE_SEC = 60
@@ -75,6 +98,7 @@ class Episode:
     actions: list[dict] = field(default_factory=list)
     idle: int = 0
     seed_sent: bool = True
+    token_budget_exhausted: bool = False
 
 
 def protocol_spec(action_budget: int, time_budget: float) -> dict:
@@ -90,7 +114,8 @@ def protocol_spec(action_budget: int, time_budget: float) -> dict:
         "episodesPerTask": 1,
         "retries": "none at episode level; transport-level HTTP retries only (429/5xx/connection)",
         "successRule": "grader score 1: every hidden test passes AND the episode ended by submit",
-        "failures": "budget exhaustion, timeout, no submit and infrastructure failures score 0; infra failures are flagged status=infra_failure",
+        "failures": "budget exhaustion, token-budget stops, timeout, no submit and infrastructure failures score 0; infra failures are flagged status=infra_failure",
+        "tokenBudget": "optional per-episode cap (--max-episode-tokens N | IN:OUT, per model): a model call is not started if cumulative prompt tokens plus the next prompt (estimated at 3 chars/token) would exceed the input cap, or if less than 256 output tokens remain; max_tokens is limited to the remaining output cap; the episode then ends with termination token_budget and scores 0",
         "grading": "separate sandboxed process (entrypoints.gradeArtifact) with the hidden tests; the agent phase never contains hidden tests or solutions",
     }
 
@@ -133,9 +158,12 @@ class EnvMarketCodingEnv(vf.MultiTurnEnv):
         pricing: dict | None = None,
         transcripts_dir: Path | None = None,
         keep_workdirs: bool = False,
+        max_episode_tokens: dict[str, dict[str, int | None]] | None = None,
         **kwargs: Any,
     ) -> None:
         self.bundle, self.split, self.task_ids = bundle, split, task_ids
+        self.token_caps = max_episode_tokens or {}
+        self._tools_chars = len(json.dumps(bundle.tool_definitions(), default=str))
         self.action_budget, self.time_budget, self.seed = action_budget, float(time_budget), seed
         self.sandbox, self.venv = sandbox, Path(venv)
         self.work_root = sandbox.prepare_root(Path(work_root))
@@ -203,18 +231,54 @@ class EnvMarketCodingEnv(vf.MultiTurnEnv):
             raise vf.InfraError(f"episode setup failed: {type(e).__name__}: {e}") from e
         return state
 
+    def token_caps_for(self, model: str | None) -> dict[str, int | None] | None:
+        return self.token_caps.get(model or "") or self.token_caps.get("*")
+
+    def _estimate_prompt_tokens(self, prompt: vf.Messages) -> int:
+        chars = self._tools_chars
+        for m in prompt or []:
+            chars += len(json.dumps(m.model_dump(exclude_none=True) if hasattr(m, "model_dump") else m, default=str))
+        return chars // PROMPT_CHARS_PER_TOKEN + 1
+
+    def _exhaust(self, ep: Episode, why: str) -> None:
+        ep.token_budget_exhausted = True
+        ep.termination = ep.termination or "token_budget"
+        raise TokenBudgetExhausted(f"episode token budget: {why}")
+
     async def get_model_response(self, state: vf.State, prompt: vf.Messages, *args: Any, **kwargs: Any):
+        sa = dict(kwargs.pop("sampling_args", None) or state.get("sampling_args") or {})
+        ep: Episode | None = state.get("em")
+        caps = self.token_caps_for(state.get("model"))
+        if caps and ep is not None:
+            # Enforce the cumulative cap BEFORE the call, against the exact prompt about to be sent.
+            u = self.get_state_usage(state) or {}
+            used_in, used_out = int(u.get("input_tokens", 0)), int(u.get("output_tokens", 0))
+            est = self._estimate_prompt_tokens(prompt)
+            key = "max_completion_tokens" if "max_completion_tokens" in sa else "max_tokens"
+            room = [int(sa[key])] if sa.get(key) else []
+            if caps.get("in") is not None:
+                if used_in + est > caps["in"]:
+                    self._exhaust(ep, f"prompt tokens {used_in} + next ~{est} > {caps['in']}")
+            if caps.get("out") is not None:
+                room.append(caps["out"] - used_out)
+            if caps.get("total") is not None:
+                room.append(caps["total"] - used_in - used_out - est)
+            if room and min(room) < MIN_COMPLETION_TOKENS:
+                self._exhaust(ep, f"{min(room)} output tokens left (< {MIN_COMPLETION_TOKENS})")
+            if room:
+                sa[key] = min(room)
         try:
-            return await super().get_model_response(state, prompt, *args, **kwargs)
+            return await super().get_model_response(state, prompt, *args, sampling_args=sa, **kwargs)
         except vf.ModelError as e:
             # A provider that rejects `seed` (HTTP 400 naming it): drop it, record seedSent=false.
-            sa = dict(state.get("sampling_args") or {})
             text = f"{e} {e.__cause__}".lower()
             if "seed" in sa and "seed" in text and ("400" in text or "bad request" in text or "invalid" in text):
                 sa.pop("seed")
-                state["sampling_args"] = sa
+                st = dict(state.get("sampling_args") or {})
+                st.pop("seed", None)
+                state["sampling_args"] = st
                 state["em"].seed_sent = False
-                return await super().get_model_response(state, prompt, *args, **kwargs)
+                return await super().get_model_response(state, prompt, *args, sampling_args=sa, **kwargs)
             raise
 
     async def env_response(self, messages: vf.Messages, state: vf.State, **kwargs: Any) -> vf.Messages:
@@ -312,6 +376,8 @@ class EnvMarketCodingEnv(vf.MultiTurnEnv):
 
     def _record(self, state: vf.State, ep: Episode, grade: dict | None, grade_error: str | None, final_files: dict) -> dict:
         err = state.get("error")
+        if isinstance(err, TokenBudgetExhausted):
+            err = None  # a protocol stop (termination token_budget), not an error or infra failure
         infra, error = False, None
         if err is not None:
             error = f"{type(err).__name__}: {err}" + (f" (cause: {type(err.__cause__).__name__}: {err.__cause__})" if err.__cause__ else "")
@@ -349,7 +415,9 @@ class EnvMarketCodingEnv(vf.MultiTurnEnv):
             "solved": score == 1,
             "score": score,
             "termination": (grade or {}).get("termination") or ep.termination or "incomplete",
-            "stopCondition": state.get("stop_condition"),
+            "stopCondition": "token_budget" if ep.token_budget_exhausted else state.get("stop_condition"),
+            "tokenBudgetExhausted": ep.token_budget_exhausted,
+            "tokenCaps": self.token_caps_for(requested),
             "actionsUsed": ep.actions_used,
             "actions": ep.actions,
             "llmCalls": len(state.get("trajectory") or []),
@@ -407,6 +475,7 @@ def load_environment(
     pricing: dict | None = None,
     transcripts_dir: str | None = None,
     keep_workdirs: bool = False,
+    max_episode_tokens: dict[str, dict[str, int | None]] | list[str] | str | None = None,
     **kwargs: Any,
 ) -> EnvMarketCodingEnv:
     """Load an EnvMarket coding bundle as a verifiers environment (one dataset row per task).
@@ -442,6 +511,7 @@ def load_environment(
         pricing=pricing,
         transcripts_dir=Path(transcripts_dir) if transcripts_dir else None,
         keep_workdirs=keep_workdirs,
+        max_episode_tokens=max_episode_tokens if isinstance(max_episode_tokens, dict) else parse_token_caps([max_episode_tokens] if isinstance(max_episode_tokens, str) else max_episode_tokens),
         env_args={"bundle_dir": str(b.root), "split": split, "task_ids": ids, "action_budget": action_budget, "time_budget": time_budget, "seed": seed, "sandbox": sandbox},
         **kwargs,
     )

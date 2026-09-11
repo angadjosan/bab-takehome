@@ -42,6 +42,10 @@ describe('harness client', () => {
     expect(e.usage.costUsd).toBeCloseTo((10_000 * 3 + 1_000 * 15) / 1e6, 6); // kimi-k3 list price
     expect(e.finalFiles['ledgerlite/lru.py']).toBe('x = 1\n');
   });
+  it('a token-budget stop is a failed episode, flagged tokenBudgetExceeded (not infra)', () => {
+    const e = toEpisodeResult({ ...rec, status: 'failed', solved: false, score: 0, termination: 'token_budget', tokenBudgetExhausted: true }, { jobId: 'j', requested: 'GLM 5.3', provider: 'fireworks', set: 'purchased' });
+    expect(e).toMatchObject({ status: 'failed', solved: false, termination: 'token_budget', tokenBudgetExceeded: true });
+  });
   it('an infra failure is never solved; missing episodes are synthesized as infra failures', () => {
     expect(toEpisodeResult({ ...rec, status: 'infra_failure', solved: true }, { jobId: 'j', requested: 'r', provider: 'p', set: 'audit' }).solved).toBe(false);
     const m = missingEpisode({ jobId: 'j', requested: 'GLM 5.3', provider: 'fireworks', set: 'audit' }, 'accounts/fireworks/models/glm-5p3', 'A1', 'harness exited 1');

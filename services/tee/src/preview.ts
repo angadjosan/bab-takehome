@@ -78,7 +78,7 @@ export function protocolSpec(ctx: Ctx): Record<string, unknown> {
     actionBudget: p.actionBudget,
     timeBudgetSec: p.episodeTimeSec,
     tokenBound:
-      'per model call: max_tokens; per episode: at most the harness protocol maxModelCalls calls. A cumulative per-episode token stop (docs/PREVIEW_COST.md fullBudgetIn/Out) is NOT enforced by the harness yet, so quote.worstCaseUsd is an estimate',
+      'per episode and model, docs/PREVIEW_COST.md fullBudgetIn/fullBudgetOut passed to the harness as --max-episode-tokens MODEL=IN:OUT: a model call is not started if cumulative prompt tokens plus the next prompt could exceed fullBudgetIn, and max_tokens is capped at the remaining fullBudgetOut; such an episode ends with termination token_budget and counts as failed. quote.worstCaseUsd is therefore a bound (up to the 3 chars/token estimate of the next prompt)',
     costModel: COST_MODEL_VERSION,
     taskSelection: 'every purchased task and every audit task, exactly one episode per model (pass@1); no retries, no best-of',
     successRule: SUCCESS_RULE_ALL_TESTS + ' (and the episode ended by submit)',
@@ -248,7 +248,7 @@ export async function quotePreview(ctx: Ctx, versionId: bigint, store = true): P
     estimatedCostUsd: cost.estimatedCostUsd,
     quoteUsd: cost.quoteUsd,
     worstCaseUsd: cost.worstCaseUsd,
-    tokenBoundEnforced: false,
+    tokenBoundEnforced: true,
     feeUsdc: fee.toString(),
     feeDecimals: 6,
     minPreviewFee: minFee.toString(),

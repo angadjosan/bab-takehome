@@ -108,9 +108,9 @@ async def run(args: argparse.Namespace) -> int:
     import verifiers as vf
     from openai import AsyncOpenAI
 
-    from .environment import load_environment
+    from .environment import load_environment, parse_token_caps
 
-    models = [m.strip() for spec in args.model for m in spec.split(",") if m.strip()]
+    models =[m.strip() for spec in args.model for m in spec.split(",") if m.strip()]
     api_key = os.environ.get(args.api_key_env) or os.environ.get("LLM_API_KEY")
     if not api_key:
         print(f"error: set {args.api_key_env} (or LLM_API_KEY)", file=sys.stderr)
@@ -134,6 +134,7 @@ async def run(args: argparse.Namespace) -> int:
         pricing=pricing,
         transcripts_dir=args.transcripts,
         keep_workdirs=args.keep_workdirs,
+        max_episode_tokens=parse_token_caps(args.max_episode_tokens),
     )
     client = vf.OpenAIChatCompletionsClient(AsyncOpenAI(base_url=args.base_url, api_key=api_key, max_retries=args.max_retries, timeout=args.request_timeout))
     sampling = {"temperature": args.temperature, "seed": args.seed, "max_tokens": args.max_tokens}
@@ -243,6 +244,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=0, help="env reset seed and sampling seed")
     p.add_argument("--temperature", type=float, default=0.0)
     p.add_argument("--max-tokens", type=int, default=8192, help="max completion tokens per model call")
+    p.add_argument(
+        "--max-episode-tokens",
+        action="append",
+        default=[],
+        help='cumulative per-episode token cap: "N" (prompt+completion) or "IN:OUT", optionally "MODEL=..." per model; repeatable. '
+        "Enforced before each model call; the episode ends with termination token_budget (score 0)",
+    )
     p.add_argument("--action-budget", type=int, default=12)
     p.add_argument("--time-budget", type=float, default=600, help="wall-clock seconds per episode")
     p.add_argument("--concurrency", type=int, default=4, help="episodes in flight")
