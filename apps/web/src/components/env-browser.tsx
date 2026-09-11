@@ -58,7 +58,8 @@ export function EnvBrowser() {
   const [status, setStatus] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>("newest");
 
-  const all = useMemo(() => versions.data ?? [], [versions.data]);
+  // Retired versions (setVersionActive false) stay on-chain but are not for sale; hide them.
+  const all = useMemo(() => (versions.data ?? []).filter((v) => v.active), [versions.data]);
   const known = all.map((v) => facts[v.id.toString()]).filter((f): f is EnvFacts => !!f);
   const types = countBy(known.flatMap((f) => (f.environmentType ? [f.environmentType] : [])));
   const skills = countBy(known.flatMap((f) => [...new Set(f.skills)]));
