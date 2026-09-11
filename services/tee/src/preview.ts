@@ -8,14 +8,14 @@
  * can finish before previewDeadline(versionId). attachReport (which releases the fee) is submitted
  * immediately after signing.
  *
- * Inference runs ONCE per environment: the run is cached by (bundleHash, auditRoot, protocol digests,
- * model ids) — see cache.ts — and a later version/listing/contract/chain with the same content gets a
- * freshly signed report rebuilt from the cached run (original jobs/dates, `cachedFrom`). Otherwise the
- * reference panel runs through the real harness (every model × every purchased and audit task, one
- * episode each, per-episode token bound from docs/PREVIEW_COST.md) plus the validator.
+ * Episodes run in the open-source reference harness `harness/envmarket_coding` (Prime Intellect
+ * verifiers 0.3.1) as a subprocess (see harnessRunner.ts); every panel model × every purchased and
+ * audit task, one episode each (pass@1). Inference runs ONCE per environment: the run is cached by
+ * (bundleHash, auditRoot, protocol commitment, model ids) — see cache.ts — and a later version /
+ * listing / contract / chain with the same content gets a freshly signed report rebuilt from the
+ * cached run (original jobs/dates, `cachedFrom`).
  */
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import {
   canonicalJson,
   pass1Rounded,
@@ -33,15 +33,17 @@ import { loadUpload, openAudit, openBundle, type UploadRecord } from './bundle.t
 import { getCacheEntry, previewCacheKey, putCacheEntry, signEntry, type PreviewCacheEntry, type PreviewCacheKeyInput } from './cache.ts';
 import { abiHas, ZERO32, type VersionTerms } from './chain.ts';
 import { domainOf, requireChain, type Ctx } from './context.ts';
-import { COST_MODEL_VERSION, feeUsdcBaseUnits, quotePreviewCost, tokenBudgetFor, type CostQuote } from './cost.ts';
-import { AGENT_TOOLS, EXTRA_LLM_CALLS, HARNESS_ID, harnessDigest, MAX_IDLE_TURNS, promptDigest, runEpisode, TOOL_RESULT_MAX_CHARS, type EpisodeResult, type EpisodeSpec } from './harness.ts';
+import { COST_MODEL_VERSION, feeUsdcBaseUnits, quotePreviewCost, type CostQuote } from './cost.ts';
+import { bundleDigest, missingEpisode, runHarness, toEpisodeResult, type EpisodeResult } from './harnessRunner.ts';
 import { errMsg, logger } from './log.ts';
 import { llmClient, resolveModels, type ResolvedModels } from './models.ts';
 import { prepareVenv } from './sandbox.ts';
-import { mapLimit, nowIso } from './util.ts';
+import { nowIso } from './util.ts';
 import { buildScreeningIndex, buildValidatorInput, collectFiles, runValidator, SCREENING_RULES, validatorPromptHash, VALIDATOR_PROMPT_VERSION, type ValidatorResult } from './validator.ts';
 
-export const PROTOCOL_ID = 'envmarket.preview.v1';
+/** v2: episodes run in the verifiers-based reference harness (v1 was the former TypeScript loop). */
+export const PROTOCOL_ID = 'envmarket.preview.v2';
+export const LEGACY_PROTOCOL_IDS = ['envmarket.preview.v1'];
 
 export class HttpError extends Error {
   constructor(
@@ -53,38 +55,53 @@ export class HttpError extends Error {
   }
 }
 
-/** The public, precommitted protocol (hashed into protocol.harnessDigest). */
+function requireHarness(ctx: Ctx) {
+  if (!ctx.harness) throw new HttpError(503, 'reference harness unavailable (harness/envmarket_coding; HARNESS_DIR / HARNESS_PYTHON)');
+  return ctx.harness;
+}
+
+/** The public, precommitted protocol. Its sha256 (with the bundle's toolsDigest) is report.protocol.harnessDigest. */
 export function protocolSpec(ctx: Ctx): Record<string, unknown> {
+  const h = requireHarness(ctx);
   const p = ctx.cfg.preview;
   return {
     id: PROTOCOL_ID,
-    harness: HARNESS_ID,
-    tools: AGENT_TOOLS.map((t) => t.function.name),
+    harness: {
+      id: h.digest.harnessId,
+      source: 'harness/envmarket_coding (Prime Intellect verifiers, MIT)',
+      harnessDigest: h.digest.harnessDigest,
+      promptDigest: h.digest.promptDigest,
+      verifiersVersion: h.digest.verifiersVersion,
+      protocol: h.digest.protocol,
+    },
     decoding: { temperature: p.temperature, seed: p.seed, maxTokens: p.maxTokens },
     actionBudget: p.actionBudget,
     timeBudgetSec: p.episodeTimeSec,
-    maxModelCalls: p.actionBudget + EXTRA_LLM_CALLS,
-    maxIdleTurns: MAX_IDLE_TURNS,
-    toolResultMaxChars: TOOL_RESULT_MAX_CHARS,
-    tokenBudget:
-      'per episode and model (docs/PREVIEW_COST.md fullBudgetIn/fullBudgetOut): a call is not started if cumulative prompt tokens could exceed fullBudgetIn, and max_tokens is capped at the remaining fullBudgetOut; an episode stopped this way counts as failed (not submitted)',
+    tokenBound:
+      'per model call: max_tokens; per episode: at most the harness protocol maxModelCalls calls. A cumulative per-episode token stop (docs/PREVIEW_COST.md fullBudgetIn/Out) is NOT enforced by the harness yet, so quote.worstCaseUsd is an estimate',
     costModel: COST_MODEL_VERSION,
-    taskSelection: 'every purchased task and every audit task, exactly one episode each (pass@1); no retries, no best-of',
+    taskSelection: 'every purchased task and every audit task, exactly one episode per model (pass@1); no retries, no best-of',
     successRule: SUCCESS_RULE_ALL_TESTS + ' (and the episode ended by submit)',
-    failures: 'budget exhaustion, token-bound stops, timeout, no submit and infrastructure failures all count as attempted and not solved; infrastructure failures are also reported per model',
+    failures: 'budget exhaustion, timeout, no submit and infrastructure failures all count as attempted and not solved; infrastructure failures (including episodes the harness did not report) are also reported per model',
     rounding: 'pass@1 rounded to the nearest 5 percentage points (half up), purchased and audit reported separately',
     panel: { requested: ['GLM 5.3', 'Kimi K3', 'Qwen 3.8'], resolution: 'pinned provider model ids checked against the live model list; unavailable models are reported as unavailable, never substituted by another family' },
-    reuse: 'a run is reused for any version with the same bundleHash, auditRoot, protocol digests and model ids (report.cachedFrom); runs with infrastructure failures are not reused',
+    reuse: 'a run is reused for any version with the same bundleHash, auditRoot, protocol commitment and model ids (report.cachedFrom); runs with infrastructure failures are not reused',
     reproducibility: {
       repeatCount: 1,
       deterministicRegradeTolerance: 0,
-      deterministicRegrade: 'the stored final workspace of each original episode is re-graded with the hidden tests; the outcome must match exactly',
+      deterministicRegrade: 'harness --regrade: each original episode\'s stored final workspace is graded again with the hidden tests; score and graded tree digest must match exactly',
       llmRerunTolerancePp: 5,
-      llmRerun: 'each masked task is re-run once per model under this protocol; per model, |rerun pass rate - original pass rate| over the masked tasks must be <= 5 percentage points (at this population size a single changed outcome exceeds it)',
+      llmRerun: 'each masked task is re-run once per model through the harness under this protocol; per model, |rerun pass rate - original pass rate| over the masked tasks must be <= 5 percentage points (at this population size a single changed outcome exceeds it)',
     },
     validator: { promptVersion: VALIDATOR_PROMPT_VERSION, promptHash: validatorPromptHash(), screening: SCREENING_RULES },
-    sandbox: 'agent phase and grade phase run in separate offline sandboxes; the agent phase never contains hidden tests or solutions',
+    sandbox: 'harness agent phase and grade phase run in separate offline sandboxes (docker, or unshare/setpriv/prlimit + seccomp net-deny in the TEE); the agent phase never contains hidden tests or solutions',
   };
+}
+
+/** Commitment for report.protocol.harnessDigest; the preimage is published as a blob. */
+export function protocolCommitment(ctx: Ctx, toolsDigest: string | null): { json: string; digest: Hex } {
+  const json = canonicalJson({ type: 'envmarket.protocol-commitment.v1', spec: protocolSpec(ctx), toolsDigest });
+  return { json, digest: sha256Hex(json) };
 }
 
 export interface StoredReport {
@@ -108,10 +125,23 @@ export interface StoredReport {
   createdAt: string;
 }
 
-const reportKey = (versionId: bigint) => `v${versionId}-${PROTOCOL_ID}`;
+const reportKey = (versionId: bigint, protocolId = PROTOCOL_ID) => `v${versionId}-${protocolId}`;
 
 export function getStoredReport(ctx: Ctx, versionId: bigint): StoredReport | null {
-  return ctx.priv.get<StoredReport>('reports', reportKey(versionId));
+  for (const id of [PROTOCOL_ID, ...LEGACY_PROTOCOL_IDS]) {
+    const r = ctx.priv.get<StoredReport>('reports', reportKey(versionId, id));
+    if (r) return r;
+  }
+  return null;
+}
+
+/** Private run record for a version (current or legacy protocol). */
+export function getRunRecord<T>(ctx: Ctx, versionId: bigint): T | null {
+  for (const id of [PROTOCOL_ID, ...LEGACY_PROTOCOL_IDS]) {
+    const r = ctx.priv.get<T>('runs', reportKey(versionId, id));
+    if (r) return r;
+  }
+  return null;
 }
 
 export function termsMismatches(terms: VersionTerms, up: UploadRecord): string[] {
@@ -159,8 +189,9 @@ export function cacheKeyInput(ctx: Ctx, terms: Pick<VersionTerms, 'bundleHash' |
     bundleHash: terms.bundleHash.toLowerCase(),
     auditRoot: terms.auditRoot.toLowerCase(),
     protocolId: PROTOCOL_ID,
-    harnessDigest: harnessDigest(protocolSpec(ctx)),
-    promptDigest: promptDigest(),
+    // the bundle's tools are generated from its manifest, which bundleHash already covers
+    harnessDigest: protocolCommitment(ctx, null).digest,
+    promptDigest: requireHarness(ctx).digest.promptDigest,
     validatorPromptHash: validatorPromptHash(),
     panel: models.panel.map((m) => ({ requested: m.requested, resolved: m.resolved, status: m.status })),
     validatorModel: models.validator.model,
@@ -171,7 +202,7 @@ export function cacheKeyInput(ctx: Ctx, terms: Pick<VersionTerms, 'bundleHash' |
 export function estimateRunSec(ctx: Ctx, episodes: number, cached: boolean): number {
   if (cached) return 60;
   const rounds = Math.ceil(episodes / Math.max(1, ctx.cfg.preview.concurrency));
-  return rounds * (ctx.cfg.preview.episodeTimeSec + 60) + 360;
+  return rounds * (ctx.cfg.preview.episodeTimeSec + 60) + 420;
 }
 
 // ------------------------------------------------------------------------------ quotes + payment
@@ -183,6 +214,7 @@ export interface IssuedQuote {
 
 export async function quotePreview(ctx: Ctx, versionId: bigint, store = true): Promise<IssuedQuote> {
   const chain = requireChain(ctx);
+  requireHarness(ctx);
   const terms = await chain.getVersion(versionId);
   if (!terms) throw new HttpError(404, `version ${versionId} not found on-chain`);
   const models = await resolveModelsCached(ctx);
@@ -216,6 +248,7 @@ export async function quotePreview(ctx: Ctx, versionId: bigint, store = true): P
     estimatedCostUsd: cost.estimatedCostUsd,
     quoteUsd: cost.quoteUsd,
     worstCaseUsd: cost.worstCaseUsd,
+    tokenBoundEnforced: false,
     feeUsdc: fee.toString(),
     feeDecimals: 6,
     minPreviewFee: minFee.toString(),
@@ -240,10 +273,7 @@ export interface Payment {
   quote: IssuedQuote | null;
 }
 
-/**
- * On-chain paid preview request check. Null when the deployed ABI predates seller-paid previews.
- * `episodesIfFresh`/`cached` size the deadline check.
- */
+/** On-chain paid preview request check. Null when the deployed ABI predates seller-paid previews. */
 async function requirePaidPreview(ctx: Ctx, versionId: bigint, cachedNow: boolean): Promise<Payment | null> {
   const chain = requireChain(ctx);
   if (!abiHas(chain.abi, 'previewInfo')) return null;
@@ -299,6 +329,7 @@ export async function previewVersion(ctx: Ctx, versionId: bigint): Promise<{ sto
 /** Validate that a preview can run (used before rate limiting so bad requests don't burn quota). */
 export async function previewPreconditions(ctx: Ctx, versionId: bigint): Promise<{ terms: VersionTerms; upload: UploadRecord; models: ResolvedModels; cacheKey: Hex; keyInput: PreviewCacheKeyInput; hit: PreviewCacheEntry | null; payment: Payment | null }> {
   if (ctx.sandbox.kind === 'unavailable') throw new HttpError(503, `sandbox ${ctx.sandbox.description}`);
+  requireHarness(ctx);
   const chain = requireChain(ctx);
   const terms = await chain.getVersion(versionId);
   if (!terms) throw new HttpError(404, `version ${versionId} not found on-chain`);
@@ -375,9 +406,18 @@ function reportFromEntry(ctx: Ctx, e: PreviewCacheEntry, terms: VersionTerms, ve
   ) as unknown as Report;
 }
 
-async function runFresh(ctx: Ctx, versionId: bigint, terms: VersionTerms, upload: UploadRecord, models: ResolvedModels) {
+interface FreshRun {
+  episodes: EpisodeResult[];
+  validator: ValidatorResult;
+  inferenceCostUsd: number;
+  toolsDigest: string | null;
+  transcripts: Record<string, string>;
+  harnessRuns: Array<{ split: string; exitCode: number | null; timedOut: boolean; records: number; summaries: unknown[]; stderrTail: string }>;
+}
+
+async function runFresh(ctx: Ctx, versionId: bigint, upload: UploadRecord, models: ResolvedModels): Promise<FreshRun> {
   const cfg = ctx.cfg;
-  const client = llmClient(cfg.llm);
+  const h = requireHarness(ctx);
   const { dir: payloadDir, checks } = openBundle(ctx, upload, `pv${versionId}`);
   const bad = checks.filter((c) => !c.ok);
   if (bad.length) throw new HttpError(500, 'stored bundle failed integrity checks', bad);
@@ -385,55 +425,64 @@ async function runFresh(ctx: Ctx, versionId: bigint, terms: VersionTerms, upload
   try {
     const dep = await prepareVenv(ctx.sandbox, ctx.cacheRoot, upload.requirementsLock);
     if (!dep.ok) throw new HttpError(500, 'dependency install failed', dep.log.slice(-1000));
-    const specs: Array<{ spec: EpisodeSpec; inputs: { venv: string; payloadDir: string; taskSourceDir: string } }> = [];
-    models.panel.forEach((m, mi) => {
-      if (m.status !== 'run' || !m.resolved) return;
-      const tasks = [
-        ...upload.taskIds.map((t) => ({ t, set: 'purchased' as const, dir: path.join(payloadDir, 'tasks') })),
-        ...upload.auditTaskIds.map((t) => ({ t, set: 'audit' as const, dir: auditDir })),
-      ];
-      tasks.forEach((x, ti) =>
-        specs.push({
-          spec: {
-            jobId: `v${versionId}.m${mi}.j${ti}`,
-            requested: m.requested,
-            model: m.resolved!,
-            provider: m.provider ?? cfg.llm.provider,
-            taskId: x.t,
-            set: x.set,
-            seed: cfg.preview.seed,
-            temperature: cfg.preview.temperature,
-            maxTokens: cfg.preview.maxTokens,
-            actionBudget: cfg.preview.actionBudget,
-            timeBudgetSec: cfg.preview.episodeTimeSec,
-            tokenBudget: tokenBudgetFor(m.resolved!),
-          },
-          inputs: { venv: dep.venv, payloadDir, taskSourceDir: x.dir },
-        }),
-      );
+    const tools = await bundleDigest(ctx, h, payloadDir, auditDir).catch((e) => {
+      logger.warn('harness bundle digest failed', { error: errMsg(e) });
+      return null;
     });
-    const episodes: EpisodeResult[] = await mapLimit(specs, cfg.preview.concurrency, (s) => runEpisode(ctx, client, s.spec, s.inputs));
+    const runnable = models.panel.map((m, mi) => ({ m, mi })).filter((x) => x.m.status === 'run' && x.m.resolved);
+    const ids = runnable.map((x) => x.m.resolved!);
+    const splits = [
+      { split: 'purchased' as const, tasks: upload.taskIds, offset: 0, concurrency: cfg.preview.concurrency },
+      ...(upload.auditTaskIds.length ? [{ split: 'audit' as const, tasks: upload.auditTaskIds, offset: upload.taskIds.length, concurrency: Math.max(1, Math.ceil(cfg.preview.concurrency / 3)) }] : []),
+    ];
+    const runs = ids.length
+      ? await Promise.all(splits.map((s) => runHarness(ctx, h, { payloadDir, auditDir, split: s.split, tasks: s.tasks, models: ids, concurrency: s.concurrency, venv: dep.venv, label: `pv${versionId}-${s.split}` })))
+      : [];
+    const episodes: EpisodeResult[] = [];
+    const transcripts: Record<string, string> = {};
+    for (const x of runnable) {
+      splits.forEach((s, si) => {
+        const r = runs[si]!;
+        s.tasks.forEach((task, ti) => {
+          const meta = { jobId: `v${versionId}.m${x.mi}.j${s.offset + ti}`, requested: x.m.requested, provider: x.m.provider ?? cfg.llm.provider, set: s.split };
+          const rec = r.records.find((rr) => rr.requestedModel === x.m.resolved && rr.taskId === task);
+          episodes.push(rec ? toEpisodeResult(rec, meta) : missingEpisode(meta, x.m.resolved!, task, `harness reported no record (exit ${r.exitCode}${r.timedOut ? ', timed out' : ''}): ${r.stderrTail.slice(-300)}`));
+        });
+      });
+    }
+    for (const r of runs) Object.assign(transcripts, r.transcripts);
 
     const payloadFiles = collectFiles(payloadDir);
     const auditFiles = collectFiles(auditDir, 'audit/');
-    const publicTexts = [upload.descriptionHash, upload.descriptionMdHash, upload.manifestHash].map((h) => (h ? ctx.blobs.getText(h) : null)).filter((t): t is string => !!t);
+    const publicTexts = [upload.descriptionHash, upload.descriptionMdHash, upload.manifestHash].map((hh) => (hh ? ctx.blobs.getText(hh) : null)).filter((t): t is string => !!t);
     const idx = buildScreeningIndex({ files: [...payloadFiles, ...auditFiles], taskIds: [...upload.taskIds, ...upload.auditTaskIds], publicTexts });
     const validatorInput = buildValidatorInput({
       files: payloadFiles.filter((f) => !f.path.startsWith('solutions/')),
       descriptionJson: ctx.blobs.getText(upload.descriptionHash) ?? '{}',
       preflight: { dependencies: upload.preflight.dependencies.ok, graderImports: upload.preflight.imports?.ok, purchased: upload.preflight.purchased, auditTaskCount: upload.auditTaskIds.length, sandbox: upload.preflight.sandbox },
     });
-    const validator: ValidatorResult = await runValidator(models.validator.model ? client : null, models.validator.model, validatorInput, idx, { temperature: 0, seed: cfg.preview.seed, maxTokens: cfg.preview.maxTokens });
+    const client = llmClient(cfg.llm);
+    const validator = await runValidator(models.validator.model ? client : null, models.validator.model, validatorInput, idx, { temperature: 0, seed: cfg.preview.seed, maxTokens: cfg.preview.maxTokens });
     const inferenceCostUsd = Math.round((episodes.reduce((s, e) => s + (e.usage.costUsd ?? 0), 0) + (validator.private.costUsd ?? 0)) * 1e6) / 1e6;
-    return { episodes, validator, inferenceCostUsd };
+    return {
+      episodes,
+      validator,
+      inferenceCostUsd,
+      toolsDigest: tools?.toolsDigest ?? null,
+      transcripts,
+      harnessRuns: runs.map((r, i) => ({ split: splits[i]!.split, exitCode: r.exitCode, timedOut: r.timedOut, records: r.records.length, summaries: r.summaries, stderrTail: r.stderrTail })),
+    };
   } finally {
     fs.rmSync(payloadDir, { recursive: true, force: true });
     fs.rmSync(auditDir, { recursive: true, force: true });
   }
 }
 
-function freshReport(ctx: Ctx, versionId: bigint, terms: VersionTerms, upload: UploadRecord, models: ResolvedModels, episodes: EpisodeResult[], validator: ValidatorResult, inferenceCostUsd: number, payment: Payment | null): Report {
+function freshReport(ctx: Ctx, versionId: bigint, terms: VersionTerms, upload: UploadRecord, models: ResolvedModels, fresh: FreshRun, payment: Payment | null): Report {
   const cfg = ctx.cfg;
+  const { episodes, validator } = fresh;
+  const commitment = protocolCommitment(ctx, fresh.toolsDigest);
+  ctx.blobs.put(commitment.json); // preimage of protocol.harnessDigest, retrievable at /blobs/<digest>
   const reportModels = models.panel.map((m) => {
     const rs = episodes.filter((r) => r.requested === m.requested);
     const outcome = (set: 'purchased' | 'audit') => {
@@ -453,8 +502,8 @@ function freshReport(ctx: Ctx, versionId: bigint, terms: VersionTerms, upload: U
     auditRoot: terms.auditRoot.toLowerCase(),
     protocol: {
       id: PROTOCOL_ID,
-      harnessDigest: harnessDigest(protocolSpec(ctx)),
-      promptDigest: promptDigest(),
+      harnessDigest: commitment.digest,
+      promptDigest: requireHarness(ctx).digest.promptDigest,
       decoding: { temperature: cfg.preview.temperature, seed: cfg.preview.seed, maxTokens: cfg.preview.maxTokens },
       actionBudget: cfg.preview.actionBudget,
       timeBudgetSec: cfg.preview.episodeTimeSec,
@@ -477,7 +526,7 @@ function freshReport(ctx: Ctx, versionId: bigint, terms: VersionTerms, upload: U
     signer: ctx.keys.account.address,
     createdAt: nowIso(),
   };
-  return withOptionalFields(base, { inferenceCostUsd, feePaidUsdc: payment ? payment.fee.toString() : undefined }, '') as unknown as Report;
+  return withOptionalFields(base, { inferenceCostUsd: fresh.inferenceCostUsd, feePaidUsdc: payment ? payment.fee.toString() : undefined }, '') as unknown as Report;
 }
 
 async function runPreview(ctx: Ctx, versionId: bigint): Promise<StoredReport> {
@@ -491,17 +540,18 @@ async function runPreview(ctx: Ctx, versionId: bigint): Promise<StoredReport> {
   let validatorPrivate: unknown;
   let inferenceCostUsd = 0;
   let runModels = models;
+  let fresh: FreshRun | null = null;
   if (hit) {
     report = reportFromEntry(ctx, hit, terms, versionId, payment);
     episodes = hit.episodes;
     validatorPrivate = hit.validatorPrivate;
     runModels = hit.models;
   } else {
-    const fresh = await runFresh(ctx, versionId, terms, upload, models);
+    fresh = await runFresh(ctx, versionId, upload, models);
     episodes = fresh.episodes;
     validatorPrivate = fresh.validator.private;
     inferenceCostUsd = fresh.inferenceCostUsd;
-    report = freshReport(ctx, versionId, terms, upload, models, episodes, fresh.validator, inferenceCostUsd, payment);
+    report = freshReport(ctx, versionId, terms, upload, models, fresh, payment);
   }
 
   const reportJson = serializeReport(report);
@@ -539,18 +589,21 @@ async function runPreview(ctx: Ctx, versionId: bigint): Promise<StoredReport> {
     validator: validatorPrivate,
     inferenceCostUsd,
     feePaidUsdc: stored.feePaidUsdc,
+    toolsDigest: fresh?.toolsDigest ?? null,
+    harnessRuns: fresh?.harnessRuns ?? null,
     durationMs: Date.now() - t0,
   });
+  if (fresh && Object.keys(fresh.transcripts).length) ctx.priv.put('transcripts', reportKey(versionId), fresh.transcripts);
 
   // attach immediately after signing (releases the escrowed preview fee)
   if (ctx.cfg.submitTxs) {
     try {
       if (!(await chain.hasRole('isRunner'))) throw new Error(`signer ${ctx.keys.account.address} is not a registered runner`);
-      const fresh = await chain.getVersion(versionId);
-      if (fresh && fresh.reportHash === ZERO32) {
+      const v = await chain.getVersion(versionId);
+      if (v && v.reportHash === ZERO32) {
         const { hash } = await chain.write('attachReport', [versionId, rh, signature], `attachReport(v${versionId})`);
         stored.attachTx = hash;
-      } else if (!(fresh && fresh.reportHash.toLowerCase() === rh)) stored.attachError = `another report is attached: ${fresh?.reportHash}`;
+      } else if (!(v && v.reportHash.toLowerCase() === rh)) stored.attachError = `another report is attached: ${v?.reportHash}`;
     } catch (e) {
       stored.attachError = errMsg(e).slice(0, 500);
       logger.warn('attachReport failed', { versionId, error: stored.attachError });
@@ -600,7 +653,7 @@ export async function attachStoredReport(ctx: Ctx, versionId: bigint): Promise<S
     const { hash } = await chain.write('attachReport', [versionId, stored.reportHash, stored.signature], `attachReport(v${versionId})`);
     stored.attachTx = hash;
     stored.attachError = null;
-    ctx.priv.put('reports', reportKey(versionId), stored);
+    ctx.priv.put('reports', reportKey(versionId, stored.protocolId), stored);
   }
   return stored;
 }

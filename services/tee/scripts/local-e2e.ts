@@ -44,10 +44,10 @@ import {
   readTar,
   sha256Hex,
   toBase64,
-  unwrapKey,
+  unwrapKeyAsync,
   UPLOAD_KEYWRAP_INFO,
   verifyEnvMarketSignature,
-  wrapKey,
+  wrapKeyAsync,
 } from '@envmarket/shared';
 import { packageEnvironment, type PackageResult } from '../../../agents/src/seller/package.ts';
 
@@ -220,7 +220,7 @@ async function stopTee(): Promise<void> {
 }
 
 // ------------------------------------------------------------------------------ flows
-function uploadBody(pkg: PackageResult, encPubKey: Hex) {
+async function uploadBody(pkg: PackageResult, encPubKey: Hex) {
   const out = pkg.outDir;
   const L = pkg.listing;
   const bundleEnc = new Uint8Array(fs.readFileSync(path.join(out, L.files.bundleCiphertext)));
@@ -232,8 +232,8 @@ function uploadBody(pkg: PackageResult, encPubKey: Hex) {
   return {
     encryptedBundle: toBase64(bundleEnc),
     encryptedAudit: toBase64(auditEnc),
-    wrappedBundleKey: toBase64(wrapKey({ key: keys.bundleKey, recipientPublicKey: encPubKey, wrapperHash: salt, info: UPLOAD_KEYWRAP_INFO })),
-    wrappedAuditKey: toBase64(wrapKey({ key: keys.auditKey, recipientPublicKey: encPubKey, wrapperHash: salt, info: UPLOAD_KEYWRAP_INFO })),
+    wrappedBundleKey: toBase64(await wrapKeyAsync({ key: keys.bundleKey, recipientPublicKey: encPubKey, wrapperHash: salt, info: UPLOAD_KEYWRAP_INFO })),
+    wrappedAuditKey: toBase64(await wrapKeyAsync({ key: keys.auditKey, recipientPublicKey: encPubKey, wrapperHash: salt, info: UPLOAD_KEYWRAP_INFO })),
     encryptedSalts: toBase64(encryptFile(keys.auditKey, salts)),
     publicDocs: {
       'description.json': text(L.files.description),
@@ -333,7 +333,7 @@ async function buyAndReceive(buyer: 'buyer' | 'buyer2', versionId: bigint, pkg: 
   const p = await readM<{ wrapperHash: Hex; wrappedKeyHash: Hex; buyer: Address }>('getPurchase', [pid]);
   check(w.wrapperHash === p.wrapperHash.toLowerCase() && sha256Hex(fromBase64(d.json.wrappedKey)) === p.wrappedKeyHash.toLowerCase(), 'wrapperHash / wrappedKeyHash match the on-chain receipt');
   check(w.wrapper.buyer === p.buyer.toLowerCase() && w.wrapper.buyerEncPubKey === encKeys.publicKey.toLowerCase() && w.wrapper.bundleHash === pkg.bundleHash, 'wrapper binds buyer, encryption key and bundle');
-  const key = unwrapKey({ blob: fromBase64(d.json.wrappedKey), recipientSecretKey: encKeys.secretKey, wrapperHash: w.wrapperHash });
+  const key = await unwrapKeyAsync({ blob: fromBase64(d.json.wrappedKey), recipientSecretKey: encKeys.secretKey, wrapperHash: w.wrapperHash });
   const ct = await httpBytes(d.json.ciphertextUrl);
   check(sha256Hex(ct) === pkg.listing.versionInput.ciphertextHash, 'downloaded ciphertext matches ciphertextHash');
   const tar = decryptFile(key, ct);
@@ -439,11 +439,11 @@ async function main(): Promise<void> {
   const health = (await httpJson('GET', `${TEE}/health`)).json;
   check(health.signer === TEE_SIGNER && health.attestation.kind === 'none-local-dev' && /^0x[0-9a-f]{64}$/.test(health.encPubKey), 'TEE service up in local-dev mode (none-local-dev), exposes its X25519 key');
 
-  const up = await httpJson('POST', `${TEE}/seller/upload`, uploadBody(pkg, health.encPubKey), 900_000);
+  const up = await httpJson('POST', `${TEE}/seller/upload`, await uploadBody(pkg, health.encPubKey), 900_000);
   check(up.status === 200, `seller upload accepted (HTTP ${up.status}${up.status !== 200 ? ' ' + JSON.stringify(up.json).slice(0, 800) : ''})`);
   check(up.json.stored.bundleHash === pkg.bundleHash && up.json.stored.taskRoot === pkg.listing.versionInput.taskRoot && up.json.stored.auditRoot === pkg.listing.versionInput.auditRoot, 'TEE recomputed bundleHash, taskRoot and auditRoot');
   check(up.json.preflight.ok, `preflight: deps install, grader imports, hidden tests collect, reference solutions pass (${up.json.preflight.purchased.map((t: { taskId: string; hiddenTestCount: number }) => `${t.taskId}:${t.hiddenTestCount}`).join(' ')})`);
-  const bad = await httpJson('POST', `${TEE}/seller/upload`, { ...uploadBody(pkg, health.encPubKey), claims: { bundleHash: sha256Hex('wrong') } });
+  const bad = await httpJson('POST', `${TEE}/seller/upload`, { ...(await uploadBody(pkg, health.encPubKey)), claims: { bundleHash: sha256Hex('wrong') } });
   check(bad.status === 400 && bad.json.checks.some((c: { name: string; ok: boolean }) => c.name === 'claim.bundleHash' && !c.ok), 'upload with a false bundleHash claim is rejected');
 
   await send('seller', TOKEN, tokenAbi, 'approve', [MARKET, 3n * COLLATERAL]);
@@ -481,7 +481,7 @@ async function main(): Promise<void> {
   if (process.env.E2E_BROKEN_VARIANT === '1') {
     log('broken variant: T3 has a hidden test that fails on the reference solution');
     const pkg2 = packageEnvironment({ workspace: brokenWorkspace(), outDir: path.join(E2E, 'seller', 'v2'), force: true, price: PRICE, collateral: COLLATERAL, currency: 'tUSDC', decimals: 6 });
-    const up2 = await httpJson('POST', `${TEE}/seller/upload`, uploadBody(pkg2, health.encPubKey), 900_000);
+    const up2 = await httpJson('POST', `${TEE}/seller/upload`, await uploadBody(pkg2, health.encPubKey), 900_000);
     check(up2.status === 200 && up2.json.preflight.ok === false && up2.json.preflight.buildOk !== false, 'broken bundle uploads; preflight reports the failing reference solution');
     const listingId = (await readM<{ listingId: bigint }>('getVersion', [versionId])).listingId;
     const v2 = await listVersion(pkg2, listingId);

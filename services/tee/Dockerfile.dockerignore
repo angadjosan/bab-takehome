@@ -8,6 +8,9 @@
 !services/tee/tsconfig.json
 !services/tee/src
 !services/tee/runtime
+!harness/envmarket_coding
+harness/envmarket_coding/.venv
+harness/envmarket_coding/.ruff_cache
 **/node_modules
 **/__pycache__
 **/.DS_Store

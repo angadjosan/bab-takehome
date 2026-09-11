@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   for (const id of ids) {
     const e = store.get<PreviewCacheEntry>(CACHE_NS, id)!;
     const signer = await entrySigner(e);
-    const sealed = sealEntry(e, recipient);
+    const sealed = await sealEntry(e, recipient);
     const file = path.join(out, `${id}.json`);
     fs.writeFileSync(file, JSON.stringify(sealed, null, 1));
     console.log(`sealed ${e.environmentVersion} key=${e.key} producer=${signer ?? 'UNSIGNED'} run=${e.original.runAt} (${e.original.attestationKind}) -> ${file}`);

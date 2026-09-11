@@ -6,12 +6,11 @@ import { processUpload, UploadError } from './bundle.ts';
 import type { Ctx } from './context.ts';
 import { casePacket, storeEvidence } from './evidence.ts';
 import { errMsg, logger } from './log.ts';
-import { attachStoredReport, disclosures, getStoredReport, HttpError, previewPreconditions, previewState, previewVersion, protocolSpec, quotePreview } from './preview.ts';
+import { attachStoredReport, disclosures, getStoredReport, HttpError, previewPreconditions, previewState, previewVersion, protocolCommitment, protocolSpec, quotePreview } from './preview.ts';
 import { getCacheEntry, importSealed, listCacheKeys, type SealedCacheExport } from './cache.ts';
 import { serveDelivery } from './relay.ts';
 import { normHash } from './store.ts';
 import { RateLimiter } from './util.ts';
-import { AGENT_SYSTEM_PROMPT, AGENT_TOOLS, NUDGE, promptDigest } from './harness.ts';
 import { VALIDATOR_SYSTEM_PROMPT, validatorOutputSchema, validatorPromptHash, VALIDATOR_PROMPT_VERSION } from './validator.ts';
 import type { Watcher } from './watcher.ts';
 import { z } from 'zod';
@@ -105,8 +104,9 @@ export function buildApp(ctx: Ctx, watcher: Watcher | null): Hono {
 
   app.get('/protocol', (c) =>
     c.json({
-      spec: protocolSpec(ctx),
-      agent: { system: AGENT_SYSTEM_PROMPT, nudge: NUDGE, tools: AGENT_TOOLS, promptDigest: promptDigest() },
+      spec: ctx.harness ? protocolSpec(ctx) : null,
+      specCommitment: ctx.harness ? protocolCommitment(ctx, null).digest : null,
+      harness: ctx.harness ? ctx.harness.digest : { error: 'reference harness unavailable' },
       validator: { promptVersion: VALIDATOR_PROMPT_VERSION, system: VALIDATOR_SYSTEM_PROMPT, schema: z.toJSONSchema(validatorOutputSchema), promptHash: validatorPromptHash() },
     }),
   );

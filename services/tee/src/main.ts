@@ -2,6 +2,7 @@
 import * as path from 'node:path';
 import { serve } from '@hono/node-server';
 import { importCacheDir } from './cache.ts';
+import { loadHarness, type HarnessInfo } from './harnessRunner.ts';
 import { Attestor } from './attestation.ts';
 import { Chain_, marketAbi } from './chain.ts';
 import { loadConfig } from './config.ts';
@@ -31,7 +32,15 @@ export async function startService(overrides: Partial<Record<string, string>> = 
   const chain = cfg.market ? new Chain_(cfg.chainId, cfg.rpcUrl, cfg.market, keys.account, marketAbi(cfg.repoRoot)) : null;
   const attestor = new Attestor(process.env, keys.account.address, keys.encPublicKey, keys.source, cfg.chainId, cfg.market);
   await attestor.refresh();
-  const ctx: Ctx = { cfg, keys, blobs, priv, sandbox, chain, attestor, workRoot, cacheRoot };
+  let harness: HarnessInfo | null = null;
+  try {
+    harness = await loadHarness(cfg);
+    if (harness) logger.info('reference harness bound', { harnessId: harness.digest.harnessId, harnessDigest: harness.digest.harnessDigest, verifiers: harness.digest.verifiersVersion, dir: harness.dir });
+    else logger.error('reference harness not found (HARNESS_DIR): previews and PreviewNotReproducible checks are disabled');
+  } catch (e) {
+    logger.error('reference harness unavailable: previews and PreviewNotReproducible checks are disabled', { error: errMsg(e) });
+  }
+  const ctx: Ctx = { cfg, keys, blobs, priv, sandbox, chain, attestor, harness, workRoot, cacheRoot };
   if (cfg.rawEnv.PREVIEW_CACHE_IMPORT_DIR) {
     const n = await importCacheDir(ctx, path.resolve(cfg.rawEnv.PREVIEW_CACHE_IMPORT_DIR));
     logger.info('preview cache import dir processed', { imported: n });

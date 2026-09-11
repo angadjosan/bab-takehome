@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildDeliveryWrapper, generateX25519KeyPair, randomKey, sha256Hex, unwrapKey, wrapKey, bytesToHex } from '@envmarket/shared';
+import { buildDeliveryWrapper, generateX25519KeyPair, randomKey, sha256Hex, unwrapKeyAsync, wrapKeyAsync, bytesToHex } from '@envmarket/shared';
 import { Attestor } from '../src/attestation.ts';
 import { keysFromMnemonic, keysFromPrivateKey } from '../src/keys.ts';
 import { rederiveWrappedKey, type DeliveryRecord } from '../src/relay.ts';
@@ -31,12 +31,12 @@ describe('keys', () => {
     expect(c.encPublicKey).not.toBe(a.encPublicKey);
     expect(c.source).toBe('local-dev-runner-pk');
   });
-  it('sellers can wrap to the TEE key and the TEE unwraps', () => {
+  it('sellers can wrap to the TEE key and the TEE unwraps (HPKE, async)', async () => {
     const k = keysFromMnemonic(TEST_MNEMONIC);
     const key = randomKey();
     const salt = sha256Hex('ciphertext');
-    const blob = wrapKey({ key, recipientPublicKey: k.encPublicKey, wrapperHash: salt, info: 'envmarket.upload.v1' });
-    expect(Buffer.from(unwrapKey({ blob, recipientSecretKey: k.encSecretKey, wrapperHash: salt, info: 'envmarket.upload.v1' }))).toEqual(Buffer.from(key));
+    const blob = await wrapKeyAsync({ key, recipientPublicKey: k.encPublicKey, wrapperHash: salt, info: 'envmarket.upload.v1' });
+    expect(Buffer.from(await unwrapKeyAsync({ blob, recipientSecretKey: k.encSecretKey, wrapperHash: salt, info: 'envmarket.upload.v1' }))).toEqual(Buffer.from(key));
   });
 });
 
@@ -115,7 +115,7 @@ describe('validator output', () => {
 });
 
 describe('delivery', () => {
-  it('wrapped key re-derives byte-for-byte and the buyer can unwrap it', () => {
+  it('wrapped key re-derives byte-for-byte and the buyer can unwrap it', async () => {
     const buyer = generateX25519KeyPair();
     const K = bytesToHex(randomKey());
     const w = buildDeliveryWrapper({
@@ -132,10 +132,10 @@ describe('delivery', () => {
     });
     const eph = generateX25519KeyPair().secretKey;
     const nonce = new Uint8Array(12).fill(3);
-    const blob = wrapKey({ key: K, recipientPublicKey: buyer.publicKey, wrapperHash: w.wrapperHash, ephemeralSecretKey: eph, nonce });
+    const blob = await wrapKeyAsync({ key: K, recipientPublicKey: buyer.publicKey, wrapperHash: w.wrapperHash, ephemeralSecretKey: eph, nonce });
     const rec = { buyerEncPubKey: buyer.publicKey, wrapperHash: w.wrapperHash, ephemeralSecretKey: eph, nonce: bytesToHex(nonce) } as DeliveryRecord;
-    expect(Buffer.from(rederiveWrappedKey(rec, K))).toEqual(Buffer.from(blob));
-    expect(bytesToHex(unwrapKey({ blob, recipientSecretKey: buyer.secretKey, wrapperHash: w.wrapperHash }))).toBe(K);
+    expect(Buffer.from(await rederiveWrappedKey(rec, K))).toEqual(Buffer.from(blob));
+    expect(bytesToHex(await unwrapKeyAsync({ blob, recipientSecretKey: buyer.secretKey, wrapperHash: w.wrapperHash }))).toBe(K);
   });
 });
 

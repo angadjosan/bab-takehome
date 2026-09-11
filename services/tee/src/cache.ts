@@ -25,13 +25,13 @@ import {
   randomKey,
   sha256Hex,
   toBase64,
-  unwrapKey,
-  wrapKey,
+  unwrapKeyAsync,
+  wrapKeyAsync,
   type Report,
 } from '@envmarket/shared';
 import { getAddress, recoverMessageAddress, type Address, type Hex } from 'viem';
 import type { Ctx } from './context.ts';
-import type { EpisodeResult } from './harness.ts';
+import type { EpisodeResult } from './harnessRunner.ts';
 import { errMsg, logger } from './log.ts';
 import type { ResolvedModels } from './models.ts';
 
@@ -139,7 +139,7 @@ export interface SealedCacheExport {
   exportedAt: string;
 }
 
-export function sealEntry(e: PreviewCacheEntry, recipientEncPubKey: Hex): SealedCacheExport {
+export async function sealEntry(e: PreviewCacheEntry, recipientEncPubKey: Hex): Promise<SealedCacheExport> {
   const k = randomKey();
   const ct = encryptFile(k, new TextEncoder().encode(JSON.stringify(e)));
   return {
@@ -150,7 +150,7 @@ export function sealEntry(e: PreviewCacheEntry, recipientEncPubKey: Hex): Sealed
     producer: e.producer,
     recipientEncPubKey: recipientEncPubKey.toLowerCase() as Hex,
     ciphertext: toBase64(ct),
-    wrappedKey: toBase64(wrapKey({ key: k, recipientPublicKey: recipientEncPubKey, wrapperHash: sha256Hex(ct), info: EXPORT_INFO })),
+    wrappedKey: toBase64(await wrapKeyAsync({ key: k, recipientPublicKey: recipientEncPubKey, wrapperHash: sha256Hex(ct), info: EXPORT_INFO })),
     exportedAt: new Date().toISOString(),
   };
 }
@@ -171,7 +171,7 @@ export async function importSealed(ctx: Ctx, sealed: SealedCacheExport): Promise
   if (sealed?.type !== 'envmarket.preview-cache-export.v1') throw new Error('not a preview cache export');
   if (sealed.recipientEncPubKey.toLowerCase() !== ctx.keys.encPublicKey.toLowerCase()) throw new Error('export is sealed to a different service key');
   const ct = fromBase64(sealed.ciphertext);
-  const k = unwrapKey({ blob: fromBase64(sealed.wrappedKey), recipientSecretKey: ctx.keys.encSecretKey, wrapperHash: sha256Hex(ct), info: EXPORT_INFO });
+  const k = await unwrapKeyAsync({ blob: fromBase64(sealed.wrappedKey), recipientSecretKey: ctx.keys.encSecretKey, wrapperHash: sha256Hex(ct), info: EXPORT_INFO });
   const entry = JSON.parse(new TextDecoder().decode(decryptFile(k, ct))) as PreviewCacheEntry;
   if (entry.type !== 'envmarket.preview-cache.v1' || entry.key !== previewCacheKey(entry.keyInput)) throw new Error('cache entry key does not match its key input');
   const signer = await entrySigner(entry);

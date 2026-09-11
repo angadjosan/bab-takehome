@@ -9,10 +9,12 @@
  *   sandbox. A task is "broken" if, in both runs, the grader cannot be imported (build failure),
  *   the task crashes, no hidden test is collected, or the hidden tests fail on the reference solution.
  *
- * PreviewNotReproducible: for the masked tasks, (1) re-grade every original episode's stored final
- *   workspace with the hidden tests — must match exactly (tolerance 0); (2) re-run each model once
- *   per masked task under the report's protocol and compare per-model pass rates on the masked set
- *   with the precommitted tolerance (5 pp). Tasks whose outcome changed are confirmed.
+ * PreviewNotReproducible (both halves run in the reference harness, harness/envmarket_coding):
+ *   (1) `--regrade`: every original episode's stored final workspace on the masked tasks is graded
+ *       again with the hidden tests — score and graded tree digest must match exactly (tolerance 0);
+ *   (2) each model re-runs the masked tasks once under the report's protocol; per-model pass rates
+ *       on the masked set are compared with the precommitted tolerance (5 pp). Tasks whose outcome
+ *       changed (or whose re-grade did not match) are confirmed.
  *
  * Findings: public findings JSON (aggregates only, no audit data) → findingsHash (sha256 of its
  * canonical JSON) stored as a blob; the full private findings (logs, per-episode detail) stay in
@@ -24,14 +26,11 @@ import { canonicalJson, fromBase64, indicesFromMask, sha256Hex, signMechanicalFi
 import type { Hex } from 'viem';
 import { loadUpload, openAudit, openBundle, runTaskChecks, type Check, type TaskCheckRow } from './bundle.ts';
 import { domainOf, requireChain, type Ctx } from './context.ts';
-import { tokenBudgetFor } from './cost.ts';
-import { gradeWorkspace, runEpisode, type EpisodeResult } from './harness.ts';
+import { missingEpisode, regradeHarness, runHarness, toEpisodeResult, type EpisodeResult } from './harnessRunner.ts';
 import { errMsg, logger } from './log.ts';
-import { llmClient } from './models.ts';
-import { PROTOCOL_ID } from './preview.ts';
+import { getRunRecord, PROTOCOL_ID } from './preview.ts';
 import { getDeliveryRecord, rederiveWrappedKey } from './relay.ts';
-import { prepareVenv, scratchDir } from './sandbox.ts';
-import { mapLimit } from './util.ts';
+import { prepareVenv } from './sandbox.ts';
 
 export const GROUND = { BrokenOrHashMismatch: 1, FalseDescription: 2, PreviewNotReproducible: 3 } as const;
 const DS_VOTING = 2;
@@ -82,7 +81,7 @@ async function verifyBroken(ctx: Ctx, disputeId: bigint, d: { taskMask: bigint; 
     const stored = fromBase64(rec.wrappedKey);
     checks.push({ name: 'delivery.wrappedKeyHash == on-chain', ok: sha256Hex(stored) === p.wrappedKeyHash.toLowerCase() });
     checks.push({ name: 'delivery.wrapperHash == on-chain', ok: rec.wrapperHash === p.wrapperHash.toLowerCase() });
-    checks.push({ name: 'delivery.wrappedKey re-derives (K_bundle to buyerEncPubKey)', ok: Buffer.from(rederiveWrappedKey(rec, up.bundleKey)).equals(Buffer.from(stored)) });
+    checks.push({ name: 'delivery.wrappedKey re-derives (K_bundle to buyerEncPubKey)', ok: Buffer.from(await rederiveWrappedKey(rec, up.bundleKey)).equals(Buffer.from(stored)) });
     checks.push({ name: 'delivery.wrapper.bundleHash', ok: JSON.parse(rec.wrapperJson).bundleHash === v.bundleHash.toLowerCase() });
   } else {
     checks.push({ name: 'delivery.record', ok: false, detail: 'delivery was not produced by this relay; key validity cannot be re-derived' });
@@ -127,11 +126,13 @@ async function verifyBroken(ctx: Ctx, disputeId: bigint, d: { taskMask: bigint; 
 
 async function verifyRepro(ctx: Ctx, disputeId: bigint, d: { taskMask: bigint; purchaseId: bigint }) {
   const chain = requireChain(ctx);
+  const h = ctx.harness;
+  if (!h) throw new Error('reference harness unavailable');
   const p = (await chain.getPurchase(d.purchaseId))!;
   const v = (await chain.getVersion(p.versionId))!;
   const up = loadUpload(ctx, v.ciphertextHash);
   if (!up) throw new Error('no upload record for the disputed version');
-  const run = ctx.priv.get<{ episodes: EpisodeResult[]; models: { panel: Array<{ requested: string; resolved: string | null; status: string; provider: string | null }> } }>('runs', `v${p.versionId}-${PROTOCOL_ID}`);
+  const run = getRunRecord<{ episodes: EpisodeResult[]; models: { panel: Array<{ requested: string; resolved: string | null; status: string; provider: string | null }> } }>(ctx, p.versionId);
   if (!run) throw new Error('no private run record for this version (report not produced by this runner)');
   const idx = indicesFromMask(d.taskMask, v.taskCount);
   const masked = idx.map((i) => ({ index: i, taskId: up.taskIds[i]! }));
@@ -140,79 +141,58 @@ async function verifyRepro(ctx: Ctx, disputeId: bigint, d: { taskMask: bigint; p
   try {
     const dep = await prepareVenv(ctx.sandbox, ctx.cacheRoot, up.requirementsLock);
     if (!dep.ok) throw new Error('dependency install failed');
-    const inputs = { venv: dep.venv, payloadDir, taskSourceDir: path.join(payloadDir, 'tasks') };
     // (1) deterministic re-grade of stored final workspaces (tolerance 0)
     const originals = run.episodes.filter((e) => e.set === 'purchased' && masked.some((m) => m.taskId === e.taskId));
-    const regrades = await mapLimit(originals, 2, async (e) => {
-      const scratch = scratchDir(ctx.workRoot, `regrade-${e.jobId}`);
-      try {
-        if (e.status === 'infra_failure' || !e.grade) return { jobId: e.jobId, taskId: e.taskId, requested: e.requested, skipped: true, match: true };
-        const ws = path.join(scratch, 'ws');
-        fs.mkdirSync(ws, { recursive: true });
-        for (const [rel, content] of Object.entries(e.finalFiles)) {
-          fs.mkdirSync(path.dirname(path.join(ws, rel)), { recursive: true });
-          fs.writeFileSync(path.join(ws, rel), content);
-        }
-        const g = await gradeWorkspace(ctx, inputs, e.taskId, ws, e.grade.termination, scratch);
-        return { jobId: e.jobId, taskId: e.taskId, requested: e.requested, skipped: false, match: !!g.summary && g.summary.success === e.solved && g.summary.passed === e.grade.passed, regrade: g.summary, error: g.error };
-      } finally {
-        fs.rmSync(scratch, { recursive: true, force: true });
-      }
+    const gradable = originals.filter((e) => e.status !== 'infra_failure' && e.grade);
+    const regrade = gradable.length ? await regradeHarness(ctx, h, { payloadDir, auditDir, episodes: gradable, venv: dep.venv, label: `d${disputeId}` }) : { rows: [], mismatches: 0, exitCode: 0, stderrTail: '' };
+    const rowFor = (e: EpisodeResult) => regrade.rows.find((r) => r.episodeId === (e.harnessEpisodeId ?? e.jobId));
+    const regrades = gradable.map((e) => {
+      const r = rowFor(e);
+      return { jobId: e.jobId, taskId: e.taskId, requested: e.requested, match: !!r?.match, score: r?.score ?? null, originalScore: e.grade!.score, error: r ? r.error : 'not re-graded by the harness' };
     });
-    // (2) one LLM re-run per (model, masked task) under the same protocol
-    const client = llmClient(ctx.cfg.llm);
-    const reruns = await mapLimit(
-      run.models.panel.flatMap((m, mi) => (m.status === 'run' && m.resolved ? masked.map((t) => ({ m, mi, t })) : [])),
-      ctx.cfg.preview.concurrency,
-      ({ m, mi, t }) =>
-        runEpisode(
-          ctx,
-          client,
-          {
-            jobId: `d${disputeId}.repro.m${mi}.t${t.index}`,
-            requested: m.requested,
-            model: m.resolved!,
-            provider: m.provider ?? ctx.cfg.llm.provider,
-            taskId: t.taskId,
-            set: 'purchased',
-            seed: ctx.cfg.preview.seed,
-            temperature: ctx.cfg.preview.temperature,
-            maxTokens: ctx.cfg.preview.maxTokens,
-            actionBudget: ctx.cfg.preview.actionBudget,
-            timeBudgetSec: ctx.cfg.preview.episodeTimeSec,
-            tokenBudget: tokenBudgetFor(m.resolved!),
-          },
-          inputs,
-        ),
-    );
+
+    // (2) one LLM re-run per (model, masked task) under the same protocol, in the harness
+    const runnable = run.models.panel.map((m, mi) => ({ m, mi })).filter((x) => x.m.status === 'run' && x.m.resolved);
+    const rerun = runnable.length
+      ? await runHarness(ctx, h, { payloadDir, auditDir, split: 'purchased', tasks: masked.map((m) => m.taskId), models: runnable.map((x) => x.m.resolved!), concurrency: ctx.cfg.preview.concurrency, venv: dep.venv, label: `d${disputeId}-repro` })
+      : null;
+    const reruns: EpisodeResult[] = [];
+    for (const x of runnable) {
+      for (const t of masked) {
+        const meta = { jobId: `d${disputeId}.repro.m${x.mi}.t${t.index}`, requested: x.m.requested, provider: x.m.provider ?? ctx.cfg.llm.provider, set: 'purchased' as const };
+        const rec = rerun?.records.find((r) => r.requestedModel === x.m.resolved && r.taskId === t.taskId);
+        reruns.push(rec ? toEpisodeResult(rec, meta) : missingEpisode(meta, x.m.resolved!, t.taskId, `harness reported no record (exit ${rerun?.exitCode})`));
+      }
+    }
+    if (rerun && Object.keys(rerun.transcripts).length) ctx.priv.put('transcripts', `d${disputeId}-repro`, rerun.transcripts);
+
     const confirmed = new Set<number>();
     for (const r of regrades) if (!r.match) confirmed.add(masked.find((m) => m.taskId === r.taskId)!.index);
-    const perModel = run.models.panel
-      .filter((m) => m.status === 'run')
-      .map((m) => {
-        const orig = originals.filter((e) => e.requested === m.requested);
-        const re = reruns.filter((e) => e.requested === m.requested);
-        const n = masked.length;
-        const o = orig.filter((e) => e.solved).length;
-        const rr = re.filter((e) => e.solved).length;
-        const deltaPp = n ? (Math.abs(rr - o) * 100) / n : 0;
-        const exceeded = deltaPp > 5;
-        if (exceeded) {
-          for (const t of masked) {
-            const a = orig.find((e) => e.taskId === t.taskId)?.solved ?? false;
-            const b = re.find((e) => e.taskId === t.taskId)?.solved ?? false;
-            if (a !== b) confirmed.add(t.index);
-          }
+    const perModel = runnable.map(({ m }) => {
+      const orig = originals.filter((e) => e.requested === m.requested);
+      const re = reruns.filter((e) => e.requested === m.requested);
+      const n = masked.length;
+      const o = orig.filter((e) => e.solved).length;
+      const rr = re.filter((e) => e.solved).length;
+      const deltaPp = n ? (Math.abs(rr - o) * 100) / n : 0;
+      const exceeded = deltaPp > 5;
+      if (exceeded) {
+        for (const t of masked) {
+          const a = orig.find((e) => e.taskId === t.taskId)?.solved ?? false;
+          const b = re.find((e) => e.taskId === t.taskId)?.solved ?? false;
+          if (a !== b) confirmed.add(t.index);
         }
-        return { requested: m.requested, resolved: m.resolved, maskedTasks: n, originalSolved: o, rerunSolved: rr, deltaPp, tolerancePp: 5, exceeded, rerunInfraFailures: re.filter((e) => e.status === 'infra_failure').length };
-      });
+      }
+      return { requested: m.requested, resolved: m.resolved, maskedTasks: n, originalSolved: o, rerunSolved: rr, deltaPp, tolerancePp: 5, exceeded, rerunInfraFailures: re.filter((e) => e.status === 'infra_failure').length };
+    });
     return {
       publicPart: {
         protocol: PROTOCOL_ID,
-        deterministicRegrade: { tolerance: 0, episodes: regrades.filter((r) => !r.skipped).length, mismatches: regrades.filter((r) => !r.match).length },
+        harness: h.digest.harnessId,
+        deterministicRegrade: { tolerance: 0, episodes: regrades.length, mismatches: regrades.filter((r) => !r.match).length },
         llmRerun: perModel,
       },
-      privatePart: { regrades, reruns },
+      privatePart: { regrades, regradeStderr: regrade.stderrTail, reruns, rerunExit: rerun?.exitCode ?? null },
       confirmed: [...confirmed].sort((a, b) => a - b),
     };
   } finally {
@@ -263,7 +243,7 @@ async function verifyDispute(ctx: Ctx, disputeId: bigint): Promise<FindingRecord
       rule:
         d.ground === GROUND.BrokenOrHashMismatch
           ? 'confirmed iff payload/key mismatch, dependency build failure, or (in two independent sandboxed runs) grader import failure / task crash / no hidden tests collected / hidden tests failing on the delivered reference solution'
-          : 'confirmed iff a stored final workspace re-grades differently (tolerance 0) or a model\'s re-run pass rate on the masked tasks differs by more than 5 percentage points (outcome-changed tasks confirmed)',
+          : 'confirmed iff a stored final workspace re-grades differently (harness --regrade, tolerance 0) or a model\'s harness re-run pass rate on the masked tasks differs by more than 5 percentage points (outcome-changed tasks confirmed)',
       sandbox: ctx.sandbox.description,
       verifier: ctx.keys.account.address,
       attestation: ctx.attestor.reportBlock(),

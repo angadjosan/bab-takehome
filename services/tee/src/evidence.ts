@@ -24,7 +24,7 @@ import {
   sha256Hex,
   toBase64,
   verifyEvidenceAuth,
-  wrapKey,
+  wrapKeyAsync,
 } from '@envmarket/shared';
 import { getAddress, type Address, type Hex } from 'viem';
 import { loadUpload, openBundle, runTaskChecks } from './bundle.ts';
@@ -230,7 +230,7 @@ export async function casePacket(ctx: Ctx, disputeId: bigint, body: Record<strin
       encrypted: true,
       format: `EMENC1 packet; key ${KEYWRAP_MAGIC}-wrapped (shared wrapKey) to encPubKey with wrapperHash = sha256(challenge message), info envmarket.keywrap.v1`,
       salt,
-      wrappedKey: toBase64(wrapKey({ key: k, recipientPublicKey: encPubKey, wrapperHash: salt })),
+      wrappedKey: toBase64(await wrapKeyAsync({ key: k, recipientPublicKey: encPubKey, wrapperHash: salt })),
       ciphertext: toBase64(encryptFile(k, new TextEncoder().encode(packetJson))),
       packetHash,
       packetSignature,

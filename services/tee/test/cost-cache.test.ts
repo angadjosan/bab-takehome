@@ -88,17 +88,17 @@ describe('preview cache', () => {
     expect((await entrySigner(signed))?.toLowerCase()).toBe(producer.keys.account.address.toLowerCase());
 
     const untrusting = ctxFor(B);
-    await expect(importSealed(untrusting, sealEntry(signed, untrusting.keys.encPublicKey))).rejects.toThrow(/not trusted/);
+    await expect(importSealed(untrusting, await sealEntry(signed, untrusting.keys.encPublicKey))).rejects.toThrow(/not trusted/);
 
     const trusting = ctxFor(B, producer.keys.account.address);
-    const r = await importSealed(trusting, sealEntry(signed, trusting.keys.encPublicKey));
+    const r = await importSealed(trusting, await sealEntry(signed, trusting.keys.encPublicKey));
     expect(r.key).toBe(signed.key);
     expect(r.replaced).toBe(false);
 
-    await expect(importSealed(trusting, sealEntry(signed, producer.keys.encPublicKey))).rejects.toThrow(/different service key/);
+    await expect(importSealed(trusting, await sealEntry(signed, producer.keys.encPublicKey))).rejects.toThrow(/different service key/);
     const tampered = { ...signed, environmentVersion: 'evil' };
-    await expect(importSealed(trusting, sealEntry(tampered, trusting.keys.encPublicKey))).rejects.toThrow(/signature invalid/);
+    await expect(importSealed(trusting, await sealEntry(tampered, trusting.keys.encPublicKey))).rejects.toThrow(/signature invalid/);
     const rekeyed = { ...signed, keyInput: { ...keyInput, bundleHash: sha256Hex('x') } };
-    await expect(importSealed(trusting, sealEntry(rekeyed, trusting.keys.encPublicKey))).rejects.toThrow(/key does not match/);
+    await expect(importSealed(trusting, await sealEntry(rekeyed, trusting.keys.encPublicKey))).rejects.toThrow(/key does not match/);
   });
 });

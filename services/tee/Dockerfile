@@ -29,6 +29,14 @@ COPY services/tee/runtime/requirements.lock /tmp/requirements.lock
 RUN python3 -m pip install --no-cache-dir --disable-pip-version-check --require-hashes --only-binary=:all: -r /tmp/requirements.lock \
  && rm /tmp/requirements.lock
 
+# Reference harness (harness/envmarket_coding, Prime Intellect verifiers 0.3.1): source + its
+# hash-pinned lock, installed into its own venv. The whole directory (minus .venv) is copied so the
+# harness's self-computed harnessDigest matches a local checkout of the same commit.
+COPY harness/envmarket_coding /app/harness/envmarket_coding
+RUN python3 -m venv /opt/harness-venv \
+ && /opt/harness-venv/bin/pip install --no-cache-dir --disable-pip-version-check --require-hashes -r /app/harness/envmarket_coding/requirements.lock \
+ && cd /app/harness/envmarket_coding && /opt/harness-venv/bin/python -m envmarket_coding.run --digest > /dev/null
+
 WORKDIR /app
 COPY packages/shared/package.json packages/shared/package-lock.json packages/shared/
 RUN cd packages/shared && npm ci --omit=dev --no-audit --no-fund
@@ -41,6 +49,8 @@ COPY services/tee/runtime services/tee/runtime
 
 # Non-secret defaults only.
 ENV NODE_ENV=production \
+    HARNESS_DIR=/app/harness/envmarket_coding \
+    HARNESS_PYTHON=/opt/harness-venv/bin/python \
     PORT=8080 \
     HOST=0.0.0.0 \
     DATA_DIR=/data \

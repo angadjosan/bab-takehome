@@ -11,7 +11,7 @@
  * on-chain with the same wrapperHash and wrappedKeyHash.
  */
 import { x25519 } from '@noble/curves/ed25519.js';
-import { buildDeliveryWrapper, bytesToHex, fromBase64, KEYWRAP_INFO, KEYWRAP_MAGIC, randomBytes, sha256Hex, signDeliveryReceipt, toBase64, wrapKey } from '@envmarket/shared';
+import { buildDeliveryWrapper, bytesToHex, fromBase64, KEYWRAP_INFO, KEYWRAP_MAGIC, randomBytes, sha256Hex, signDeliveryReceipt, toBase64, wrapKeyAsync } from '@envmarket/shared';
 import type { Hex } from 'viem';
 import { loadUpload } from './bundle.ts';
 import { domainOf, requireChain, type Ctx } from './context.ts';
@@ -51,8 +51,8 @@ function save(ctx: Ctx, r: DeliveryRecord): void {
 }
 
 /** Re-derive the wrapped key from the stored ephemeral key + nonce (used by the verifier). */
-export function rederiveWrappedKey(rec: DeliveryRecord, bundleKey: Hex): Uint8Array {
-  return wrapKey({
+export function rederiveWrappedKey(rec: DeliveryRecord, bundleKey: Hex): Promise<Uint8Array> {
+  return wrapKeyAsync({
     key: bundleKey,
     recipientPublicKey: rec.buyerEncPubKey,
     wrapperHash: rec.wrapperHash,
@@ -106,7 +106,7 @@ export async function handlePurchased(ctx: Ctx, purchaseId: bigint): Promise<Del
     const nonce = randomBytes(12);
     let blob: Uint8Array;
     try {
-      blob = wrapKey({ key: up.bundleKey, recipientPublicKey: p.buyerEncPubKey, wrapperHash: built.wrapperHash, ephemeralSecretKey: eph, nonce });
+      blob = await wrapKeyAsync({ key: up.bundleKey, recipientPublicKey: p.buyerEncPubKey, wrapperHash: built.wrapperHash, ephemeralSecretKey: eph, nonce });
     } catch (e) {
       logger.error('cannot wrap key to buyerEncPubKey', { purchaseId, error: errMsg(e) });
       return null;

@@ -35,7 +35,7 @@ import {
   saltsFileSchema,
   sha256Hex,
   taskHashOfDir,
-  unwrapKey,
+  unwrapKeyAsync,
   writeTar,
   type SaltsFile,
 } from '@envmarket/shared';
@@ -135,12 +135,12 @@ function b64(v: unknown, name: string): Uint8Array {
 }
 
 /** Try the accepted (salt, info) combinations for an upload key wrap. */
-function unwrapUploadKey(ctx: Ctx, blob: Uint8Array, salts: Hex[]): Uint8Array {
+async function unwrapUploadKey(ctx: Ctx, blob: Uint8Array, salts: Hex[]): Promise<Uint8Array> {
   const errors: string[] = [];
   for (const salt of salts) {
     for (const info of [UPLOAD_KEYWRAP_INFO, KEYWRAP_INFO]) {
       try {
-        const k = unwrapKey({ blob, recipientSecretKey: ctx.keys.encSecretKey, wrapperHash: salt, info });
+        const k = await unwrapKeyAsync({ blob, recipientSecretKey: ctx.keys.encSecretKey, wrapperHash: salt, info });
         if (k.length === 32) return k;
       } catch (e) {
         errors.push(errMsg(e));
@@ -288,14 +288,14 @@ export async function processUpload(ctx: Ctx, body: Record<string, any>): Promis
   let bundleKey: Uint8Array;
   let auditKey: Uint8Array;
   try {
-    bundleKey = unwrapUploadKey(ctx, b64(body.wrappedBundleKey, 'wrappedBundleKey'), [ciphertextHash]);
+    bundleKey = await unwrapUploadKey(ctx, b64(body.wrappedBundleKey, 'wrappedBundleKey'), [ciphertextHash]);
     need('keys.bundle.unwrap', true);
   } catch (e) {
     need('keys.bundle.unwrap', false, errMsg(e));
     throw new UploadError('wrappedBundleKey does not unwrap with the TEE key (salt must be the bundle ciphertext sha256)', checks);
   }
   try {
-    auditKey = unwrapUploadKey(ctx, b64(body.wrappedAuditKey, 'wrappedAuditKey'), [ciphertextHash, auditCiphertextHash]);
+    auditKey = await unwrapUploadKey(ctx, b64(body.wrappedAuditKey, 'wrappedAuditKey'), [ciphertextHash, auditCiphertextHash]);
     need('keys.audit.unwrap', true);
   } catch (e) {
     need('keys.audit.unwrap', false, errMsg(e));
@@ -389,7 +389,7 @@ export async function processUpload(ctx: Ctx, body: Record<string, any>): Promis
     // ---------------------------------------------------------------- salts + roots
     let salts: SaltsFile;
     try {
-      const saltsKey = body.wrappedSaltsKey ? unwrapUploadKey(ctx, b64(body.wrappedSaltsKey, 'wrappedSaltsKey'), [ciphertextHash, auditCiphertextHash]) : auditKey;
+      const saltsKey = body.wrappedSaltsKey ? await unwrapUploadKey(ctx, b64(body.wrappedSaltsKey, 'wrappedSaltsKey'), [ciphertextHash, auditCiphertextHash]) : auditKey;
       salts = saltsFileSchema.parse(JSON.parse(new TextDecoder().decode(decryptFile(saltsKey, b64(body.encryptedSalts, 'encryptedSalts')))));
       need('salts.decrypt', true);
     } catch (e) {

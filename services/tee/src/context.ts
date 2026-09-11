@@ -5,6 +5,7 @@ import { envMarketDomain, type EnvMarketDomain } from '@envmarket/shared';
 import type { Attestor } from './attestation.ts';
 import type { Chain_ } from './chain.ts';
 import type { ServiceConfig } from './config.ts';
+import type { HarnessInfo } from './harnessRunner.ts';
 import type { ServiceKeys } from './keys.ts';
 import type { SandboxInfo } from './sandbox.ts';
 import type { BlobStore, PrivateStore } from './store.ts';
@@ -17,6 +18,8 @@ export interface Ctx {
   sandbox: SandboxInfo;
   chain: Chain_ | null;
   attestor: Attestor;
+  /** reference harness (harness/envmarket_coding); null = previews and repro checks unavailable */
+  harness: HarnessInfo | null;
   workRoot: string;
   cacheRoot: string;
 }
