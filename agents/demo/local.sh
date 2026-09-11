@@ -36,8 +36,15 @@ export FAST_FORWARD=1
 unset MARKET_ADDRESS TOKEN_ADDRESS TOKEN_ADDR MNEMONIC || true
 
 PIDS=()
+# Kill a process and all its descendants (npx/tsx spawn nested node processes; killing only the
+# subshell would leave the TEE and juror services running against the next run's chain).
+killtree() {
+  local pid="$1" child
+  for child in $(pgrep -P "$pid" 2>/dev/null); do killtree "$child"; done
+  kill "$pid" 2>/dev/null || true
+}
 cleanup() {
-  for p in "${PIDS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done
+  for p in "${PIDS[@]:-}"; do [ -n "$p" ] && killtree "$p"; done
   wait 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
@@ -82,6 +89,10 @@ done
 echo "    TEE signer $TEE_SIGNER is runner+relay+verifier"
 
 echo "==> TEE service (local-dev) on :$PORT_TEE (logs $RUN/tee.log)"
+if curl -s -m 2 "$TEE_URL/health" >/dev/null 2>&1; then
+  echo "port $PORT_TEE already serves a TEE (a stale service from an earlier run?): stop it first" >&2
+  exit 1
+fi
 (cd "$ROOT/services/tee" && DATA_DIR="$RUN/tee-data" TEE_MODE=local-dev npx tsx src/main.ts) >"$RUN/tee.log" 2>&1 &
 PIDS+=($!)
 for _ in $(seq 1 60); do curl -sf "$TEE_URL/health" >/dev/null 2>&1 && break; sleep 1; done
