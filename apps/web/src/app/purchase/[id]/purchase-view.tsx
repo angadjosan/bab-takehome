@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { parseEventLogs, type Hex } from "viem";
 import { useAccount, useReadContract } from "wagmi";
 import { DeploymentGate } from "@/components/gate";
 import { EventList } from "@/components/events";
-import { useTokenInfo } from "@/components/providers";
+import { useTokenInfo, useWalletMode } from "@/components/providers";
 import { RequireWallet, TxStatus, useTx } from "@/components/tx";
+import { useApproveAndCall } from "@/components/tx-sequence";
 import { AddressLink, Card, Countdown, Empty, HashValue, Notice, Skeleton, Spinner, Stars, Verified, cx, useNow, IconCheck, IconX, TxLink } from "@/components/ui";
 import { marketAbi, tokenAbi } from "@/lib/abi";
 import { deployment, CHAIN_ID } from "@/lib/config";
@@ -16,6 +17,7 @@ import { decryptBundle, encKeyFromSecret, eqHash, listTar, sha256Hex, unwrapBund
 import { describe, useDoc } from "@/lib/docs";
 import { fmtTime, fmtUsdc, fmtWindow, maskToIndexes, pct, popcount } from "@/lib/format";
 import { downloadBytes, useEncKeys } from "@/lib/keys";
+import { useWalletEncKey } from "@/lib/enc-derive";
 import {
   GROUND_HELP,
   GROUND_LABEL,
@@ -301,7 +303,7 @@ function NextActions({ p, v, isBuyer, tar }: { p: Purchase; v: Version; isBuyer:
             </p>
             <RequireWallet why="Connect any wallet to finalize. It is permissionless.">
               <button className="btn btn-primary mt-3" disabled={finalize.busy} onClick={() => finalize.run("Finalize", { address: m, abi: marketAbi, functionName: "finalize", args: [p.id] })}>
-                Finalize purchase
+                Release payment to the seller
               </button>
             </RequireWallet>
             <TxStatus state={finalize.state} />
@@ -375,8 +377,16 @@ function DeliveryCard({ p, v, isBuyer, onTar }: { p: Purchase; v: Version; isBuy
   );
 }
 
+/**
+ * Delivered purchase → decrypted environment, with no key handling for the buyer: the decryption key
+ * is the one derived from the buyer's wallet at purchase time (cached in this browser, or re-derived
+ * with one signature). Once it is available, download + verify + decrypt runs automatically and the
+ * page offers one "Download environment" button; the individual checks stay available underneath.
+ */
 function Decrypt({ p, v, onTar }: { p: Purchase; v: Version; onTar: (t: TarEntry[]) => void }) {
   const { find, add } = useEncKeys();
+  const { devTools } = useWalletMode();
+  const { derive } = useWalletEncKey();
   const key = find(p.buyerEncPubKey);
   const [checks, setChecks] = useState<Check[]>([]);
   const [running, setRunning] = useState(false);
@@ -384,6 +394,26 @@ function Decrypt({ p, v, onTar }: { p: Purchase; v: Version; onTar: (t: TarEntry
   const [entries, setEntries] = useState<TarEntry[] | null>(null);
   const [imp, setImp] = useState("");
   const [impErr, setImpErr] = useState<string | null>(null);
+  const [unlockErr, setUnlockErr] = useState<string | null>(null);
+  const autoRan = useRef(false);
+
+  useEffect(() => {
+    if (!key || autoRan.current) return;
+    autoRan.current = true;
+    void run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- decrypt once, when this purchase's key becomes available
+  }, [key]);
+
+  async function unlock() {
+    setUnlockErr(null);
+    try {
+      const k = await derive({ fresh: true });
+      if (!eqHash(k.publicKey, p.buyerEncPubKey))
+        setUnlockErr("This wallet’s key doesn’t match the one this purchase was made for. Log in with the wallet that bought it, or open this page in the browser you bought it from.");
+    } catch (e) {
+      setUnlockErr((e as Error).message.split("\n")[0]);
+    }
+  }
 
   async function run() {
     if (!key) return;
@@ -446,67 +476,67 @@ function Decrypt({ p, v, onTar }: { p: Purchase; v: Version; onTar: (t: TarEntry
   const tasks = entries ? [...new Set(entries.filter((e) => e.path.startsWith("tasks/")).map((e) => e.path.split("/")[1]).filter(Boolean))] : [];
   const hasAudit = entries?.some((e) => /audit/i.test(e.path));
 
+  const failed = checks.some((c) => !c.ok);
+  const passed = checks.filter((c) => c.ok).length;
+
   return (
     <div>
-      <h3 className="text-sm font-semibold">Download & decrypt</h3>
-      <p className="mt-1 text-xs text-muted">Everything below runs in your browser. The key never leaves this page; the service only hands out the buyer-encrypted key blob.</p>
+      <h3 className="text-sm font-semibold">Your environment</h3>
       {!key ? (
         <div className="mt-3 space-y-2">
-          <Notice tone="warn" title="Your secret key for this purchase isn’t in this browser">
-            The purchase was made for public key <span className="break-all font-mono">{p.buyerEncPubKey}</span>. Paste the matching secret key (from your downloaded key file) to decrypt.
-          </Notice>
-          <div className="flex gap-2">
-            <input className="input font-mono text-xs" placeholder="0x… secretKey" value={imp} onChange={(e) => setImp(e.target.value)} />
-            <button
-              className="btn btn-sm"
-              onClick={() => {
-                try {
-                  const k = encKeyFromSecret(imp);
-                  if (!eqHash(k.publicKey, p.buyerEncPubKey)) throw new Error("That secret key does not match this purchase’s public key.");
-                  add(k);
-                  setImpErr(null);
-                } catch (e) {
-                  setImpErr((e as Error).message);
-                }
-              }}
-            >
-              Import
-            </button>
-          </div>
-          {impErr && <p className="text-xs text-bad">{impErr}</p>}
-        </div>
-      ) : (
-        <button className="btn btn-primary mt-3" disabled={running} onClick={run}>
-          {running ? <Spinner /> : null} {checks.length ? "Run again" : "Download, verify & decrypt"}
-        </button>
-      )}
-      {checks.length > 0 && (
-        <ul className="mt-4 space-y-2">
-          {checks.map((c, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm">
-              <span className={cx("mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full", c.ok ? "bg-ok text-white" : "bg-bad text-white")}>
-                {c.ok ? <IconCheck className="h-3 w-3" /> : <IconX className="h-3 w-3" />}
-              </span>
-              <div className="min-w-0">
-                <div>{c.label}</div>
-                {c.detail && <div className="text-xs text-muted">{c.detail}</div>}
+          <p className="text-sm text-muted">Unlock the download with the wallet you bought with. It takes one signature; nothing is sent on-chain.</p>
+          <button className="btn btn-primary btn-sm" onClick={unlock}>
+            Unlock with your wallet
+          </button>
+          {unlockErr && <p className="text-xs text-bad">{unlockErr}</p>}
+          {devTools && (
+            <details className="rounded-lg border border-dashed border-line px-3 py-2 text-xs">
+              <summary className="cursor-pointer text-muted">Dev tools: import a secret key</summary>
+              <div className="mt-2 flex gap-2">
+                <input className="input font-mono text-xs" placeholder="0x… secretKey" value={imp} onChange={(e) => setImp(e.target.value)} />
+                <button
+                  className="btn btn-sm"
+                  onClick={() => {
+                    try {
+                      const k = encKeyFromSecret(imp);
+                      if (!eqHash(k.publicKey, p.buyerEncPubKey)) throw new Error("That secret key does not match this purchase’s public key.");
+                      add(k);
+                      setImpErr(null);
+                    } catch (e) {
+                      setImpErr((e as Error).message);
+                    }
+                  }}
+                >
+                  Import
+                </button>
               </div>
-            </li>
-          ))}
-        </ul>
-      )}
-      {plain && entries && (
-        <div className="mt-4 rounded-lg border border-line p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm">
-              <span className="font-semibold">Canonical bundle</span> · {entries.filter((e) => e.type === "file").length} files · {(plain.length / 1024).toFixed(1)} KiB · {tasks.length} task folder(s)
-              {hasAudit ? " · contains audit paths!" : " · no audit tasks (as committed)"}
-            </div>
-            <button className="btn btn-sm" onClick={() => downloadBytes(plain, `envmarket-purchase-${p.id}-${v.bundleHash.slice(2, 10)}.tar`, "application/x-tar")}>
-              Save .tar
-            </button>
-          </div>
-          <details className="mt-2">
+              {impErr && <p className="mt-1 text-bad">{impErr}</p>}
+            </details>
+          )}
+        </div>
+      ) : running ? (
+        <p className="mt-3 flex items-center gap-2 text-sm text-muted">
+          <Spinner className="h-3.5 w-3.5" /> Fetching and decrypting in your browser…
+        </p>
+      ) : failed ? (
+        <div className="mt-3 space-y-2">
+          <Notice tone="bad" title="The download could not be completed or verified">
+            See the failed check below. If the delivered file doesn’t match what was committed, you can dispute under “Doesn’t match hash / broken”.
+          </Notice>
+          <button className="btn btn-sm" onClick={run}>
+            Try again
+          </button>
+        </div>
+      ) : plain && entries ? (
+        <div className="mt-3 space-y-2">
+          <button className="btn btn-primary" onClick={() => downloadBytes(plain, `envmarket-purchase-${p.id}-${v.bundleHash.slice(2, 10)}.tar`, "application/x-tar")}>
+            Download environment
+          </button>
+          <p className="text-xs text-muted">
+            {entries.filter((e) => e.type === "file").length} files · {(plain.length / 1024).toFixed(1)} KiB · {tasks.length} tasks
+            {hasAudit ? " · contains audit paths!" : ""}. Decrypted in your browser and matched to the listing’s on-chain commitments.
+          </p>
+          <details>
             <summary className="cursor-pointer text-xs text-accent">Show file list</summary>
             <ul className="mt-2 max-h-64 overflow-auto font-mono text-[11px] text-muted">
               {entries.map((e) => (
@@ -517,6 +547,26 @@ function Decrypt({ p, v, onTar }: { p: Purchase; v: Version; onTar: (t: TarEntry
             </ul>
           </details>
         </div>
+      ) : null}
+      {checks.length > 0 && (
+        <details className="mt-3" open={failed}>
+          <summary className="cursor-pointer text-xs text-accent">
+            Verification: {passed}/{checks.length} checks passed
+          </summary>
+          <ul className="mt-2 space-y-2">
+            {checks.map((c, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm">
+                <span className={cx("mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full", c.ok ? "bg-ok text-white" : "bg-bad text-white")}>
+                  {c.ok ? <IconCheck className="h-3 w-3" /> : <IconX className="h-3 w-3" />}
+                </span>
+                <div className="min-w-0">
+                  <div>{c.label}</div>
+                  {c.detail && <div className="text-xs text-muted">{c.detail}</div>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );
@@ -535,8 +585,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
   const [claimSel, setClaimSel] = useState<string[]>([]);
   const [stage, setStage] = useState<string | null>(null);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
-  const approve = useTx();
-  const open = useTx();
+  const open = useApproveAndCall();
   const desc = useDoc(v.uri, v.descriptionHash);
   const claims = describe(desc.data?.json).claims;
   const m = deployment!.market;
@@ -548,9 +597,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
   const evidenceText = ground === 2 && claimSel.length ? `Disputed claims: ${claimSel.join(", ")}\n\n${evidence.trim()}` : evidence.trim();
   const evidenceBytes = file ? file.bytes : evidenceText ? utf8(evidenceText) : null;
   const evidenceHash = evidenceBytes ? sha256Hex(evidenceBytes) : (`0x${"0".repeat(64)}` as Hex);
-  const allowance = useReadContract({ address: deployment!.token, abi: tokenAbi, functionName: "allowance", args: [address!, m], query: { enabled: !!address, refetchInterval: 8_000 } });
   const bal = useReadContract({ address: deployment!.token, abi: tokenAbi, functionName: "balanceOf", args: [address!], query: { enabled: !!address, refetchInterval: 8_000 } });
-  const approved = ((allowance.data as bigint | undefined) ?? 0n) >= q.bond;
   const enough = ((bal.data as bigint | undefined) ?? 0n) >= q.bond;
   const taskIds = tar ? [...new Set(tar.filter((e) => e.path.startsWith("tasks/")).map((e) => e.path.split("/")[1]).filter(Boolean))].sort() : [];
   const ready = ground > 0 && selected > 0 && !!evidenceBytes && (ground !== 2 || claimSel.length > 0 || !!file || /\bC[1-9][0-9]*\b/.test(evidenceText));
@@ -569,7 +616,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
       return;
     }
     setStage(`The TEE stored your evidence (sha256 ${hash.slice(0, 14)}…). Opening the dispute on-chain…`);
-    const r = await open.run("Open dispute", { address: m, abi: marketAbi, functionName: "openDispute", args: [p.id, ground, mask, hash] });
+    const r = await open.run("Open dispute", q.bond, { address: m, abi: marketAbi, functionName: "openDispute", args: [p.id, ground, mask, hash] });
     setStage(null);
     if (!r) return;
     const logs = parseEventLogs({ abi: marketAbi, logs: r.logs, eventName: "DisputeOpened" as never });
@@ -704,19 +751,11 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {!approved ? (
-          <button className="btn" disabled={!ready || !enough || approve.busy} onClick={() => approve.run("Approve bond", { address: deployment!.token, abi: tokenAbi, functionName: "approve", args: [m, q.bond] })}>
-            Approve {fmtUsdc(q.bond)} bond
-          </button>
-        ) : (
-          <span className="badge badge-ok">bond approved</span>
-        )}
-        <button className="btn btn-primary" disabled={!ready || !approved || open.busy} onClick={submit}>
-          Open dispute
+        <button className="btn btn-primary" disabled={!ready || !enough || open.busy} onClick={submit}>
+          Report a problem{selected > 0 ? ` · ${fmtUsdc(q.bond)} bond` : ""}
         </button>
         {!enough && selected > 0 && <span className="text-xs text-warn">You need {fmtUsdc(q.bond)} {token.symbol} for the bond.</span>}
       </div>
-      <TxStatus state={approve.state} />
       <TxStatus state={open.state} />
       {stage && (
         <p className="flex items-center gap-2 text-xs text-muted">

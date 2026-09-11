@@ -4,13 +4,14 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { getAddress, isAddress, type Address } from "viem";
-import { useAccount, useReadContract } from "wagmi";
+import { useAccount } from "wagmi";
 import { DeploymentGate } from "@/components/gate";
 import { EventList } from "@/components/events";
 import { DepositAction, WithdrawAction } from "@/components/token-action";
 import { RequireWallet, TxStatus, useTx } from "@/components/tx";
+import { useApproveAndCall } from "@/components/tx-sequence";
 import { AddressLink, Card, Countdown, Empty, Notice, Skeleton, Stars, Stat, cx, useNow } from "@/components/ui";
-import { marketAbi, tokenAbi } from "@/lib/abi";
+import { marketAbi } from "@/lib/abi";
 import { deployment } from "@/lib/config";
 import { eqHash } from "@/lib/crypto";
 import { fmtTime, fmtUsdc } from "@/lib/format";
@@ -265,8 +266,8 @@ function KeeperRow({ id }: { id: bigint }) {
       </span>
       <span className="ml-auto">
         {canFinalize && (
-          <button className="btn btn-primary btn-sm" disabled={tx.busy} onClick={() => tx.run("Finalize", { address: deployment!.market, abi: marketAbi, functionName: "finalize", args: [p.id] })}>
-            Finalize
+          <button className="btn btn-primary btn-sm" disabled={tx.busy} onClick={() => tx.run("Release payment", { address: deployment!.market, abi: marketAbi, functionName: "finalize", args: [p.id] })}>
+            Release payment
           </button>
         )}
         {canRefund && (
@@ -319,18 +320,14 @@ function VersionRow({ id, isMe }: { id: bigint; isMe: boolean }) {
 }
 
 function PreviewActions({ versionId, paid, reclaimable, deadline }: { versionId: bigint; paid: boolean; reclaimable: boolean; deadline: number }) {
-  const { address } = useAccount();
   const health = useHealth();
   const [quote, setQuote] = useState<PreviewQuote | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [runMsg, setRunMsg] = useState<string | null>(null);
-  const approve = useTx();
-  const request = useTx();
+  const request = useApproveAndCall();
   const reclaim = useTx();
   const m = deployment!.market;
   const fee = quote ? BigInt(quote.quote.feeUsdc) : null;
-  const allowance = useReadContract({ address: deployment!.token, abi: tokenAbi, functionName: "allowance", args: [address!, m], query: { enabled: !!address && fee !== null, refetchInterval: 5_000 } });
-  const approved = fee !== null && ((allowance.data as bigint | undefined) ?? 0n) >= fee;
   const now = useNow();
   const quoteTrusted = !!quote && quote.hashOk && !!quote.signer && eqHash(quote.signer, health.data?.signer) && now < quote.quote.validUntil;
 
@@ -370,21 +367,14 @@ function PreviewActions({ versionId, paid, reclaimable, deadline }: { versionId:
                     fee <span className="font-semibold">{fmtUsdc(fee)}</span> (est. ${quote.quote.estimatedCostUsd} for {quote.quote.episodes} episodes{quote.quote.cached ? ", cached run" : ""}) · valid until {fmtTime(quote.quote.validUntil)}
                   </span>
                   <span className={cx("badge", quoteTrusted ? "badge-ok" : "badge-bad")}>{quoteTrusted ? "signed by the TEE" : "quote not verified"}</span>
-                  {!approved ? (
-                    <button className="btn btn-sm" disabled={!quoteTrusted || approve.busy} onClick={() => approve.run("Approve fee", { address: deployment!.token, abi: tokenAbi, functionName: "approve", args: [m, fee] })}>
-                      Approve {fmtUsdc(fee)}
-                    </button>
-                  ) : (
-                    <span className="badge badge-ok">approved</span>
-                  )}
                   <button
                     className="btn btn-primary btn-sm"
-                    disabled={!quoteTrusted || !approved || request.busy}
+                    disabled={!quoteTrusted || request.busy}
                     onClick={async () => {
-                      if (await request.run("Request preview", { address: m, abi: marketAbi, functionName: "requestPreview", args: [versionId, fee, quote.quoteHash] })) await runPreview();
+                      if (await request.run("Pay preview fee", fee, { address: m, abi: marketAbi, functionName: "requestPreview", args: [versionId, fee, quote.quoteHash] })) await runPreview();
                     }}
                   >
-                    Pay & request preview
+                    Pay {fmtUsdc(fee)} & start preview
                   </button>
                 </>
               )}
@@ -409,7 +399,6 @@ function PreviewActions({ versionId, paid, reclaimable, deadline }: { versionId:
         )}
         {runMsg && <p className="text-ok">{runMsg}</p>}
         {err && <p className="break-words text-bad">{err}</p>}
-        <TxStatus state={approve.state} />
         <TxStatus state={request.state} />
         <TxStatus state={reclaim.state} />
       </div>

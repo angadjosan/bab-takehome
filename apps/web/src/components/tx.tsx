@@ -3,10 +3,10 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useContext, useState, type ReactNode } from "react";
 import { BaseError, ContractFunctionRevertedError, encodeFunctionData, type Abi, type Address, type Hex, type TransactionReceipt } from "viem";
-import { useAccount, useChainId, useConnect, useSwitchChain, useWriteContract } from "wagmi";
+import { useAccount, useBalance, useChainId, useConnect, useSwitchChain, useWriteContract } from "wagmi";
 import { BURNER_CONNECTOR_ID } from "@/lib/burner";
 import { publicClient } from "@/lib/client";
-import { CHAIN_ID, CHAIN_NAME } from "@/lib/config";
+import { CHAIN_ID, CHAIN_NAME, GAS_FAUCET_URL } from "@/lib/config";
 import { SponsorCtx } from "@/lib/sponsor";
 import { BurnerForm, BurnerSwitcher } from "./burner-ui";
 import { PrivyLoginPrompt } from "./privy-login";
@@ -103,9 +103,13 @@ export function TxStatus({ state }: { state: TxState }) {
 /** Renders children only when a wallet is connected to the right chain; otherwise a login/connect prompt. */
 export function RequireWallet({ children, why }: { children: ReactNode; why?: string }) {
   const { mode } = useWalletMode();
-  const { isConnected } = useAccount();
+  const { isConnected, address } = useAccount();
   const chainId = useChainId();
   const { switchChain, isPending: switching } = useSwitchChain();
+  const sponsor = useContext(SponsorCtx);
+  const eth = useBalance({ address, query: { enabled: !!address, refetchInterval: 15_000 } });
+  const sponsored = !!sponsor && !!address && sponsor.canSponsor(address);
+  const noGas = !sponsored && eth.data !== undefined && eth.data.value === 0n;
   if (!isConnected) return mode === "privy" ? <PrivyLoginPrompt why={why} /> : <ConnectPrompt why={why} />;
   if (chainId !== CHAIN_ID) {
     return (
@@ -117,7 +121,24 @@ export function RequireWallet({ children, why }: { children: ReactNode; why?: st
       </div>
     );
   }
-  return <>{children}</>;
+  return (
+    <>
+      {noGas && (
+        <p className="mb-2 text-xs text-warn">
+          This wallet has no ETH for network fees.{" "}
+          {GAS_FAUCET_URL ? (
+            <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="link">
+              Get a little Base Sepolia ETH
+            </a>
+          ) : (
+            "Add a little ETH"
+          )}{" "}
+          first.
+        </p>
+      )}
+      {children}
+    </>
+  );
 }
 
 /** wagmi mode (dev tools, or Privy not configured): browser wallets, plus burner keys with dev tools on. */
