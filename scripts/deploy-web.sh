@@ -50,20 +50,20 @@ say "link $WEB to Vercel project $PROJECT"
 if [[ -n "${VERCEL_LINK_DIR:-}" ]]; then
   cp -R "$VERCEL_LINK_DIR" "$WEB/.vercel"
 else
-  (cd "$WEB" && vercel link --yes --project "$PROJECT" "${scope[@]}" >/dev/null)
+  (cd "$WEB" && vercel link --yes --project "$PROJECT" ${scope[@]+"${scope[@]}"} >/dev/null)
 fi
 rm -f "$WEB/.env.local" "$WEB/.env" # `vercel link` may write a pulled env file (with a token); never upload it
 grep -q "\"projectName\":\"$PROJECT\"" "$WEB/.vercel/project.json" || die "linked to the wrong project: $(cat "$WEB/.vercel/project.json")"
 
 say "check production env vars"
-envs="$(cd "$WEB" && vercel env ls production "${scope[@]}" 2>/dev/null)"
+envs="$(cd "$WEB" && vercel env ls production ${scope[@]+"${scope[@]}"} 2>/dev/null)"
 missing=()
 for n in "${REQUIRED_ENV[@]}"; do grep -qE "^ *$n " <<<"$envs" || missing+=("$n"); done
 ((${#missing[@]} == 0)) || die "missing production env var(s): ${missing[*]} (vercel env add <NAME> production)"
 for n in "${OPTIONAL_ENV[@]}"; do grep -qE "^ *$n " <<<"$envs" && echo "set: $n" || echo "unset (optional): $n"; done
 
 say "deploy to production"
-DEPLOY_URL="$(cd "$WEB" && vercel deploy --prod --yes "${scope[@]}" 2>/dev/null | grep -Eo 'https://[^ ]+\.vercel\.app' | tail -1)"
+DEPLOY_URL="$(cd "$WEB" && vercel deploy --prod --yes ${scope[@]+"${scope[@]}"} 2>/dev/null | grep -Eo 'https://[^ ]+\.vercel\.app' | tail -1)"
 [[ -n "$DEPLOY_URL" ]] || die "vercel deploy did not print a deployment URL"
 echo "deployment: $DEPLOY_URL"
 PROD_URL="https://$PROJECT.vercel.app"
