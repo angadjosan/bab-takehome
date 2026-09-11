@@ -70,6 +70,18 @@ Privy dashboard settings (https://dashboard.privy.io):
    *Enable test accounts*. Log in with the listed `test-XXXX@privy.io` email and its fixed `XXXXXX`
    OTP exactly (development apps only).
 
+### Buyer decryption key
+
+Buyers never generate or back up a key. At the first purchase the wallet signs the fixed message
+`EnvMarket encryption key v1 for <address> on <chainId>`; the X25519 secret is HKDF-SHA256 of that
+signature and its public half goes into `buy()`. Standard secp256k1 signing (viem / noble, as used by
+local accounts and browser wallets) uses RFC 6979 deterministic nonces, so signing again on any device
+re-derives the same key (checked: two signatures and derived keys are identical). Privy's docs don't
+state the embedded wallet's nonce scheme, so the derived key is also cached in this browser; the
+purchase page uses the cached key if present and otherwise asks for one signature, and says so if a
+re-derived key doesn't match the purchase. Verified end to end on anvil: burner buy → relay delivery
+→ automatic decryption → "Download environment", sha256 of the file = on-chain `bundleHash`.
+
 ### Burner keys (dev tool only)
 
 On the local anvil chain, or with `?dev=1` in the URL (remembered for the tab, `?dev=0` turns it off),
@@ -131,7 +143,9 @@ It prints the burner keys to use by **.env variable name** (never the keys): `SE
 `BUYER2_PK`, `JUROR1_PK`…`JUROR3_PK`, and `DEPLOYER_PK` for an observer/keeper. Re-running it is safe:
 the previous run's processes (recorded in `.data/local-stack/pids` by pid and start time) are stopped,
 ports held by anything else are refused, and each run starts a fresh chain. Logs:
-`.data/local-stack/logs/{anvil,deploy,tee,seller,jurors,web}.log`; juror rationale hashes appear there as
-`published rationale … sha256 0x…` (paste them into the dispute page). Windows are the demo values
+`.data/local-stack/logs/{anvil,deploy,tee,seller,jurors,web}.log`. Jurors publish their screened
+rationales to the TEE's `POST /rationales/:disputeId` (juror-signed, accepted only after the juror's
+reveal is on-chain); the dispute page lists them automatically from `GET /rationales/:disputeId` and
+re-checks each against the chain. Windows are the demo values
 (challenge 300 s, delivery 600 s); to skip ahead on anvil:
 `cast rpc evm_increaseTime 301 --rpc-url http://127.0.0.1:8546 && cast rpc evm_mine --rpc-url http://127.0.0.1:8546`.

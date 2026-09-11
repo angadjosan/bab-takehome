@@ -36,7 +36,8 @@ import { fmtTime, fmtUsdc, maskToIndexes, pct } from "@/lib/format";
 import { eventsForDispute, isMechanical, isZeroHash, readOptional, useBlockNumber, useDispute, useMarketEvents, usePurchase, type Dispute, type Purchase, type Seat } from "@/lib/market";
 import type { MarketEvent } from "@/lib/client";
 import { eqHash, sha256Hex } from "@/lib/crypto";
-import { fetchBlob, fetchRationale, getFindings, loadLocalEvidence, requestCasePacket, type CasePacket, type RationaleDoc } from "@/lib/tee";
+import { fetchBlob, getFindings, loadLocalEvidence, requestCasePacket, type CasePacket, type RationaleDoc } from "@/lib/tee";
+import { listRationales, type ListedRationale } from "@/lib/rationales";
 import { ClaimBanner, StateBadge } from "../../purchase/[id]/purchase-view";
 
 function parseId(id: string): bigint | null {
@@ -889,83 +890,37 @@ function SelectionRow({ sel }: { sel: MarketEvent }) {
 
 /* ------------------------------ published rationales ------------------------------ */
 
-const ratKey = (id: bigint) => `envmarket.rationales.${CHAIN_ID}.${deployment?.market.toLowerCase()}.${id}`;
-
 /**
- * Juror agents publish a screened rationale (envmarket.juror-rationale.v1) to the TEE's
- * content-addressed blob store after their own reveal, and log its sha256. There is no on-chain
- * pointer, so a rationale is looked up by that hash and checked against the chain here: same
- * chain/market/dispute, a seat in that round, the revealed vote and the seat's commitment.
+ * Juror agents publish a screened explanation (envmarket.juror-rationale.v1) to the TEE after their
+ * own reveal; the TEE indexes it per dispute and serves it only once that reveal is on-chain. Each
+ * one is re-checked here against the chain: hash, chain/market/dispute, seat, revealed vote and the
+ * seat's commitment.
  */
 function RationalesSection({ d }: { d: Dispute }) {
-  const [hashes, setHashes] = useState<string[]>([]);
-  const [input, setInput] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  const inputId = useId();
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- remembered hashes live in localStorage
-  useEffect(() => setHashes(JSON.parse((typeof window !== "undefined" && window.localStorage.getItem(ratKey(d.id))) || "[]")), [d.id]);
   const anyRevealed = d.seats.some((s) => s.revealed);
-  if (!anyRevealed && !hashes.length) return null;
-  function add() {
-    const m = input.match(/(?:0x)?([0-9a-fA-F]{64})/);
-    if (!m) {
-      setErr("Paste the explanation’s sha256 (64 hex characters) or its /blobs/ URL.");
-      return;
-    }
-    const h = `0x${m[1].toLowerCase()}`;
-    const next = [...new Set([...hashes, h])];
-    setHashes(next);
-    window.localStorage.setItem(ratKey(d.id), JSON.stringify(next));
-    setInput("");
-    setErr(null);
-  }
+  const q = useQuery({ queryKey: ["rationales", d.id.toString()], queryFn: () => listRationales(d.id), enabled: anyRevealed, refetchInterval: d.status === 3 ? 30_000 : 10_000, retry: 1 });
+  if (!anyRevealed) return null;
   return (
-    <DetailSection title="Juror explanations" hint="Each juror agent publishes a screened explanation after its own reveal, never before, so it can’t leak a hidden vote. There is no on-chain pointer yet: the agent logs the file’s sha256 when it uploads.">
-      <div className="space-y-3">
-        {hashes.map((h) => (
-          <RationaleItem key={h} hash={h as Hex} d={d} />
-        ))}
-        <form
-          className="space-y-1.5"
-          onSubmit={(e) => {
-            e.preventDefault();
-            add();
-          }}
-        >
-          <label htmlFor={inputId} className="block text-xs text-muted">
-            Explanation sha256 or blob URL, from the juror’s log
-          </label>
-          <div className="flex gap-2">
-            <input
-              id={inputId}
-              name="rationale-hash"
-              autoComplete="off"
-              spellCheck={false}
-              className="input font-mono"
-              placeholder="0x… or https://…/blobs/…"
-              value={input}
-              aria-invalid={!!err}
-              onChange={(e) => setInput(e.target.value)}
-            />
-            <button type="submit" className="btn shrink-0" disabled={!input}>
-              Check and show
-            </button>
-          </div>
-          {err && (
-            <p role="alert" className="text-xs text-bad">
-              {err}
-            </p>
-          )}
-        </form>
-      </div>
+    <DetailSection title="Juror explanations" hint="Each juror publishes a screened explanation after its own vote is revealed, never before, so it can’t leak a hidden vote.">
+      {q.isLoading ? (
+        <Skeleton className="h-16" />
+      ) : q.error ? (
+        <Notice tone="bad">Couldn’t load the explanations: {(q.error as Error).message}</Notice>
+      ) : !q.data?.length ? (
+        <p className="text-[13px] text-muted">No explanations published yet. Jurors post theirs shortly after revealing.</p>
+      ) : (
+        <div className="space-y-3">
+          {q.data.map((r) => (
+            <RationaleItem key={r.sha256} item={r} d={d} />
+          ))}
+        </div>
+      )}
     </DetailSection>
   );
 }
 
-function RationaleItem({ hash, d }: { hash: Hex; d: Dispute }) {
-  const q = useQuery({ queryKey: ["rationale", hash], queryFn: () => fetchRationale(hash), staleTime: Infinity, retry: 0 });
-  if (q.isLoading) return <Skeleton className="h-16" />;
-  if (q.error || !q.data) return <Notice tone="bad">{(q.error as Error)?.message ?? "Not found in the blob store. Check the hash and try again."}</Notice>;
+function RationaleItem({ item, d }: { item: ListedRationale; d: Dispute }) {
+  const q = { data: { doc: item.doc, hashOk: item.hashOk, url: item.url } };
   const r: RationaleDoc = q.data.doc;
   const seats = roundSeats(d, r.round);
   const seat = seats.find((s) => s.juror.toLowerCase() === r.juror.toLowerCase());

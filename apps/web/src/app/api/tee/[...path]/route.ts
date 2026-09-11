@@ -26,6 +26,7 @@ const RULES: Rule[] = [
   { re: /^blobs$/, methods: ["PUT"], cache: "none", maxBody: 64 * KB }, // rating comments
   { re: /^deliveries\/\d{1,30}$/, methods: ["GET"], cache: "none" },
   { re: /^findings\/\d{1,30}$/, methods: ["GET"], cache: "none" },
+  { re: /^rationales\/\d{1,30}$/, methods: ["GET"], cache: "none" }, // published juror rationales
   { re: /^evidence-upload$/, methods: ["POST"], cache: "none", maxBody: 400 * KB }, // TEE caps evidence at 256 KiB (base64 inflates)
   { re: /^evidence\/\d{1,30}$/, methods: ["POST"], cache: "none", maxBody: 16 * KB }, // juror case-packet challenge
   { re: /^preview\/quote\/\d{1,30}$/, methods: ["GET"], cache: "none" },
