@@ -446,7 +446,30 @@ export async function openDispute(
   policy.record({ kind: 'bond', ref: disputeId.toString(), amount: bond, txHash: sent.hash });
   writeJson(path.join(purchaseDir(purchaseId), 'dispute.json'), { disputeId, purchaseId, ground: enumName(Ground, ground), taskMask: `0x${taskMask.toString(16)}`, requested, bond, evidenceHash, txHash: sent.hash });
   log(who, `dispute #${disputeId} opened (${enumName(Ground, ground)}, mask 0x${taskMask.toString(16)})`);
+  if (ground === Ground.FalseDescription) await wakeJurors(ctx, who, disputeId);
   return { disputeId, bond, evidenceHash };
+}
+
+/**
+ * Best-effort nudge to the juror service (Vercel project running the three AI jurors) so it starts
+ * on this dispute now instead of at its next sweep. JURORS_WAKE_URL overrides; empty disables.
+ */
+async function wakeJurors(ctx: Ctx, who: string, disputeId: bigint): Promise<void> {
+  const url = process.env.JURORS_WAKE_URL ?? (ctx.chainId === 84532 ? 'https://rl-env-market-jurors.vercel.app/api/wake' : '');
+  if (!url) return;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ disputeId: disputeId.toString() }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const body = (await res.json().catch(() => null)) as { disputes?: Array<{ disputeId: string; action: string }> } | null;
+    const mine = body?.disputes?.find((d) => d.disputeId === disputeId.toString());
+    log(who, `juror service woken (${res.status}${mine ? `: ${mine.action}` : ''})`);
+  } catch (e) {
+    log(who, `note: could not reach the juror service (${(e as Error).message}); its sweep will pick up dispute #${disputeId}`);
+  }
 }
 
 // ------------------------------------------------------------------------------------ rate / withdraw
