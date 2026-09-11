@@ -12,6 +12,30 @@ settlement. A local dev mode is allowed (e.g. running the TEE service on a lapto
 it must be labeled truthfully in reports (`attestation.kind = "none-local-dev"`) and is never the
 demo path.
 
+## Deployment target (founder decision, 2026-09-10 — supersedes "Base Sepolia"/"TestUSDC" below)
+
+- **Contracts: Base mainnet (chainId 8453)**, explorer https://basescan.org. Payment token = **real
+  native USDC on Base** (`0x833589fCD6eDb6E08f4c7C32D19b0Ed1f2bD6E9`, 6 decimals — verify with
+  `cast call <addr> "symbol()(string)" --rpc-url https://mainnet.base.org` before use). Amounts are
+  tiny (see mainnet params). `TestUSDC` is kept ONLY for local anvil tests (chainId 31337); on
+  8453 the deploy script takes `TOKEN_ADDR` and deploys no token. No faucet on mainnet.
+- **TEE: EigenCompute mainnet** (`ecloud` CLI, `@layr-labs/ecloud-cli`; app registered on
+  Ethereum mainnet; Intel TDX / GCP confidential VM). App wallet from the KMS `MNEMONIC` env var
+  is the runner/relay/verifier signer registered in EnvMarket. It sends txs to Base mainnet.
+  Attestation evidence: app id + image digest on the EigenCloud verify dashboard and the
+  AppController contract; the app also serves its attestation token at `/attestation`.
+- **Inference: OpenRouter** (`https://openrouter.ai/api/v1`, OpenAI-compatible, env
+  `OPENROUTER_API_KEY`), called from inside the TEE for the reference panel and validator, and by
+  the juror processes. Panel = the newest real OpenRouter model ids in the GLM, Kimi and Qwen
+  families (resolve at runtime from `GET /api/v1/models`, record the exact ids in the report; the
+  requested names "GLM 5.3 / Kimi K3 / Qwen 3.8" are recorded as `requested`). Validator = a
+  different model family (e.g. a DeepSeek or gpt-oss model), recorded in the report.
+- Env names: `BASE_RPC=https://mainnet.base.org`, `CHAIN_ID=8453`. Local tests: anvil 31337.
+
+Mainnet params (override the demo table below on 8453): price 2 USDC, collateral 2 USDC per sale,
+bondFloor 0.25, bondCap 2, caseFee 0.30, participationFee 0.05, jurorStake 1 USDC, other bps/
+windows unchanged (challenge 300 s, delivery 600 s, commit/reveal 180 s each).
+
 ## Repo layout
 
 ```
