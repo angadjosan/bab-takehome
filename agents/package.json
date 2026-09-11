@@ -1,0 +1,29 @@
+{
+  "name": "@envmarket/agents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Autonomous seller + buyer agents and the end-to-end demo orchestrator for the RL Environment Market",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "seller": "tsx src/seller/cli.ts",
+    "buyer": "tsx src/buyer/cli.ts",
+    "e2e": "tsx demo/e2e.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@envmarket/shared": "file:../packages/shared",
+    "commander": "^14.0.0",
+    "viem": "^2.56.3",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
