@@ -52,6 +52,30 @@ never this app's), token / ETH / claimable balances, the faucet and withdraw.
 | `NEXT_PUBLIC_PRIVY_APP_ID` | Privy app id (Dashboard → App settings). Required on every chain except local anvil. Unset: the app still builds and browses, but **Sign in** is disabled and the browser console logs an error naming this variable. There is no browser-wallet fallback. |
 | `NEXT_PUBLIC_PRIVY_CLIENT_ID` | Optional app client id (Dashboard → App settings → Clients), for per-environment settings. |
 | `NEXT_PUBLIC_PRIVY_SPONSOR_GAS` | `1` sends writes from the **embedded** wallet through Privy's native gas sponsorship (`useSendTransaction(…, {sponsor: true})`), so a first-time reviewer needs no ETH. External wallets always pay their own gas. |
+| `FAUCET_PK` | **Server-only, sensitive.** Private key of the test-funds faucet wallet used by `POST /api/faucet` (see below). Unset: the "Get test tUSDC" button falls back to the token's own `faucet()` from the user's wallet (local anvil). |
+| `FAUCET_ETH_DRIP` / `FAUCET_ETH_MIN` / `FAUCET_IP_LIMIT` / `FAUCET_RPC_URL` | Optional faucet tuning: ETH sent per drip (default `0.000005`), skip the ETH drip at or above this balance (default `0.000003`), drips per IP per 24 h (default `3`), RPC for the faucet's sends (default `NEXT_PUBLIC_RPC_URL`). |
+
+### Test funds faucet (`/api/faucet`)
+
+New Privy embedded wallets start with 0 ETH, so any user-paid transaction (including the token's own
+`faucet()`) fails with "insufficient funds for gas". The app therefore funds wallets from a server
+wallet instead:
+
+- **Get test tUSDC** (testnet strip, account menu, buy panel) calls `POST /api/faucet {address}`. The
+  server wallet (`FAUCET_PK`) sends 1,000 tUSDC (a transfer from its own balance; the deployer tops it up
+  with the owner-only `mint`) plus ~0.000005 ETH for fees (≈ 5 transactions at ~0.006 gwei). It skips the
+  ETH if the wallet already holds ≥ 0.000003 ETH and the tUSDC if it holds ≥ 500, and says so when both
+  are already there. Limits: one drip per address per 24 h and 3 per IP (in memory, per server instance).
+  Sends are serialized and each waits for its receipt.
+- Every user-paid write (`useTx`, so also approve → buy, dispute bonds, stakes) first checks the
+  wallet's ETH and, if it is below 0.000001, asks `/api/faucet` for a drip before asking the user to sign.
+- Refill the faucet wallet (`FAUCET_ADDR` in the repo `.env`) with Base Sepolia ETH; mint more tUSDC to it
+  from the deployer (`cast send <token> 'mint(address,uint256)' <faucet> <amount>`). When it runs low the
+  route answers 503 "The faucet is running low".
+- **Privy gas sponsorship makes the ETH drip unnecessary:** with `NEXT_PUBLIC_PRIVY_SPONSOR_GAS=1` and
+  **App pays** enabled for Base Sepolia in the Privy dashboard (step 5 below), writes from embedded wallets
+  are sponsored, `useTx` skips the gas check for them, and the faucet only needs to send tUSDC (the ETH
+  drip then only matters for external wallets).
 
 Privy dashboard settings (https://dashboard.privy.io):
 
