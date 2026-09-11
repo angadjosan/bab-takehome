@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import tarStream from 'tar-stream';
 import { describe, expect, it } from 'vitest';
 import {
   canonicalTarHashOfDir,
@@ -80,14 +81,66 @@ describe('canonical tar', () => {
     expect(entries.find((e) => e.path === 'src')!.mode).toBe(0o755);
     expect(entries.find((e) => e.path === 'grader/run.sh')!.mode).toBe(0o755);
     expect(entries.find((e) => e.path === 'manifest.json')!.mode).toBe(0o644);
-    // first header: mtime/uid/gid are zero, uname/gname empty, magic ustar\0 00
+    // first header (tar-stream encoding): mtime/uid/gid are zero, uname/gname empty, magic "ustar" NUL "00"
     const h = tar.subarray(0, 512);
     const txt = (o: number, n: number) => Buffer.from(h.subarray(o, o + n)).toString('latin1');
-    expect(txt(108, 8)).toBe('0000000\0');
-    expect(txt(116, 8)).toBe('0000000\0');
-    expect(txt(136, 12)).toBe('00000000000\0');
+    const NUL = String.fromCharCode(0);
+    expect(txt(108, 8)).toBe('000000 ' + NUL);
+    expect(txt(116, 8)).toBe('000000 ' + NUL);
+    expect(txt(136, 12)).toBe('00000000000 ');
     expect(txt(257, 8)).toBe('ustar\u000000');
     expect(h.subarray(265, 329).every((x) => x === 0)).toBe(true);
+  });
+
+  const enc = new TextEncoder();
+  const NL = String.fromCharCode(10);
+  const LONG = 'deep/' + 'd'.repeat(60) + '/' + 'e'.repeat(60) + '/f.txt';
+  const vectorInputs = () => [
+    { path: 'run.sh', type: 'file' as const, data: enc.encode('#!/bin/sh' + NL + 'exit 0' + NL), executable: true },
+    { path: 'a/b.txt', type: 'file' as const, data: enc.encode('hello' + NL) },
+    { path: 'empty', type: 'dir' as const },
+    { path: LONG, type: 'file' as const, data: enc.encode('long') },
+  ];
+
+  it('pinned vector (tar-stream header codec; changed from the hand-rolled writer)', () => {
+    const t = writeTar(vectorInputs());
+    expect(t.length).toBe(6656);
+    expect(sha256Hex(t)).toBe('0x684f08f699818922246eff6e27f63b7b2cbd02779a7bada7c78b6d1911976a68');
+  });
+
+  it("is byte-identical to tar-stream's own pack() and readable by its extract()", async () => {
+    const t = writeTar(vectorInputs());
+    const entries = readTar(t);
+    const p = tarStream.pack();
+    const chunks: Buffer[] = [];
+    p.on('data', (c: unknown) => chunks.push(c as Buffer));
+    const done = new Promise<void>((r) => p.on('end', () => r()));
+    for (const e of entries) {
+      const header = { name: e.type === 'dir' ? `${e.path}/` : e.path, type: e.type === 'dir' ? 'directory' : 'file', mode: e.mode, mtime: new Date(0), uid: 0, gid: 0, uname: '', gname: '' } as const;
+      if (e.type === 'dir') p.entry(header);
+      else p.entry({ ...header, size: e.data.length }, Buffer.from(e.data));
+    }
+    p.finalize();
+    await done;
+    expect(sha256Hex(new Uint8Array(Buffer.concat(chunks)))).toBe(sha256Hex(t));
+
+    const x = tarStream.extract();
+    const seen: Array<[string, string, number]> = [];
+    x.on('entry', (hdr, stream, next) => {
+      seen.push([hdr.name, hdr.type ?? '', hdr.mode ?? 0]);
+      stream.on('end', next);
+      stream.resume();
+    });
+    const finished = new Promise<void>((r) => x.on('finish', () => r()));
+    x.end(Buffer.from(t));
+    await finished;
+    expect(seen.map((s) => s[0])).toContain(LONG);
+    expect(seen.find((s) => s[0] === 'run.sh')).toEqual(['run.sh', 'file', 0o755]);
+    expect(seen.find((s) => s[0] === 'empty/')?.[1]).toBe('directory');
+  });
+
+  it('rejects non-ASCII paths (plain ustar, no PAX)', () => {
+    expect(() => writeTar([{ path: 'caf' + String.fromCharCode(0xe9) + '.txt', type: 'file', data: new Uint8Array() }])).toThrow(/non-ASCII/);
   });
 
   it('exclude option (paths and subtrees)', () => {

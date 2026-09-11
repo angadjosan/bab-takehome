@@ -9,11 +9,14 @@
  *   graderDigest      bytes32 sha256(canonical tar of grader/)
  *   salt              bytes32 random
  *
- * Merkle: OpenZeppelin MerkleProof-compatible sorted-pair keccak256 (commutative hash); a lone
- * odd node at any level is promoted unchanged. Leaves are ordered by taskId ascending (ASCII),
- * and that index is the task's bit in on-chain `taskMask`.
+ * Merkle: @openzeppelin/merkle-tree `SimpleMerkleTree` (sorted-pair keccak256 = OZ
+ * `Hashes.commutativeKeccak256`, verifiable with OZ `MerkleProof.sol`), leaves supplied by us and
+ * NOT re-sorted. Tree shape is OZ's complete-binary-tree array layout (for leaf counts that are
+ * not a power of two this differs from "promote the odd node"). Leaves are ordered by taskId
+ * ascending (ASCII), and that index is the task's bit in on-chain `taskMask`.
  */
 import * as path from 'node:path';
+import { SimpleMerkleTree } from '@openzeppelin/merkle-tree';
 import {
   concat,
   encodeAbiParameters,
@@ -101,39 +104,26 @@ export function hashPair(a: Hex, b: Hex): Hex {
   return keccak256(x < y ? concat([x, y]) : concat([y, x]));
 }
 
-/** All tree layers, leaves first, root last. */
-export function merkleLayers(leaves: Hex[]): Hex[][] {
+/**
+ * The @openzeppelin/merkle-tree `SimpleMerkleTree` over caller-supplied leaves, in the given
+ * order (`sortLeaves: false`, so leaf index == taskMask bit).
+ */
+export function merkleTree(leaves: Hex[]): SimpleMerkleTree {
   if (leaves.length === 0) throw new Error('merkle: no leaves');
-  const layers: Hex[][] = [leaves.map((l) => normalizeBytes32(l, 'leaf'))];
-  while (layers[layers.length - 1]!.length > 1) {
-    const cur = layers[layers.length - 1]!;
-    const next: Hex[] = [];
-    for (let i = 0; i < cur.length; i += 2) {
-      next.push(i + 1 < cur.length ? hashPair(cur[i]!, cur[i + 1]!) : cur[i]!);
-    }
-    layers.push(next);
-  }
-  return layers;
+  return SimpleMerkleTree.of(
+    leaves.map((l) => normalizeBytes32(l, 'leaf')),
+    { sortLeaves: false },
+  );
 }
 
 export function merkleRoot(leaves: Hex[]): Hex {
-  const layers = merkleLayers(leaves);
-  return layers[layers.length - 1]![0]!;
+  return merkleTree(leaves).root as Hex;
 }
 
-/** Sibling path for leaf `index` (levels where the node is promoted contribute nothing). */
+/** Proof for leaf `index` (OZ tree layout; verifiable with OZ `MerkleProof.verify`). */
 export function merkleProof(leaves: Hex[], index: number): Hex[] {
   if (!Number.isInteger(index) || index < 0 || index >= leaves.length) throw new Error('merkle: index out of range');
-  const layers = merkleLayers(leaves);
-  const proof: Hex[] = [];
-  let i = index;
-  for (let level = 0; level < layers.length - 1; level++) {
-    const layer = layers[level]!;
-    const sib = i ^ 1;
-    if (sib < layer.length) proof.push(layer[sib]!);
-    i = Math.floor(i / 2);
-  }
-  return proof;
+  return merkleTree(leaves).getProof(index) as Hex[];
 }
 
 /** OZ `MerkleProof.processProof`. */
@@ -141,10 +131,10 @@ export function processMerkleProof(leaf: Hex, proof: Hex[]): Hex {
   return proof.reduce<Hex>((acc, p) => hashPair(acc, p), normalizeBytes32(leaf, 'leaf'));
 }
 
-/** OZ `MerkleProof.verify`. */
+/** OZ `MerkleProof.verify` (via `SimpleMerkleTree.verify`). */
 export function verifyMerkleProof(leaf: Hex, proof: Hex[], root: Hex): boolean {
   try {
-    return processMerkleProof(leaf, proof) === normalizeBytes32(root, 'root');
+    return SimpleMerkleTree.verify(normalizeBytes32(root, 'root'), normalizeBytes32(leaf, 'leaf'), proof.map((p) => normalizeBytes32(p, 'proof')));
   } catch {
     return false;
   }
@@ -196,14 +186,15 @@ export function buildTaskTree(args: {
   const leafHashes = sorted.map((t) =>
     taskLeaf({ environmentVersion: args.environmentVersion, taskId: t.taskId, taskHash: t.taskHash, graderDigest: args.graderDigest, salt: t.salt }, domain),
   );
-  const root = merkleRoot(leafHashes);
+  const tree = merkleTree(leafHashes);
+  const root = tree.root as Hex;
   const leaves: TaskTreeLeaf[] = sorted.map((t, index) => ({
     taskId: t.taskId,
     taskHash: normalizeBytes32(t.taskHash, 'taskHash'),
     salt: normalizeBytes32(t.salt, 'salt'),
     index,
     leaf: leafHashes[index]!,
-    proof: merkleProof(leafHashes, index),
+    proof: tree.getProof(index) as Hex[],
   }));
   return {
     domain,

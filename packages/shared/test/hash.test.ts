@@ -1,5 +1,8 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { canonicalJson, isCanonicalJson, keccakUtf8, parseCanonicalJson, sha256Canonical, sha256Hex } from '../src/index.ts';
+import { buildDeliveryWrapper, canonicalJson, isCanonicalJson, keccakUtf8, parseCanonicalJson, sha256Canonical, sha256Hex } from '../src/index.ts';
 import { cast, hasCast } from './helpers.ts';
 
 describe('hash', () => {
@@ -34,6 +37,66 @@ describe('canonicalJson', () => {
     expect(isCanonicalJson(JSON.stringify(v, null, 2))).toBe(false);
     expect(parseCanonicalJson(s)).toEqual(JSON.parse(s));
     expect(() => parseCanonicalJson('{"b":1,"a":2}')).toThrow(/canonical/);
+  });
+
+  // RFC 8785 test data; backslashes/special chars built from char codes to keep this file plain ASCII.
+  const BS = String.fromCharCode(92);
+  const C = (...cps: number[]) => String.fromCodePoint(...cps);
+
+  it('RFC 8785 §3.2.3 example (JCS via `canonicalize`)', () => {
+    const s = [BS + "u20ac", "$", BS + "u000F", BS + "u000a", "A'", BS + "u0042", BS + "u0022", BS + "u005c", BS + BS, BS + '"', BS + "/"].join("");
+    const input = `{"numbers": [333333333.33333329, 1E30, 4.50, 2e-3, 0.000000000000000000000000001], "string": "${s}", "literals": [null, true, false]}`;
+    const out = [C(0x20ac), "$", BS + "u000f", BS + "n", "A'B", BS + '"', BS + BS, BS + BS, BS + '"', "/"].join("");
+    expect(canonicalJson(JSON.parse(input))).toBe(`{"literals":[null,true,false],"numbers":[333333333.3333333,1e+30,4.5,0.002,1e-27],"string":"${out}"}`);
+  });
+
+  it('RFC 8785 §3.2.3 key sorting by UTF-16 code units', () => {
+    const names: Array<[string, string]> = [
+      [C(0x20ac), 'Euro Sign'],
+      [C(0x0d), 'Carriage Return'],
+      [C(0xfb33), 'Hebrew Letter Dalet With Dagesh'],
+      ['1', 'One'],
+      [C(0x1f600), 'Emoji: Grinning Face'],
+      [C(0x80), 'Control'],
+      [C(0xf6), 'Latin Small Letter O With Diaeresis'],
+    ];
+    const obj = Object.fromEntries(names);
+    const order = [C(0x0d), '1', C(0x80), C(0xf6), C(0x20ac), C(0x1f600), C(0xfb33)];
+    expect(canonicalJson(obj)).toBe('{' + order.map((k) => `${JSON.stringify(k)}:${JSON.stringify(obj[k])}`).join(',') + '}');
+  });
+
+  it('rejects lone surrogates (RFC 8785 §3.2.2.2; the pre-JCS encoder escaped them)', () => {
+    expect(() => canonicalJson({ a: String.fromCharCode(0xd800) })).toThrow(/canonicalJson/);
+  });
+
+  it('same bytes as the pre-JCS encoder for every committed JSON document and a delivery wrapper', () => {
+    const legacy = (v: unknown): string => {
+      if (v === null || typeof v !== 'object') return JSON.stringify(v);
+      if (Array.isArray(v)) return `[${v.map(legacy).join(',')}]`;
+      const o = v as Record<string, unknown>;
+      return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${legacy(o[k])}`).join(',')}}`;
+    };
+    const ws = fileURLToPath(new URL('../../../seller-workspace', import.meta.url));
+    const files = fs.readdirSync(ws, { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.json') && !f.includes('node_modules'));
+    expect(files.length).toBeGreaterThan(5);
+    for (const f of files) {
+      const doc = JSON.parse(fs.readFileSync(path.join(ws, f), 'utf8'));
+      expect(canonicalJson(doc), f).toBe(legacy(doc));
+    }
+    const { json } = buildDeliveryWrapper({
+      purchaseId: 12n,
+      chainId: 8453,
+      market: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+      buyer: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+      buyerEncPubKey: `0x${'ab'.repeat(32)}`,
+      versionId: 2n,
+      bundleHash: sha256Hex('b'),
+      ciphertextHash: sha256Hex('c'),
+      issuedAt: 1_789_000_000,
+      relay: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
+    });
+    expect(canonicalJson(JSON.parse(json))).toBe(json);
+    expect(legacy(JSON.parse(json))).toBe(json);
   });
 
   it('omits undefined members, rejects unstable values', () => {

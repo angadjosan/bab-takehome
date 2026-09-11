@@ -7,7 +7,10 @@
  * - strings passed to the sha256/keccak helpers are ALWAYS treated as UTF-8 text
  *   (never auto-decoded as hex). Use `hexToBytes` first if you mean raw bytes.
  */
+import { equalBytes } from '@noble/curves/utils.js';
 import { sha256 as nobleSha256 } from '@noble/hashes/sha2.js';
+import { concatBytes } from '@noble/hashes/utils.js';
+import canonicalize from 'canonicalize';
 import { bytesToHex, hexToBytes, keccak256, type Hex } from 'viem';
 
 export type { Hex };
@@ -71,86 +74,68 @@ export function bytes32ToBytes(x: Hex | Uint8Array, name = 'value'): Uint8Array 
   return hexToBytes(normalizeBytes32(x, name));
 }
 
-/** Concatenate byte arrays. */
-export function concatBytes(...parts: Uint8Array[]): Uint8Array {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let off = 0;
-  for (const p of parts) {
-    out.set(p, off);
-    off += p.length;
+/** Concatenate byte arrays (@noble/hashes). */
+export { concatBytes };
+
+/** Constant-time byte equality (@noble/curves). */
+export { equalBytes };
+
+/**
+ * Canonical JSON = RFC 8785 JSON Canonicalization Scheme (JCS), serialized by `canonicalize`
+ * (the reference implementation by the RFC's authors): object keys sorted by UTF-16 code units,
+ * no whitespace, ES2015 number serialization, JSON.stringify string escaping, `undefined`
+ * object members omitted.
+ *
+ * Before serializing, values with no stable JSON form are rejected (stricter than JCS, which would
+ * silently coerce some of them): bigint (encode uint256 as a decimal string), non-finite numbers,
+ * functions, symbols, `undefined` inside arrays, Uint8Array, Date and other non-plain objects.
+ * Lone surrogates in strings are rejected (RFC 8785 §3.2.2.2).
+ */
+export function canonicalJson(value: unknown): string {
+  assertJsonValue(value, '$');
+  let out: string | undefined;
+  try {
+    out = canonicalize(value);
+  } catch (e) {
+    throw new TypeError(`canonicalJson: ${(e as Error).message}`);
   }
+  if (out === undefined) throw new TypeError('canonicalJson: value has no JSON form');
   return out;
 }
 
-/** Constant-time-ish byte equality (length leak only). */
-export function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
-  return diff === 0;
-}
-
-/**
- * Canonical JSON: object keys sorted (by UTF-16 code units, i.e. default JS sort, same as
- * RFC 8785 for key ordering), no whitespace, `undefined` object members omitted, numbers in
- * shortest round-trip form (JSON.stringify), strings escaped as JSON.stringify does.
- *
- * Rejects values that have no stable JSON form: bigint (encode uint256 as a decimal string),
- * non-finite numbers, functions, symbols, `undefined` inside arrays, Uint8Array, Date and other
- * non-plain objects.
- */
-export function canonicalJson(value: unknown): string {
-  return encodeCanonical(value, '$');
-}
-
-function encodeCanonical(v: unknown, path: string): string {
-  if (v === null) return 'null';
+function assertJsonValue(v: unknown, path: string): void {
+  if (v === null) return;
   switch (typeof v) {
     case 'string':
-      return JSON.stringify(v);
     case 'boolean':
-      return v ? 'true' : 'false';
+      return;
     case 'number':
       if (!Number.isFinite(v)) throw new TypeError(`canonicalJson: non-finite number at ${path}`);
-      return JSON.stringify(v); // -0 -> "0"
+      return;
     case 'bigint':
       throw new TypeError(`canonicalJson: bigint at ${path}; encode as a decimal string`);
     case 'object': {
       if (Array.isArray(v)) {
-        return (
-          '[' +
-          v
-            .map((x, i) => {
-              if (x === undefined || typeof x === 'function' || typeof x === 'symbol') {
-                throw new TypeError(`canonicalJson: unsupported array element at ${path}[${i}]`);
-              }
-              return encodeCanonical(x, `${path}[${i}]`);
-            })
-            .join(',') +
-          ']'
-        );
+        v.forEach((x, i) => {
+          if (x === undefined || typeof x === 'function' || typeof x === 'symbol') {
+            throw new TypeError(`canonicalJson: unsupported array element at ${path}[${i}]`);
+          }
+          assertJsonValue(x, `${path}[${i}]`);
+        });
+        return;
       }
       const proto = Object.getPrototypeOf(v);
       if (proto !== Object.prototype && proto !== null) {
         throw new TypeError(`canonicalJson: non-plain object at ${path}`);
       }
-      const obj = v as Record<string, unknown>;
-      const keys = Object.keys(obj)
-        .filter((k) => obj[k] !== undefined)
-        .sort();
-      return (
-        '{' +
-        keys
-          .map((k) => {
-            const x = obj[k];
-            if (typeof x === 'function' || typeof x === 'symbol') {
-              throw new TypeError(`canonicalJson: unsupported value at ${path}.${k}`);
-            }
-            return JSON.stringify(k) + ':' + encodeCanonical(x, `${path}.${k}`);
-          })
-          .join(',') +
-        '}'
-      );
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+        if (x === undefined) continue;
+        if (typeof x === 'function' || typeof x === 'symbol') {
+          throw new TypeError(`canonicalJson: unsupported value at ${path}.${k}`);
+        }
+        assertJsonValue(x, `${path}.${k}`);
+      }
+      return;
     }
     default:
       throw new TypeError(`canonicalJson: unsupported ${typeof v} at ${path}`);

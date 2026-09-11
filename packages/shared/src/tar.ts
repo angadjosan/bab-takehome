@@ -7,15 +7,45 @@
  * - regular files (typeflag '0') and directories (typeflag '5', name ends with '/') only;
  * - mtime 0, uid/gid 0, uname/gname "", devmajor/devminor 0, linkname empty;
  * - mode 0644 for files, 0755 for directories and for files with any executable bit;
- * - names > 100 bytes are split into the ustar `prefix` field at a '/'; no PAX/GNU extensions;
+ * - names > 100 bytes are split into the ustar `prefix` field at a '/'; no PAX/GNU extensions,
+ *   so paths must be ASCII;
  * - archive ends with two zero blocks; no padding to a 10240-byte record; no compression.
+ *
+ * Header serialization and parsing is tar-stream's ustar codec (`tar-stream/headers.js`, the code
+ * behind its pack()/extract() streams, which are async-only). We keep the framing, normalization
+ * and safety policy; a test pins that `writeTar` output is byte-identical to tar-stream's pack().
  */
 import * as fs from 'node:fs';
+import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import type { Hex } from 'viem';
-import { fromUtf8, sha256Hex, utf8 } from './hash.ts';
+import { sha256Hex, utf8 } from './hash.ts';
 
 const BLOCK = 512;
+
+interface TarStreamHeader {
+  name: string;
+  mode: number;
+  uid: number;
+  gid: number;
+  size: number;
+  mtime: Date;
+  type: string | null;
+  linkname?: string | null;
+  uname?: string;
+  gname?: string;
+  devmajor?: number;
+  devminor?: number;
+}
+
+/** tar-stream's ustar header codec. Not in its package `exports`, so it is loaded by file path. */
+const tarHeaders: {
+  encode(h: TarStreamHeader): Buffer | null;
+  decode(buf: Buffer, filenameEncoding?: string, allowUnknownFormat?: boolean): TarStreamHeader | null;
+} = (() => {
+  const req = createRequire(import.meta.url);
+  return req(path.join(path.dirname(req.resolve('tar-stream')), 'headers.js'));
+})();
 
 export type TarEntryType = 'file' | 'dir';
 
@@ -61,55 +91,26 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
   return a.length - b.length;
 }
 
-function writeOctal(h: Uint8Array, off: number, len: number, value: number): void {
-  const s = value.toString(8).padStart(len - 1, '0');
-  if (s.length > len - 1) throw new Error(`tar: numeric field overflow (${value})`);
-  for (let i = 0; i < s.length; i++) h[off + i] = s.charCodeAt(i);
-  h[off + len - 1] = 0;
-}
-
-function writeAscii(h: Uint8Array, off: number, s: string): void {
-  for (let i = 0; i < s.length; i++) h[off + i] = s.charCodeAt(i);
-}
-
-function splitName(name: Uint8Array): { name: Uint8Array; prefix: Uint8Array } {
-  if (name.length <= 100) return { name, prefix: new Uint8Array(0) };
-  // Split at a '/' so that prefix <= 155 bytes and name <= 100 bytes (name non-empty).
-  for (let i = Math.min(155, name.length - 2); i > 0; i--) {
-    if (name[i] === 0x2f) {
-      const prefix = name.subarray(0, i);
-      const rest = name.subarray(i + 1);
-      if (rest.length > 0 && rest.length <= 100) return { name: rest, prefix };
-    }
-  }
-  throw new Error(`tar: path too long for ustar (${name.length} bytes): ${fromUtf8(name)}`);
-}
-
+/** Canonical ustar header via tar-stream (mtime 0, uid/gid 0, empty uname/gname, dev 0/0). */
 function buildHeader(entryName: string, type: TarEntryType, mode: number, size: number): Uint8Array {
-  const h = new Uint8Array(BLOCK);
-  const { name, prefix } = splitName(utf8(entryName));
-  h.set(name, 0); // name[100]
-  writeOctal(h, 100, 8, mode); // mode
-  writeOctal(h, 108, 8, 0); // uid
-  writeOctal(h, 116, 8, 0); // gid
-  writeOctal(h, 124, 12, size); // size
-  writeOctal(h, 136, 12, 0); // mtime
-  h.fill(0x20, 148, 156); // chksum placeholder (8 spaces)
-  h[156] = type === 'dir' ? 0x35 : 0x30; // typeflag
-  // linkname[100] at 157: zeros
-  writeAscii(h, 257, 'ustar\0'); // magic
-  writeAscii(h, 263, '00'); // version
-  // uname[32] at 265, gname[32] at 297: empty
-  writeOctal(h, 329, 8, 0); // devmajor
-  writeOctal(h, 337, 8, 0); // devminor
-  h.set(prefix, 345); // prefix[155]
-  let sum = 0;
-  for (let i = 0; i < BLOCK; i++) sum += h[i]!;
-  const cs = sum.toString(8).padStart(6, '0');
-  writeAscii(h, 148, cs);
-  h[154] = 0;
-  h[155] = 0x20;
-  return h;
+  if (utf8(entryName).length !== entryName.length) {
+    throw new Error(`tar: non-ASCII path not representable in plain ustar: ${JSON.stringify(entryName)}`);
+  }
+  const h = tarHeaders.encode({
+    name: entryName,
+    type: type === 'dir' ? 'directory' : 'file',
+    mode,
+    uid: 0,
+    gid: 0,
+    size,
+    mtime: new Date(0),
+    uname: '',
+    gname: '',
+    devmajor: 0,
+    devminor: 0,
+  });
+  if (!h) throw new Error(`tar: path too long for ustar (${entryName.length} bytes): ${entryName}`);
+  return new Uint8Array(h.buffer, h.byteOffset, BLOCK);
 }
 
 /** Write a deterministic ustar archive. Input order is irrelevant; implied parent dirs are added. */
@@ -170,26 +171,12 @@ export function writeTar(inputs: TarInput[]): Uint8Array {
   return out;
 }
 
-function readCString(h: Uint8Array, off: number, len: number): string {
-  let end = off;
-  while (end < off + len && h[end] !== 0) end++;
-  return fromUtf8(h.subarray(off, end));
-}
-
-function parseOctal(h: Uint8Array, off: number, len: number, field: string): number {
-  if ((h[off]! & 0x80) !== 0) throw new Error(`tar: base-256 ${field} not supported`);
-  const s = readCString(h, off, len).trim();
-  if (s === '') return 0;
-  if (!/^[0-7]+$/.test(s)) throw new Error(`tar: invalid octal in ${field}: ${JSON.stringify(s)}`);
-  const n = parseInt(s, 8);
-  if (!Number.isSafeInteger(n)) throw new Error(`tar: ${field} too large`);
-  return n;
-}
+const USTAR_MAGIC = [0x75, 0x73, 0x74, 0x61, 0x72, 0x00]; // "ustar\0"
 
 /**
- * Parse a ustar archive fully in memory. Rejects: bad checksums, non-ustar headers,
- * symlinks/hardlinks/devices/fifos, PAX/GNU extension headers, absolute or '..' paths,
- * duplicate paths, truncated data, missing end-of-archive marker.
+ * Parse a ustar archive fully in memory (headers decoded by tar-stream). Rejects: bad checksums,
+ * non-ustar (incl. GNU) headers, symlinks/hardlinks/devices/fifos, PAX/GNU extension headers,
+ * absolute or '..' paths, duplicate paths, truncated data, missing end-of-archive marker.
  */
 export function readTar(bytes: Uint8Array): TarEntry[] {
   const entries: TarEntry[] = [];
@@ -202,27 +189,41 @@ export function readTar(bytes: Uint8Array): TarEntry[] {
       ended = true;
       break;
     }
-    const stored = parseOctal(h, 148, 8, 'chksum');
-    let sum = 0;
-    for (let i = 0; i < BLOCK; i++) sum += i >= 148 && i < 156 ? 0x20 : h[i]!;
-    if (sum !== stored) throw new Error(`tar: checksum mismatch at offset ${off}`);
-    const magic = fromUtf8(h.subarray(257, 262));
-    if (magic !== 'ustar') throw new Error(`tar: not a ustar header at offset ${off}`);
+    if (!USTAR_MAGIC.every((b, i) => h[257 + i] === b)) throw new Error(`tar: not a ustar header at offset ${off}`);
+    let hdr: TarStreamHeader | null;
+    try {
+      hdr = tarHeaders.decode(Buffer.from(h.buffer, h.byteOffset, BLOCK), 'utf-8', false);
+    } catch {
+      throw new Error(`tar: checksum mismatch at offset ${off}`);
+    }
+    if (!hdr) throw new Error(`tar: empty header with non-zero checksum at offset ${off}`);
 
-    const name = readCString(h, 0, 100);
-    const prefix = readCString(h, 345, 155);
-    const rawPath = prefix ? `${prefix}/${name}` : name;
+    const rawPath = hdr.name;
     const flag = String.fromCharCode(h[156]!);
-    const size = parseOctal(h, 124, 12, 'size');
-    const mode = parseOctal(h, 100, 8, 'mode') & 0o7777;
+    const size = hdr.size;
+    if (!Number.isSafeInteger(size) || size < 0) throw new Error(`tar: invalid size for ${rawPath}`);
+    const mode = hdr.mode & 0o7777;
 
     let type: TarEntryType;
-    if (flag === '0' || flag === '\0' || flag === '7') type = 'file';
-    else if (flag === '5') type = 'dir';
-    else if (flag === '1' || flag === '2') throw new Error(`tar: link entry rejected: ${rawPath}`);
-    else if (flag === 'x' || flag === 'g' || flag === 'L' || flag === 'K') {
-      throw new Error(`tar: extension header '${flag}' not supported (${rawPath})`);
-    } else throw new Error(`tar: unsupported entry type '${flag}' for ${rawPath}`);
+    switch (hdr.type) {
+      case 'file':
+      case 'contiguous-file':
+        type = 'file';
+        break;
+      case 'directory':
+        type = 'dir';
+        break;
+      case 'link':
+      case 'symlink':
+        throw new Error(`tar: link entry rejected: ${rawPath}`);
+      case 'pax-header':
+      case 'pax-global-header':
+      case 'gnu-long-path':
+      case 'gnu-long-link-path':
+        throw new Error(`tar: extension header '${flag}' not supported (${rawPath})`);
+      default:
+        throw new Error(`tar: unsupported entry type '${flag}' for ${rawPath}`);
+    }
 
     const p = normalizeTarPath(rawPath);
     if (seen.has(p)) throw new Error(`tar: duplicate entry ${p}`);

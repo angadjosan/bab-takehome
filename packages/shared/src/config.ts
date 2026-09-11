@@ -17,6 +17,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 import { getAddress, type Address, type Chain, type Hex } from 'viem';
 import { anvil, base, baseSepolia } from 'viem/chains';
 import { privateKeyToAddress } from 'viem/accounts';
@@ -83,27 +84,9 @@ export interface EnvConfig {
   env: Record<string, string>;
 }
 
-/** Minimal dotenv parser: KEY=VALUE, `export ` prefix, # comments, single/double quotes. */
+/** Parse .env text with `dotenv` (KEY=VALUE, `export ` prefix, # comments, quotes). */
 export function parseDotenv(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
-    if (!m) continue;
-    let v = m[2]!;
-    if ((v.startsWith('"') && v.endsWith('"') && v.length >= 2) || (v.startsWith("'") && v.endsWith("'") && v.length >= 2)) {
-      const dq = v.startsWith('"');
-      v = v.slice(1, -1);
-      if (dq) v = v.replace(/\\n/g, '\n').replace(/\\"/g, '"');
-    } else {
-      const hash = v.search(/\s#/);
-      if (hash >= 0) v = v.slice(0, hash);
-      v = v.trim();
-    }
-    out[m[1]!] = v;
-  }
-  return out;
+  return dotenv.parse(text);
 }
 
 function walkUpFor(start: string, predicate: (dir: string) => boolean): string | null {

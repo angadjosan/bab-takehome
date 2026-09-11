@@ -77,7 +77,7 @@ describe('task leaf', () => {
   });
 });
 
-describe('merkle (OZ sorted-pair, odd promoted)', () => {
+describe('merkle (@openzeppelin/merkle-tree SimpleMerkleTree, caller-ordered leaves)', () => {
   const leaves = (n: number) => Array.from({ length: n }, (_, i) => keccak256(new Uint8Array([i])));
 
   it('hashPair is commutative keccak of sorted concat', () => {
@@ -100,10 +100,22 @@ describe('merkle (OZ sorted-pair, odd promoted)', () => {
     expect(verifyMerkleProof(l[0]!, [], l[0]!)).toBe(true);
   });
 
-  it('three leaves: odd leaf promoted', () => {
+  it('three leaves', () => {
     const [a, b, c] = leaves(3) as [Hex, Hex, Hex];
     expect(merkleRoot([a, b, c])).toBe(hashPair(hashPair(a, b), c));
     expect(merkleProof([a, b, c], 2)).toEqual([hashPair(a, b)]);
+  });
+
+  it('OZ complete-tree layout (differs from "promote the odd node" for n = 5, 7, ...); pinned roots', () => {
+    const [a, b, c, d, e] = leaves(5) as [Hex, Hex, Hex, Hex, Hex];
+    // OZ: root = H(H(H(a,b), e), H(c,d)); the old promote-odd tree gave H(H(H(a,b), H(c,d)), e).
+    expect(merkleRoot([a, b, c, d, e])).toBe(hashPair(hashPair(hashPair(a, b), e), hashPair(c, d)));
+    expect(merkleProof([a, b, c, d, e], 4)).toEqual([hashPair(a, b), hashPair(c, d)]);
+    expect(merkleRoot(leaves(4))).toBe('0xfecce4ac8ed6fc57f4d880d6af2b443418d564df8f5d52c6782e952564ed79eb');
+    expect(merkleRoot(leaves(5))).toBe('0x4012e3527351abde51ed075bbd7c41097ede613e3e77bc14c1b2900fee859002');
+    expect(merkleRoot(leaves(7))).toBe('0x0af28ae5cb5b59d9695a4c6315dec300addb43ae2993325da6d7a17719680da3');
+    // leaves are NOT re-sorted: order matters (index == taskMask bit)
+    expect(merkleRoot([...leaves(5)].reverse())).not.toBe(merkleRoot(leaves(5)));
   });
 
   it('every proof verifies for n = 1..17; tampering fails', () => {

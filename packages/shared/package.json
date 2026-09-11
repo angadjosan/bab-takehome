@@ -16,14 +16,21 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@noble/ciphers": "^2.4.0",
+    "@hpke/core": "^1.9.0",
+    "@hpke/dhkem-x25519": "^1.8.0",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
+    "@openzeppelin/merkle-tree": "^1.0.8",
+    "canonicalize": "^5.0.0",
+    "dotenv": "^17.4.2",
+    "openai": "^7.15.0",
+    "tar-stream": "3.2.1",
     "viem": "^2.56.3",
     "zod": "^4.6.2"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
+    "@types/tar-stream": "^3.1.4",
     "tsx": "^4.23.13",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"

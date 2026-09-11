@@ -301,6 +301,18 @@ describe.skipIf(!FW_KEY)('live Fireworks', () => {
     console.log('[live] resolver newest per family:', Object.values(newest).map((m) => m?.id).join(', '));
   }, 60_000);
 
+  // Listing is not serving: GET /models listed `deepseek-v4-pro` while chat 404'd "not deployed".
+  it('every pinned model serves a real 1-token chat completion', async () => {
+    const ids = [...MODELS.panel.map((p) => p.id), MODELS.validator, ...Object.values(MODELS.jurors)];
+    const settled = await Promise.allSettled(
+      ids.map((model) => client.chat({ model, maxTokens: 1, temperature: 0, messages: [{ role: 'user', content: 'Reply with the single word OK.' }] })),
+    );
+    const failed = settled.flatMap((s, i) => (s.status === 'rejected' ? [`${ids[i]}: ${(s.reason as Error).message}`] : []));
+    console.log('[live] pinned models served:', settled.map((s, i) => `${ids[i]!.split('/').pop()}=${s.status === 'fulfilled' ? s.value.model.split('/').pop() : 'FAIL'}`).join(', '));
+    expect(failed).toEqual([]);
+    for (const s of settled) if (s.status === 'fulfilled') expect(s.value.usage.promptTokens ?? 0).toBeGreaterThan(0);
+  }, 180_000);
+
   it('real tool call round trip (one function call, then the answer)', async () => {
     let calls = 0;
     const out = await runToolLoop(client, {

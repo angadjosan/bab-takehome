@@ -1,5 +1,7 @@
 /**
- * Minimal, provider-agnostic OpenAI-compatible chat-completions client (fetch only).
+ * Provider-agnostic chat-completions client: a thin wrapper over the official `openai` npm SDK
+ * (transport, retries with backoff + Retry-After, timeouts, error types), pointed at any
+ * OpenAI-compatible base URL.
  *
  * Default provider is Fireworks AI (https://api.fireworks.ai/inference/v1, Bearer
  * FIREWORKS_API_KEY) per the founder decision; any OpenAI-compatible endpoint works via
@@ -14,6 +16,7 @@
  *   LLM_TEMPERATURE[_<ROLE>], LLM_SEED[_<ROLE>], LLM_MAX_TOKENS[_<ROLE>], LLM_TIMEOUT_MS[_<ROLE>]
  * <ROLE> is the role upper-cased with non-alphanumerics → "_" (e.g. "validator" → VALIDATOR, "juror1" → JUROR1).
  */
+import OpenAI, { APIConnectionError, APIError, APIUserAbortError } from 'openai';
 import { z } from 'zod';
 
 export const FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
@@ -51,11 +54,12 @@ export interface LlmConfig {
   temperature?: number;
   seed?: number;
   maxTokens?: number;
+  /** Per-attempt timeout (SDK `timeout`; default 180 s). */
   timeoutMs?: number;
-  /** Retries after the first attempt for network errors / 408 / 409 / 429 / 5xx (default 2). */
+  /** SDK `maxRetries`: retries after the first attempt for connection errors / timeouts / 408 / 409 / 429 / 5xx (default 2). */
   retries?: number;
   headers?: Record<string, string>;
-  /** Injected fetch (defaults to global fetch). */
+  /** Injected fetch (defaults to global fetch), passed to the SDK. */
   fetch?: typeof fetch;
 }
 
@@ -155,18 +159,45 @@ export function llmConfigFromEnv(role?: string, env: Record<string, string | und
   };
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 function num(x: unknown): number | null {
   return typeof x === 'number' && Number.isFinite(x) ? x : null;
 }
 
+const RETRYABLE = (s: number | null) => s === 408 || s === 409 || s === 429 || (s !== null && s >= 500);
+
+/** Map SDK errors onto LlmError (user aborts pass through unchanged). */
+function toLlmError(e: unknown): unknown {
+  if (e instanceof APIUserAbortError) return e;
+  if (e instanceof APIConnectionError) return new LlmError(`LLM request failed: ${e.message}`, null, null, true);
+  if (e instanceof APIError) {
+    const status = typeof e.status === 'number' ? e.status : null;
+    const body = (e.error ?? null) as any;
+    const msg = (body && typeof body === 'object' && typeof body.message === 'string' && body.message) || e.message;
+    return new LlmError(`LLM HTTP ${status}: ${msg}`, status, body, RETRYABLE(status));
+  }
+  return e;
+}
+
 export class LlmClient {
   readonly config: LlmConfig;
+  private readonly sdk: OpenAI;
 
   constructor(config: LlmConfig) {
     if (!config.baseURL) throw new Error('LlmClient: baseURL required');
     this.config = { ...config, baseURL: config.baseURL.replace(/\/+$/, ''), headers: { ...(config.headers ?? {}) } };
+    this.sdk = new OpenAI({
+      baseURL: this.config.baseURL,
+      // Keyless endpoints (Ollama) still need a non-empty value for the SDK; it goes out as an ignored Bearer token.
+      apiKey: this.config.apiKey || 'no-key',
+      // Never let OPENAI_ORG_ID / OPENAI_PROJECT_ID / OPENAI_ADMIN_KEY from the env reach another provider.
+      adminAPIKey: null,
+      organization: null,
+      project: null,
+      maxRetries: this.config.retries ?? 2,
+      timeout: this.config.timeoutMs ?? 180_000,
+      defaultHeaders: this.config.headers,
+      fetch: this.config.fetch,
+    });
   }
 
   static fromEnv(role?: string, env?: Record<string, string | undefined>): LlmClient {
@@ -180,66 +211,6 @@ export class LlmClient {
   /** Same client, different default model / settings. */
   with(overrides: Partial<LlmConfig>): LlmClient {
     return new LlmClient({ ...this.config, ...overrides, headers: { ...this.config.headers, ...overrides.headers } });
-  }
-
-  private headers(): Record<string, string> {
-    const h: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json', ...this.config.headers };
-    if (this.config.apiKey) h.Authorization = `Bearer ${this.config.apiKey}`;
-    return h;
-  }
-
-  private async request(
-    pathname: string,
-    init: { method: string; body?: string; timeoutMs?: number; signal?: AbortSignal },
-  ): Promise<{ data: any; attempts: number }> {
-    const f = this.config.fetch ?? fetch;
-    const retries = this.config.retries ?? 2;
-    let lastErr: unknown;
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      const timeout = AbortSignal.timeout(init.timeoutMs ?? this.config.timeoutMs ?? 180_000);
-      const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
-      let res: Response;
-      try {
-        res = await f(this.config.baseURL + pathname, { method: init.method, headers: this.headers(), body: init.body, signal });
-      } catch (e) {
-        if (init.signal?.aborted) throw e;
-        lastErr = new LlmError(`LLM request failed: ${(e as Error).message}`, null, null, true);
-        if (attempt < retries) await sleep(500 * 2 ** attempt);
-        continue;
-      }
-      const text = await res.text();
-      let data: any;
-      try {
-        data = text ? JSON.parse(text) : null;
-      } catch {
-        data = text;
-      }
-      const retryable = res.status === 408 || res.status === 409 || res.status === 429 || res.status >= 500;
-      if (!res.ok) {
-        const msg =
-          (data && typeof data === 'object' && (data.error?.message ?? data.message)) ||
-          (typeof data === 'string' ? data.slice(0, 500) : res.statusText);
-        lastErr = new LlmError(`LLM HTTP ${res.status}: ${msg}`, res.status, data, retryable);
-        if (retryable && attempt < retries) {
-          const ra = Number(res.headers.get('retry-after'));
-          await sleep(Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 30_000) : 500 * 2 ** attempt);
-          continue;
-        }
-        throw lastErr;
-      }
-      if (data && typeof data === 'object' && data.error && !data.choices && !data.data) {
-        const code = Number(data.error.code);
-        const r = code === 429 || code >= 500;
-        lastErr = new LlmError(`LLM error: ${data.error.message ?? JSON.stringify(data.error)}`, Number.isFinite(code) ? code : null, data, r);
-        if (r && attempt < retries) {
-          await sleep(500 * 2 ** attempt);
-          continue;
-        }
-        throw lastErr;
-      }
-      return { data, attempts: attempt + 1 };
-    }
-    throw lastErr;
   }
 
   /** One chat-completions call (non-streaming). */
@@ -261,13 +232,30 @@ export class LlmClient {
     };
     for (const k of Object.keys(body)) if (body[k] === undefined) delete body[k];
 
-    const t0 = Date.now();
-    const { data, attempts } = await this.request('/chat/completions', {
-      method: 'POST',
-      body: JSON.stringify(body),
-      timeoutMs: req.timeoutMs,
-      signal: req.signal,
+    // Count HTTP attempts (first try + SDK retries) through a per-call fetch wrapper.
+    let attempts = 0;
+    const baseFetch = this.config.fetch ?? globalThis.fetch;
+    const sdk = this.sdk.withOptions({
+      fetch: ((input: any, init?: any) => {
+        attempts++;
+        return baseFetch(input, init);
+      }) as typeof fetch,
     });
+    const t0 = Date.now();
+    let data: any;
+    try {
+      data = await sdk.chat.completions.create(body as any, {
+        ...(req.timeoutMs !== undefined ? { timeout: req.timeoutMs } : {}),
+        ...(req.signal ? { signal: req.signal } : {}),
+      });
+    } catch (e) {
+      throw toLlmError(e);
+    }
+    // Some OpenAI-compatible providers report errors in a 200 body.
+    if (data && typeof data === 'object' && data.error && !data.choices) {
+      const code = Number(data.error.code);
+      throw new LlmError(`LLM error: ${data.error.message ?? JSON.stringify(data.error)}`, Number.isFinite(code) ? code : null, data, false);
+    }
     const choice = data?.choices?.[0];
     if (!choice) throw new LlmError('LLM response has no choices', null, data, false);
     if (choice.error) throw new LlmError(`LLM choice error: ${choice.error.message ?? JSON.stringify(choice.error)}`, null, data, false);
@@ -306,11 +294,16 @@ export class LlmClient {
     };
   }
 
-  /** GET {baseURL}/models → raw model objects. */
+  /** GET {baseURL}/models → raw model objects (provider extras such as supports_tools are kept). */
   async listModels(): Promise<ProviderModel[]> {
-    const { data } = await this.request('/models', { method: 'GET' });
-    const arr = Array.isArray(data) ? data : data?.data;
-    if (!Array.isArray(arr)) throw new LlmError('unexpected /models response', null, data, false);
+    let page: any;
+    try {
+      page = await this.sdk.models.list();
+    } catch (e) {
+      throw toLlmError(e);
+    }
+    const arr = page?.data;
+    if (!Array.isArray(arr)) throw new LlmError('unexpected /models response', null, page, false);
     return arr as ProviderModel[];
   }
 }
@@ -622,7 +615,9 @@ export const MODELS = {
     { family: 'kimi', requested: 'Kimi K3', id: `${FW_MODELS}kimi-k3` },
     { family: 'qwen', requested: 'Qwen 3.8', id: `${FW_MODELS}qwen3p8-max` },
   ],
-  validator: `${FW_MODELS}deepseek-v4-pro`,
+  // `deepseek-v4-pro` is listed by GET /models but 404s "not deployed" on serverless chat; the
+  // dated snapshot is the served one (verified 2026-09-10, see docs/PREVIEW_COST.md).
+  validator: `${FW_MODELS}deepseek-v4-pro-0813`,
   jurors: {
     juror1: `${FW_MODELS}deepseek-v4p1-flash`,
     juror2: `${FW_MODELS}gpt-oss-120b`,
