@@ -34,6 +34,8 @@ function Body() {
   const me = useQuery({ queryKey: ["juror", address], queryFn: () => fetchJurorInfo(address!), enabled: !!address, refetchInterval: 6_000 });
   const events = useMarketEvents();
   const seatStake = params.data?.jurorStake;
+  // the stake and cases panels are only for approved jurors; everyone else sees the pool and the pay rules
+  const isJuror = !!address && !!me.data?.approved;
   const mySeats = useMemo(() => {
     if (!address || !events.data) return [];
     const lc = address.toLowerCase();
@@ -105,19 +107,10 @@ function Body() {
         </section>
 
         <aside className="space-y-6">
+          {!isJuror && <p className="px-1 text-sm text-muted">Jurors are approved by the market operator.</p>}
+          {isJuror && me.data && (
           <Card title="Your juror stake" subtitle={seatStake !== undefined ? `Each case locks ${fmtUsdc(seatStake)} until it’s decided.` : undefined}>
             <RequireWallet why="Sign in with the juror wallet to see and manage its stake.">
-              {!me.data ? (
-                <Skeleton className="h-24" />
-              ) : !me.data.approved ? (
-                <Notice tone="neutral" title="This address isn’t an approved juror">
-                  {consts.data ? (
-                    <>
-                      Juror addresses are approved by the market owner, <AddressLink address={consts.data.owner} />.
-                    </>
-                  ) : null}
-                </Notice>
-              ) : (
                 <div className="space-y-5">
                   <div className="grid grid-cols-3 gap-3">
                     <Stat label="Staked" value={fmtUsdc(me.data.total, { symbol: false })} />
@@ -133,11 +126,11 @@ function Body() {
                     <WithdrawAction label="Withdraw" functionName="withdrawJurorStake" max={me.data.free} />
                   </div>
                 </div>
-              )}
             </RequireWallet>
           </Card>
+          )}
 
-          {address && (
+          {isJuror && (
             <Card title="Your cases" subtitle="Disputes this wallet was drawn for.">
               {mySeats.length === 0 ? (
                 <p className="text-sm text-muted">None yet.</p>
