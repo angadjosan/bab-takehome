@@ -1,0 +1,70 @@
+<!-- Purchase state machine for docs/RL_ENV_MARKET.md. Rendered to purchase-states.png at 1040x305, scale 2. -->
+<meta charset="utf-8">
+<title>Purchase states</title>
+<style>
+  html, body { margin: 0; background: #fff; }
+  svg { display: block; }
+  text { font-family: "STIX Two Text", "Times New Roman", serif; fill: #000; }
+  .b { font-size: 16px; }
+  .f { font-size: 14px; }
+  .s { font-size: 12.5px; }
+  .box { fill: #fff; stroke: #000; stroke-width: 1; }
+  .ln { fill: none; stroke: #000; stroke-width: 1; }
+</style>
+<svg width="1040" height="305" viewBox="0 40 1040 305" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,1 L10,5 L0,9 z" fill="#000"/>
+    </marker>
+  </defs>
+
+  <!-- states -->
+  <rect class="box" x="30" y="70" width="100" height="46"/>
+  <text class="b" x="80" y="98" text-anchor="middle">Start</text>
+  <rect class="box" x="300" y="70" width="120" height="46"/>
+  <text class="b" x="360" y="98" text-anchor="middle">Funded</text>
+  <rect class="box" x="590" y="70" width="120" height="46"/>
+  <text class="b" x="650" y="98" text-anchor="middle">Delivered</text>
+  <rect class="box" x="880" y="70" width="120" height="46"/>
+  <text class="b" x="940" y="98" text-anchor="middle">Settled</text>
+  <rect class="box" x="300" y="250" width="120" height="46"/>
+  <text class="b" x="360" y="278" text-anchor="middle">Refunded</text>
+  <rect class="box" x="590" y="250" width="120" height="46"/>
+  <text class="b" x="650" y="278" text-anchor="middle">Disputed</text>
+
+  <!-- Start -> Funded -->
+  <path class="ln" d="M130,93 H300" marker-end="url(#a)"/>
+  <text class="f" x="215" y="85" text-anchor="middle">buy()</text>
+  <text class="s" x="215" y="111" text-anchor="middle">price escrowed,</text>
+  <text class="s" x="215" y="126" text-anchor="middle">collateral reserved</text>
+
+  <!-- Funded -> Delivered -->
+  <path class="ln" d="M420,93 H590" marker-end="url(#a)"/>
+  <text class="f" x="505" y="85" text-anchor="middle">recordDelivery()</text>
+  <text class="s" x="505" y="111" text-anchor="middle">relay-signed receipt;</text>
+  <text class="s" x="505" y="126" text-anchor="middle">challenge clock starts</text>
+
+  <!-- Delivered -> Settled -->
+  <path class="ln" d="M710,93 H880" marker-end="url(#a)"/>
+  <text class="f" x="795" y="85" text-anchor="middle">finalize()</text>
+  <text class="s" x="795" y="111" text-anchor="middle">challenge window over,</text>
+  <text class="s" x="795" y="126" text-anchor="middle">no dispute</text>
+
+  <!-- Funded -> Refunded -->
+  <path class="ln" d="M360,116 V250" marker-end="url(#a)"/>
+  <text class="f" x="372" y="176">refundUndelivered()</text>
+  <text class="s" x="372" y="193">delivery deadline passed;</text>
+  <text class="s" x="372" y="208">full refund</text>
+
+  <!-- Delivered -> Disputed -->
+  <path class="ln" d="M650,116 V250" marker-end="url(#a)"/>
+  <text class="f" x="662" y="176">openDispute()</text>
+  <text class="s" x="662" y="193">buyer posts bond before</text>
+  <text class="s" x="662" y="208">challenge deadline</text>
+
+  <!-- Disputed -> Settled -->
+  <path class="ln" d="M710,273 H940 V116" marker-end="url(#a)"/>
+  <text class="f" x="825" y="294" text-anchor="middle">resolveMechanical()</text>
+  <text class="f" x="825" y="311" text-anchor="middle">or tallyDispute()</text>
+  <text class="s" x="825" y="328" text-anchor="middle">(or timeout fallback)</text>
+</svg>

@@ -1,0 +1,122 @@
+<!-- Components diagram for docs/RL_ENV_MARKET.md. Rendered to components.png with headless Chrome at 1400x680, scale 2. -->
+<meta charset="utf-8">
+<title>Components</title>
+<style>
+  html, body { margin: 0; background: #fff; }
+  svg { display: block; }
+  text { font-family: "STIX Two Text", "Times New Roman", serif; fill: #000; }
+  .b { font-size: 16px; }
+  .s { font-size: 13px; }
+  .e { font-size: 13px; }
+  .g { font-size: 13px; letter-spacing: 0.02em; }
+  .box { fill: #fff; stroke: #000; stroke-width: 1; }
+  .grp { fill: #efefef; stroke: none; }
+  .ln { fill: none; stroke: #000; stroke-width: 1; }
+</style>
+<svg width="1400" height="680" viewBox="0 0 1400 680" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,1 L10,5 L0,9 z" fill="#000"/>
+    </marker>
+  </defs>
+
+  <!-- groups -->
+  <rect class="grp" x="220" y="80" width="300" height="480"/>
+  <text class="g" x="234" y="101">EigenCompute TEE</text>
+  <rect class="grp" x="1040" y="80" width="330" height="580"/>
+  <text class="g" x="1054" y="101">Base</text>
+
+  <!-- TEE <-> chain buses -->
+  <path class="ln" d="M400,80 V34 H1300 V120" marker-end="url(#a)"/>
+  <text class="e" x="850" y="27" text-anchor="middle">signed preview report, delivery receipt, dispute findings (EIP-712)</text>
+  <path class="ln" d="M1180,120 V64 H460 V80" marker-end="url(#a)"/>
+  <text class="e" x="820" y="57" text-anchor="middle">events: preview paid, purchase funded, dispute opened</text>
+
+  <!-- inference provider -->
+  <rect class="box" x="20" y="240" width="130" height="56"/>
+  <text class="b" x="85" y="263" text-anchor="middle">Fireworks</text>
+  <text class="s" x="85" y="282" text-anchor="middle">model inference</text>
+  <path class="ln" d="M250,268 H150" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text class="e" x="200" y="261" text-anchor="middle">model calls</text>
+
+  <!-- TEE boxes -->
+  <rect class="box" x="250" y="120" width="240" height="56"/>
+  <text class="b" x="370" y="143" text-anchor="middle">Encrypted storage</text>
+  <text class="s" x="370" y="162" text-anchor="middle">bundles, audit set, evidence</text>
+
+  <path class="ln" d="M370,176 V240" marker-end="url(#a)"/>
+  <text class="e" x="380" y="212">committed inputs</text>
+
+  <rect class="box" x="250" y="240" width="240" height="56"/>
+  <text class="b" x="370" y="263" text-anchor="middle">Verification runner</text>
+  <text class="s" x="370" y="282" text-anchor="middle">reference panel + validator</text>
+
+  <rect class="box" x="250" y="350" width="240" height="56"/>
+  <text class="b" x="370" y="373" text-anchor="middle">Key relay</text>
+  <text class="s" x="370" y="392" text-anchor="middle">wraps key to buyer</text>
+
+  <rect class="box" x="250" y="470" width="240" height="56"/>
+  <text class="b" x="370" y="493" text-anchor="middle">Mechanical verifier</text>
+  <text class="s" x="370" y="512" text-anchor="middle">rebuild, rerun, sign findings</text>
+
+  <!-- actors -->
+  <rect class="box" x="720" y="120" width="160" height="110"/>
+  <text class="b" x="800" y="172" text-anchor="middle">Seller</text>
+  <text class="s" x="800" y="191" text-anchor="middle">or seller agent</text>
+
+  <rect class="box" x="720" y="250" width="160" height="170"/>
+  <text class="b" x="800" y="332" text-anchor="middle">Buyer</text>
+  <text class="s" x="800" y="351" text-anchor="middle">or buyer agent</text>
+
+  <rect class="box" x="720" y="460" width="160" height="80"/>
+  <text class="b" x="800" y="497" text-anchor="middle">Jurors</text>
+  <text class="s" x="800" y="516" text-anchor="middle">3 staked AI agents</text>
+
+  <!-- TEE <-> actors -->
+  <path class="ln" d="M720,150 H490" marker-end="url(#a)"/>
+  <text class="e" x="605" y="143" text-anchor="middle">encrypted bundle</text>
+  <path class="ln" d="M490,268 H720" marker-end="url(#a)"/>
+  <text class="e" x="605" y="261" text-anchor="middle">signed preview report</text>
+  <path class="ln" d="M490,378 H720" marker-end="url(#a)"/>
+  <text class="e" x="605" y="371" text-anchor="middle">ciphertext + buyer-encrypted key</text>
+  <path class="ln" d="M490,498 H720" marker-end="url(#a)"/>
+  <text class="e" x="605" y="491" text-anchor="middle">case evidence</text>
+
+  <!-- actors <-> chain -->
+  <path class="ln" d="M880,148 H1070" marker-end="url(#a)"/>
+  <text class="e" x="975" y="141" text-anchor="middle">hashes, terms, collateral</text>
+  <path class="ln" d="M880,184 H1070" marker-end="url(#a)"/>
+  <text class="e" x="975" y="177" text-anchor="middle">preview fee</text>
+  <path class="ln" d="M1070,216 H880" marker-end="url(#a)"/>
+  <text class="e" x="975" y="209" text-anchor="middle">proceeds (withdraw)</text>
+
+  <path class="ln" d="M880,290 H1070" marker-end="url(#a)"/>
+  <text class="e" x="975" y="283" text-anchor="middle">payment (buy)</text>
+  <path class="ln" d="M880,330 H1070" marker-end="url(#a)"/>
+  <text class="e" x="975" y="323" text-anchor="middle">dispute + bond</text>
+  <path class="ln" d="M1070,370 H880" marker-end="url(#a)"/>
+  <text class="e" x="975" y="363" text-anchor="middle">refund (withdraw)</text>
+
+  <path class="ln" d="M880,486 H1070" marker-end="url(#a)"/>
+  <text class="e" x="975" y="479" text-anchor="middle">stake, commit / reveal votes</text>
+  <path class="ln" d="M1070,520 H880" marker-end="url(#a)"/>
+  <text class="e" x="975" y="513" text-anchor="middle">rewards (withdraw)</text>
+
+  <!-- contract -->
+  <rect class="box" x="1070" y="120" width="270" height="420"/>
+  <text class="b" x="1205" y="156" text-anchor="middle">EnvMarket contract</text>
+  <line class="ln" x1="1110" y1="172" x2="1300" y2="172"/>
+  <text class="s" x="1205" y="206" text-anchor="middle">listings, versions, report hashes</text>
+  <text class="s" x="1205" y="244" text-anchor="middle">preview-fee escrow</text>
+  <text class="s" x="1205" y="282" text-anchor="middle">purchase escrow</text>
+  <text class="s" x="1205" y="320" text-anchor="middle">seller collateral</text>
+  <text class="s" x="1205" y="358" text-anchor="middle">disputes and bonds</text>
+  <text class="s" x="1205" y="396" text-anchor="middle">juror stakes, commit–reveal, tally</text>
+  <text class="s" x="1205" y="434" text-anchor="middle">reputation</text>
+  <text class="s" x="1205" y="472" text-anchor="middle">claimable balances, withdraw()</text>
+
+  <path class="ln" d="M1205,540 V590" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text class="e" x="1215" y="569">token transfers</text>
+  <rect class="box" x="1140" y="590" width="130" height="44"/>
+  <text class="b" x="1205" y="617" text-anchor="middle">USDC</text>
+</svg>

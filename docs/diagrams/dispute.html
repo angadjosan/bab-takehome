@@ -1,0 +1,93 @@
+<!-- Dispute resolution paths for docs/RL_ENV_MARKET.md. Rendered to dispute.png at 1300x385, scale 2. -->
+<meta charset="utf-8">
+<title>Dispute paths</title>
+<style>
+  html, body { margin: 0; background: #fff; }
+  svg { display: block; }
+  text { font-family: "STIX Two Text", "Times New Roman", serif; fill: #000; }
+  .b { font-size: 16px; }
+  .f { font-size: 14px; }
+  .s { font-size: 13px; }
+  .g { font-size: 13px; letter-spacing: 0.02em; }
+  .box { fill: #fff; stroke: #000; stroke-width: 1; }
+  .grp { fill: #efefef; stroke: none; }
+  .ln { fill: none; stroke: #000; stroke-width: 1; }
+</style>
+<svg width="1300" height="385" viewBox="0 35 1300 385" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,1 L10,5 L0,9 z" fill="#000"/>
+    </marker>
+  </defs>
+
+  <!-- open -->
+  <rect class="box" x="20" y="170" width="180" height="80"/>
+  <text class="f" x="110" y="196" text-anchor="middle">openDispute()</text>
+  <text class="s" x="110" y="216" text-anchor="middle">ground, disputed tasks,</text>
+  <text class="s" x="110" y="234" text-anchor="middle">evidence hash, bond</text>
+
+  <!-- spine -->
+  <path class="ln" d="M200,210 H250"/>
+  <path class="ln" d="M250,85 V330"/>
+  <path class="ln" d="M250,85 H300" marker-end="url(#a)"/>
+  <path class="ln" d="M250,165 H300" marker-end="url(#a)"/>
+  <path class="ln" d="M250,330 H300" marker-end="url(#a)"/>
+
+  <!-- grounds -->
+  <rect class="box" x="300" y="63" width="190" height="44"/>
+  <text class="b" x="395" y="90" text-anchor="middle">Broken / hash mismatch</text>
+  <rect class="box" x="300" y="143" width="190" height="44"/>
+  <text class="b" x="395" y="170" text-anchor="middle">Preview not reproducible</text>
+  <rect class="box" x="300" y="308" width="190" height="44"/>
+  <text class="b" x="395" y="335" text-anchor="middle">False description</text>
+
+  <!-- verifier -->
+  <rect class="box" x="570" y="55" width="230" height="140"/>
+  <text class="b" x="685" y="96" text-anchor="middle">Mechanical verifier</text>
+  <text class="s" x="685" y="115" text-anchor="middle">in the EigenCompute TEE</text>
+  <text class="s" x="685" y="145" text-anchor="middle">rebuild, rerun hidden tests,</text>
+  <text class="s" x="685" y="163" text-anchor="middle">or rerun the reference panel</text>
+  <path class="ln" d="M490,85 H570" marker-end="url(#a)"/>
+  <path class="ln" d="M490,165 H570" marker-end="url(#a)"/>
+
+  <!-- jurors -->
+  <rect class="grp" x="550" y="262" width="390" height="118"/>
+  <text class="g" x="564" y="284">3 staked AI jurors, chosen with on-chain randomness</text>
+  <rect class="box" x="565" y="306" width="100" height="50"/>
+  <text class="f" x="615" y="328" text-anchor="middle">select</text>
+  <text class="s" x="615" y="346" text-anchor="middle">random seats</text>
+  <rect class="box" x="695" y="306" width="100" height="50"/>
+  <text class="f" x="745" y="328" text-anchor="middle">commit</text>
+  <text class="s" x="745" y="346" text-anchor="middle">vote hash</text>
+  <rect class="box" x="825" y="306" width="100" height="50"/>
+  <text class="f" x="875" y="328" text-anchor="middle">reveal</text>
+  <text class="s" x="875" y="346" text-anchor="middle">vote + salt</text>
+  <path class="ln" d="M490,330 H565" marker-end="url(#a)"/>
+  <path class="ln" d="M665,330 H695" marker-end="url(#a)"/>
+  <path class="ln" d="M795,330 H825" marker-end="url(#a)"/>
+
+  <!-- to settlement -->
+  <path class="ln" d="M800,125 H1040" marker-end="url(#a)"/>
+  <text class="f" x="920" y="117" text-anchor="middle">resolveMechanical()</text>
+  <text class="s" x="920" y="142" text-anchor="middle">verifier-signed finding</text>
+  <path class="ln" d="M925,330 H1040" marker-end="url(#a)"/>
+  <text class="f" x="982" y="322" text-anchor="middle">tallyDispute()</text>
+  <text class="s" x="982" y="347" text-anchor="middle">majority</text>
+
+  <!-- settlement -->
+  <rect class="box" x="1040" y="55" width="240" height="345"/>
+  <text class="b" x="1160" y="88" text-anchor="middle">Settlement</text>
+  <text class="s" x="1160" y="107" text-anchor="middle">EnvMarket, once per purchase</text>
+  <line class="ln" x1="1070" y1="122" x2="1250" y2="122"/>
+  <text class="f" x="1160" y="152" text-anchor="middle">upheld</text>
+  <text class="s" x="1160" y="171" text-anchor="middle">refund confirmed tasks,</text>
+  <text class="s" x="1160" y="188" text-anchor="middle">capped at 50% of price;</text>
+  <text class="s" x="1160" y="205" text-anchor="middle">bond returned</text>
+  <text class="f" x="1160" y="240" text-anchor="middle">rejected</text>
+  <text class="s" x="1160" y="259" text-anchor="middle">seller paid; bond covers</text>
+  <text class="s" x="1160" y="276" text-anchor="middle">case fee, rest to reserve</text>
+  <text class="f" x="1160" y="311" text-anchor="middle">timeout or no quorum</text>
+  <text class="s" x="1160" y="330" text-anchor="middle">bond returned, no refund</text>
+  <line class="ln" x1="1070" y1="350" x2="1250" y2="350"/>
+  <text class="s" x="1160" y="378" text-anchor="middle">payouts collected with withdraw()</text>
+</svg>

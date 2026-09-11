@@ -24,39 +24,11 @@ The structure follows the separation of components and operations in the [Aave v
 
 ### Components and verification
 
-```mermaid
-flowchart TB
-    Seller["Seller / seller agent"]
-    Buyer["Buyer / buyer agent"]
-
-    subgraph Private["Off-chain services"]
-        Storage["Encrypted environment storage"]
-        Verify["Verification runner: reference models + AI validator"]
-        Delivery["Key delivery service"]
-        Review["Dispute review: rerun verifier or AI jurors"]
-    end
-
-    subgraph Chain["On-chain protocol"]
-        Core["Marketplace: listings, escrow, disputes and reputation"]
-    end
-
-    Seller -->|"Encrypted bundle"| Storage
-    Seller -->|"Hashes, terms and collateral"| Core
-    Storage -->|"Committed inputs"| Verify
-    Verify -->|"Signed report commitment"| Core
-    Verify -->|"Public scores and screened explanation"| Buyer
-    Buyer -->|"Payment; optional challenge and bond"| Core
-    Core -->|"Funded purchase event"| Delivery
-    Delivery -->|"Buyer-encrypted key"| Buyer
-    Storage -->|"Purchased ciphertext"| Buyer
-    Delivery -->|"Signed delivery receipt"| Core
-    Core -->|"Dispute assignment"| Review
-    Review -->|"Signed findings or committed/revealed votes"| Core
-    Core -->|"Seller proceeds"| Seller
-    Core -->|"Allowed refund"| Buyer
-```
+![Components](diagrams/components.png)
 
 Arrows show transfers of data or funds, including event-triggered work; the contract does not execute off-chain services. Audit tasks use separate storage objects and keys and are excluded from buyer delivery. Dispute evidence is shared privately with assigned reviewers.
+
+In the current deployment the off-chain services run as one EigenCompute TEE app whose signer holds the runner, relay and verifier roles; reference and validator models are called through Fireworks; the contract and USDC are on Base. Proceeds, refunds and juror rewards are credited on-chain and collected with `withdraw()`. The HTML sources for all diagrams in this document are in [docs/diagrams/](diagrams/).
 
 | Component | Responsibility |
 |---|---|
@@ -70,6 +42,8 @@ The marketplace fixes the reference panel: GLM 5.3, Kimi K3, and Qwen 3.8. Exact
 ### Purchase states
 
 These are proposed state names for the existing purchase flow. Each purchase freezes its listing version and terms.
+
+![Purchase states](diagrams/purchase-states.png)
 
 | Transition | Required event and effect |
 |---|---|
@@ -259,6 +233,8 @@ Exactly three dispute grounds are allowed:
 | Doesn’t match hash / broken | Payload differs from the commitment, key is invalid, specified build fails, or the environment reproducibly crashes under its declared supported configuration. | Contract checks for deadlines, commitments, and authorized signatures; a private verifier checks encrypted content and reruns builds or execution. |
 | Description is false | A specific claim in the frozen description contradicts the product or evidence. | Staked AI juror agents, informed by mechanical evidence where available. |
 | Preview not reproducible | Repeating the committed reference protocol exceeds its precommitted tolerance. | An authorized runner signs numerical findings; the contract applies the posted rule. |
+
+![Dispute paths](diagrams/dispute.png)
 
 A contract can compare hashes and signatures. It cannot inspect an encrypted file based on a buyer’s unsupported claim, run Docker, or run a large model. The demo therefore trusts its mechanical verifier. Production needs an attested verifier policy and an independent rerun path for conflicting findings; a narrow proof system is another possible addition.
 
