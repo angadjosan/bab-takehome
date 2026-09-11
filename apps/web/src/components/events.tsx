@@ -118,8 +118,26 @@ export function describeEvent(e: MarketEvent): Described {
       return { title: `${e.eventName.replace("Set", "")} role ${e.args.allowed ? "granted" : "revoked"}`, tone: "neutral" };
     case "ParamsUpdated":
       return { title: "Market terms updated", detail: "Applies to new purchases only", tone: "neutral" };
-    default:
-      return { title: e.eventName, tone: "neutral" };
+    case "PreviewRequested":
+      return {
+        title: `Preview paid for environment #${s(e, "versionId")}`,
+        detail: e.args.fee !== undefined ? `${fmtUsdc(b(e, "fee"))} held until the signed report is attached` : "Fee held until the signed report is attached",
+        tone: "neutral",
+        href: listing,
+      };
+    case "PreviewFeeReleased":
+      return { title: `Preview fee paid to the TEE operator`, detail: e.args.versionId !== undefined ? `Environment #${s(e, "versionId")}` : undefined, tone: "neutral", href: e.args.versionId !== undefined ? listing : undefined };
+    case "PreviewFeeReclaimed":
+      return { title: `Preview fee returned to the seller`, detail: e.args.versionId !== undefined ? `Environment #${s(e, "versionId")} · no report in time` : undefined, tone: "warn", href: e.args.versionId !== undefined ? listing : undefined };
+    case "TreasuryWithdrawn":
+      return { title: "Marketplace fees withdrawn", detail: e.args.amount !== undefined ? fmtUsdc(b(e, "amount")) : undefined, tone: "neutral" };
+    case "ReserveWithdrawn":
+      return { title: "Neutral reserve withdrawn", detail: e.args.amount !== undefined ? fmtUsdc(b(e, "amount")) : undefined, tone: "neutral" };
+    default: {
+      // unknown events still read as words: "SomethingHappened" → "Something happened"
+      const words = e.eventName.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+      return { title: words.charAt(0).toUpperCase() + words.slice(1), tone: "neutral" };
+    }
   }
 }
 

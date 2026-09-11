@@ -182,10 +182,8 @@ function BuyBox({ v }: { v: Version }) {
   const perTask = v.taskCount ? v.price / BigInt(v.taskCount) : 0n;
   return (
     <section className="card p-5">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="font-mono text-[28px] leading-none font-medium tabular-nums text-ink">{fmtUsdc(v.price)}</span>
-        <span className="font-mono text-xs text-muted tabular-nums">{fmtUsdc(perTask)} / task</span>
-      </div>
+      <div className="font-mono text-2xl leading-none font-medium whitespace-nowrap text-ink tabular-nums">{fmtUsdc(v.price)}</div>
+      <div className="mt-1.5 font-mono text-xs text-muted tabular-nums">{fmtUsdc(perTask)} per task</div>
       <p className="mt-3 text-[13px] leading-relaxed text-muted">
         Full refund if not delivered within {fmtWindow(v.deliveryWindow)}
         {p ? ` · up to ${pct(p.refundCapBps)} back for defective tasks within ${fmtWindow(v.challengeWindow)} of delivery` : ""}.

@@ -148,17 +148,17 @@ function ConnectPrompt({ why }: { why?: string }) {
   const [burnerOpen, setBurnerOpen] = useState(false);
   const uniq = connectors.filter((c, i, arr) => c.id !== BURNER_CONNECTOR_ID && arr.findIndex((x) => x.name === c.name) === i);
   return (
-    <div className="rounded-lg border border-dashed border-line-strong p-4 text-sm">
+    <div className="space-y-3 text-sm">
       <p className="text-muted">{why ?? "Connect a wallet to continue."}</p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {uniq.map((c) => (
-          <button key={c.uid} className="btn btn-sm" disabled={isPending} onClick={() => connect({ connector: c, chainId: CHAIN_ID })}>
-            {c.name === "Injected" ? "Browser wallet" : c.name}
+      <div className="flex flex-wrap gap-2">
+        {uniq.map((c, i) => (
+          <button key={c.uid} className={i === 0 ? "btn btn-primary btn-sm" : "btn btn-sm"} disabled={isPending} onClick={() => connect({ connector: c, chainId: CHAIN_ID })}>
+            {isPending ? "Connecting…" : c.name === "Injected" ? "Browser wallet" : c.name}
           </button>
         ))}
         {devTools && (
-          <button className="btn btn-sm" onClick={() => setBurnerOpen((x) => !x)}>
-            Use a burner key (dev)
+          <button className="btn btn-sm btn-ghost" aria-expanded={burnerOpen} onClick={() => setBurnerOpen((x) => !x)}>
+            Burner key (dev)
           </button>
         )}
       </div>

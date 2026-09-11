@@ -49,7 +49,7 @@ export function PrivyWalletButton() {
     );
   if (!authenticated)
     return (
-      <button className="btn btn-primary btn-sm" onClick={() => login()}>
+      <button className="btn btn-sm" onClick={() => login()}>
         Sign in
       </button>
     );

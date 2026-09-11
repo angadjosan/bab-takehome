@@ -196,7 +196,7 @@ function WagmiWalletButton() {
   return (
     <div className="relative" ref={ref}>
       {!isConnected ? (
-        <button className="btn btn-primary btn-sm" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)} disabled={isPending}>
+        <button className="btn btn-sm" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)} disabled={isPending}>
           {isPending ? "Connecting…" : "Connect wallet"}
         </button>
       ) : wrongChain ? (
