@@ -104,6 +104,23 @@ contract ForkUSDCTest is Test {
         );
     }
 
+    /// Measured real preview cost (~$1.50–2.13, docs/PREVIEW_COST.md): multi-USDC fees escrow and are
+    /// paid to the operator by pull payment (claimable → withdraw).
+    function testForkPreviewFeeAtMeasuredCost() public onlyFork {
+        uint256 fee = 2_130_000; // 2.13 USDC
+        uint256 vid = _listNoReport();
+        vm.prank(seller);
+        market.requestPreview(vid, fee, QUOTE);
+        _attach(vid);
+        assertEq(usdc.balanceOf(operator), 0); // nothing pushed
+        assertEq(market.claimable(operator), fee);
+        vm.prank(operator);
+        market.withdraw();
+        assertEq(usdc.balanceOf(operator), fee);
+        assertEq(usdc.balanceOf(seller), 10e6 - fee);
+        _conserved();
+    }
+
     /// Seller-paid preview at the 0.5-USDC listing scale: 0.2 USDC fee escrowed, released to the TEE
     /// operator on attachReport; a second version's fee is reclaimed after the timeout.
     function testForkSellerPaysPreviewWithRealUsdc() public onlyFork {

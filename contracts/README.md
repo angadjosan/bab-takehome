@@ -44,8 +44,8 @@ address is known.
 `deployments/<chainId>.json`: `{chainId, market, token, views, startBlock, deployer, owner,
 tokenSymbol, tokenDecimals, testToken, params, preview, deployedAt, txs}`. Params are read back from the
 chain (amounts in 6-decimal base units). `preview = {feeRecipient, minFee, timeout}` is the
-seller-paid preview config: `PREVIEW_FEE_RECIPIENT` (default: first `RUNNER_ADDR`, else the
-deployer), `MIN_PREVIEW_FEE` (default 50000 = 0.05 USDC with mainnet params, 1 tUSDC with demo
+seller-paid preview config: `PREVIEW_FEE_RECIPIENT` (default: the deployer, i.e. the operator
+treasury that pays the inference bill; it collects with `withdraw()`), `MIN_PREVIEW_FEE` (default 50000 = 0.05 USDC with mainnet params, 1 tUSDC with demo
 params), `PREVIEW_TIMEOUT` (default 3600 s).
 
 ## Things clients must know

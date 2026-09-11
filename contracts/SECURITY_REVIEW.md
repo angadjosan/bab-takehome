@@ -223,9 +223,9 @@ EIP-712 type is unchanged, so TEE signing code is unaffected. Test: `testReclaim
 
 ## Results
 
-- `forge test`: 75 tests (59 at the original review, then +16 for seller-paid previews). All pass
-  except the 5 fork tests, which are skipped without `BASE_RPC`.
-- `BASE_RPC=https://mainnet.base.org forge test --mc ForkUSDC`: 5 of 5 pass against real Base USDC.
-  This includes the 0.2 USDC preview fee test.
+- `forge test`: 76 tests (59 at the original review, then +17 for seller-paid previews). All pass
+  except the 6 fork tests, which are skipped without `BASE_RPC`.
+- `BASE_RPC=https://mainnet.base.org forge test --mc ForkUSDC`: 6 of 6 pass against real Base USDC.
+  This includes preview fees of 0.2 USDC and 2.13 USDC (the measured preview cost).
 - `forge build --sizes`: EnvMarket runtime 23,371 B (1,205 B under EIP-170). It was 22,056 B before the
   preview functions.

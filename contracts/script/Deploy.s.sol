@@ -17,8 +17,8 @@ import {MarketParams} from "./MarketParams.sol";
 ///   RUNNER_ADDR / RELAY_ADDR / VERIFIER_ADDR   comma-separated address lists
 ///   JUROR1_ADDR / JUROR2_ADDR / JUROR3_ADDR    approved as jurors
 ///   SELLER_ADDR, BUYER_ADDR, BUYER2_ADDR       (anvil only) receive 10,000 tUSDC demo balances
-///   PREVIEW_FEE_RECIPIENT               TEE operator payout for seller-paid previews
-///                                       (default: first RUNNER_ADDR, else the deployer)
+///   PREVIEW_FEE_RECIPIENT               payout for seller-paid previews (default: the deployer = operator
+///                                       treasury paying the Fireworks bill; NOT the TEE app wallet)
 ///   MIN_PREVIEW_FEE                     base units; default 50000 (0.05 USDC) for mainnet params, 1e6 for demo
 ///   PREVIEW_TIMEOUT                     seconds before a seller may reclaim an unattached preview (default 3600)
 /// Writes nothing to disk and prints no secrets; scripts/deploy.sh records deployments/<chainId>.json.
@@ -49,7 +49,7 @@ contract Deploy is Script {
 
         address[] memory runners = _addrs("RUNNER_ADDR");
         address feeRecipient = _addr("PREVIEW_FEE_RECIPIENT");
-        if (feeRecipient == address(0)) feeRecipient = runners.length > 0 ? runners[0] : deployer;
+        if (feeRecipient == address(0)) feeRecipient = deployer;
         uint256 minPreviewFee = vm.envOr("MIN_PREVIEW_FEE", defaultMinPreviewFee);
         uint256 previewTimeout = vm.envOr("PREVIEW_TIMEOUT", uint256(MarketParams.PREVIEW_TIMEOUT));
         require(minPreviewFee <= type(uint128).max, "MIN_PREVIEW_FEE too large");
