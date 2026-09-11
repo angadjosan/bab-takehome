@@ -2,60 +2,81 @@
 
 https://rl-env-market.vercel.app
 
-A market for reinforcement-learning environments: task sets, tools and hidden graders that AI labs use to train agents. The product can't be shown before sale. If the seller shows the tasks and tests, the buyer already has them. Sellers are environment builders. Buyers are labs and agent teams running coding RL, often through their own buyer agents. Before paying, a buyer sees a preview signed inside a TEE: how a fixed panel of reference models scores on the sealed environment, plus a screened validator note. After payment enters escrow, the buyer gets the whole environment. The buyer then has a bonded challenge window to claim specific broken or misdescribed tasks. The seller is paid only after that window closes.
+A marketplace for reinforcement learning (RL) environments: bundles of tasks, tools, and hidden tests that labs use to train AI agents.
 
-## How it works
+The market for RL environments currently has a fundamental gap: Buyers (Anthropic, OpenAI, GDM, XAI, etc) need to inspect the tasks and tests to judge their quality, but once they've seen them, they already have the product.
+
+This market gives buyers a signed preview before they pay (verifying the pass@1 score for a set of open-weight agents & verifying that the environment contains tasks as advertised). All of this is done without revealing task data. Payment goes into escrow, and the buyer gets the full environment. They then have a limited window to challenge specific problems before the seller gets paid.
+
+## System Design
 
 ![Components](docs/diagrams/components.png)
 
-1. **List.** The seller agent packages the environment as a canonical tar. It commits the bundle hash, a salted Merkle root over the purchased tasks and a separate root over the audit tasks, then uploads everything encrypted to the TEE. The TEE rechecks every commitment and runs a sandboxed preflight. The seller then calls `createListing` with the hashes, price and collateral.
-2. **Preview.** The TEE quotes the inference cost and the seller pays it on-chain (`requestPreview`). The TEE runs one pass@1 episode per model per task through the open-source harness in an offline sandbox. Hidden tests are graded in a separate process. It signs the report (EIP-712) and attaches its hash on-chain, which releases the fee.
-3. **Buy.** The buyer checks the report signature, runner role, attestation and description hash in the browser, then calls `buy`. That escrows the price and reserves the seller's collateral for this sale.
-4. **Deliver.** The TEE's relay sees `Purchased` and wraps the bundle key to the buyer's X25519 key with HPKE (RFC 9180). It signs a delivery receipt and records it on-chain. The buyer decrypts in the browser and checks the plaintext against `bundleHash`.
-5. **Challenge.** Before the challenge deadline, the buyer can claim specific tasks on one of three grounds. *Broken / hash mismatch* and *preview not reproducible* go to the TEE's mechanical verifier, which reruns and signs findings. *False description* goes to three staked AI jurors: they are drawn on-chain, read a case packet from the TEE, and vote by commit-reveal.
-6. **Settle and rate.** Upheld claims refund the claimed tasks' share of the price once per task, up to 50%, and slash seller collateral. With no dispute, anyone can call `finalize`. Everything pays out through `withdraw()`. Buyers rate settled purchases, and seller reputation is money-weighted.
+## How a purchase works
+
+1. **The seller lists an environment.** They upload an encrypted bundle and record fingerprints of its contents on-chain. These let the buyer check that the delivered files match what was listed. The seller also deposits collateral that can be used to pay for valid claims.
+2. **The buyer sees a preview.** A trusted execution environment (TEE), an isolated server environment, runs a fixed panel of reference models on the tasks (pass@1 score). It signs a report with their scores and includes a screened validator note. The seller pays for the preview; buyers can read it without seeing the private tasks or tests.
+3. **The buyer pays into escrow.** The app checks the preview's signature, the runner's authorization and attestation, and the listing description's fingerprint. The contract holds the payment and reserves seller collateral for this purchase.
+4. **The buyer gets everything.** The TEE encrypts the bundle key for the buyer and records a delivery receipt on-chain. The buyer decrypts the bundle in their browser and checks its fingerprint. They receive the source, purchased tasks, hidden tests, and reference solutions.
+5. **The buyer can challenge specific tasks.** Before the deadline, they can report broken tasks, a preview that doesn't reproduce, or a false claim in the listing description. They must post a deposit, called a bond, to open a dispute.
+6. **Payment is released after validation.** If nobody disputes, anyone can finalize the sale after the challenge deadline. If the buyer disputes, settlement follows the dispute outcome. Valid claims refund the affected tasks' share of the price, subject to the 50% cap. Sellers, buyers, and jurors collect payouts through `withdraw()`.
 
 ![Purchase states](docs/diagrams/purchase-states.png)
 
-The full design is in [docs/RL_ENV_MARKET.md](docs/RL_ENV_MARKET.md), with the dispute diagram at [docs/diagrams/dispute.png](docs/diagrams/dispute.png). The interface contract is [docs/BUILD_SPEC.md](docs/BUILD_SPEC.md).
+## Trust Mechanisms
 
-## Trust assumptions and failure modes
+- **Hashing.** The seller commits hashes of the bundle and listing description on-chain, along with Merkle roots for the tasks. The TEE checks these before running the preview, and the buyer checks the delivered bundle against the listed hash. This ties the advertised version, evaluated files, and delivered product together. The verifier and dispute process check whether the description is true.
+- **Open-weight models, measured at pass@1.** The preview runs a fixed panel of reference models with one attempt per task and reports the fraction that pass the hidden tests. It records the actual models and evaluation protocol used. Completed evaluations are cached for the same bundle, audit tasks, protocol, and models, preventing repeated previews from becoming a way to select a better score.
+- **A verifier agent with screened output.** The agent inspects the private environment and checks the seller's claims. Buyers receive structured verdicts and a short assessment. The agent is instructed to omit task details, and its output is screened for copied text, code, paths, and task identifiers. Fields that fail screening are withheld. This lets buyers see the assessment while keeping private task context out of the public preview.
+- **Funds held through validation.** Delivery does not release the buyer's payment to the seller. The contract holds it in escrow until the challenge window expires without a dispute, or an opened dispute is resolved. Each purchase also reserves its own share of seller collateral.
 
-The problem: a buyer can't judge an RL environment without having it, and a seller can't show it without giving it away. So the market doesn't try to prove quality up front. It gives buyers a few cheap checks before they pay and a way to get money back after.
+## Biggest decision: the dispute window
 
-What's in place:
-- When the seller lists, the bundle hash and Merkle roots over the tasks go on-chain. After delivery, the buyer hashes what they got and compares.
-- The TEE runs every task against three open models (GLM 5.3, Kimi K3, Qwen 3.8) and signs the scores, so every buyer sees the same baseline. Next step: let buyers bring their own weights and run inference on those.
-- Payment sits in escrow for the dispute window. The seller is paid only after it closes.
-- Seller ratings are weighted by money and only count as a score after 100 settled sales (`QUALIFYING_TX_THRESHOLD` in the contract). Until then the app shows "new seller".
+I built the purchase around a bounded period of validation after full delivery. Buyers need the actual environment to run it inside their own training loop, so they receive the source, tasks, hidden tests, and reference solutions while their payment is still in escrow. The intended window is one week; the demo configuration shortens it to five minutes so the full flow can be exercised.
 
-What can go wrong:
-- The bundle doesn't match its hash, or the key doesn't open it. Dispute it as broken. The TEE reruns and signs the finding.
-- The preview scores don't reproduce. Dispute it. Same mechanical check.
-- It's junk that got past the validator, or the description lies. Dispute the specific false claim. Three staked jurors vote.
-- The buyer keeps a copy and claims everything is broken. Refunds are per task and capped at 50%, and the buyer posts a bond they lose if the claim fails.
-- Nobody disputes before the deadline. The seller gets paid. "It didn't help my model" isn't a ground.
+1. **Purchase locks the funds.** The buyer pays into escrow, and the contract reserves seller collateral for that purchase. The same collateral cannot back another sale while reserved.
+2. **Recorded delivery starts the clock.** The TEE encrypts the bundle key for the buyer and records a signed delivery receipt on-chain. The contract sets the challenge deadline from that timestamp. The buyer decrypts the bundle, checks its hash, and can run the environment locally. If delivery is not recorded by the separate delivery deadline, the payment can be refunded in full.
+3. **The buyer submits one specific dispute before the deadline.** They select the affected tasks, choose an allowed ground, commit an evidence hash, and post a bond based on the requested refund. Opening the dispute blocks ordinary settlement. The current flow settles the purchase when that dispute resolves, so the buyer must include the affected tasks in that claim.
+4. **The claim is checked.** Mechanical failures and preview reproducibility claims use signed findings from the TEE. A false-description claim goes to three staked AI jurors, who review the evidence and commit their votes before revealing them.
+5. **The contract applies the outcome.** A successful claim returns the buyer's bond and refunds the confirmed defective tasks' share of the price, capped at 50% of the purchase price. Seller collateral pays the case fee and an additional penalty if more than 5% of tasks are confirmed defective. A rejected claim forfeits the bond to dispute payments and a neutral reserve; the seller never receives it. If the process reaches its no-fault timeout or no-quorum fallback, the bond is returned and the purchase settles without a defect refund.
+6. **Settlement makes proceeds withdrawable.** If no dispute is opened, anyone can finalize after the challenge deadline. Otherwise, resolving the dispute settles the purchase, even if the original window has not yet expired. The seller receives the remaining proceeds less the market fee, unused collateral is released, and recipients collect their balances through `withdraw()`.
 
-What you still have to trust:
-- The TEE: Intel TDX on Phala Cloud, plus Phala's key service. I can push a new image to the same app. The attestation shows the change, but the contract doesn't block it.
-- The jurors. Right now they're an approved panel of three that I run. The plan is open validators who stake to join.
-- The owner key. It sets roles and approves jurors, but it can't touch escrow or balances.
-- The inference provider (Fireworks), which sees task text during previews.
+### What counts as a dispute?
 
-## Biggest design decision: deliver everything after escrow, then make lying expensive
+| Claim | Who checks it? |
+| --- | --- |
+| A task is broken, the bundle doesn't match its fingerprint, or the key doesn't open it | The TEE runs a mechanical check and signs its findings. |
+| The preview scores don't reproduce | The TEE reruns the evaluation and signs its findings. |
+| The listing makes a specific false claim | Three AI jurors review evidence from the TEE and vote using commit–reveal. |
 
-The buyer can't judge an RL environment without its tasks and grader, and seeing them is having them. So the market does not try to prove quality before sale. It hands over the complete product (source, every purchased task, hidden tests, reference solutions) as soon as payment is escrowed. Protection comes after delivery instead.
+"It didn't help my model" isn't a ground for a dispute. The price is split evenly across tasks, and each confirmed defective task earns at most one refund.
 
-I rejected three alternatives:
-- **Samples or sandboxed inspection.** With 5–50 tasks per environment, a sample is a large share of the product. A buyer who can run tests in a sandbox can extract them.
-- **Keeping the environment in the seller's TEE.** RL training means thousands of rollouts inside the buyer's own training loop (prime-rl, GRPO), close to their GPUs. Running training inside someone else's enclave isn't practical, and GPU TEE coverage for these models isn't available.
-- **Holding payment until the buyer approves.** Then the buyer never approves.
+The tradeoff is that the buyer gets an irreversible copy of the product before the seller gets paid. Bonds, specific grounds, and the 50% refund cap limit the incentive to copy an environment and then dispute the entire purchase. That protection leaves an honest buyer undercompensated if most or all of the environment is defective. The deadline also bounds how long the seller waits, but requires the buyer to find and report problems within that period.
 
-What makes after-the-fact protection work:
-- **Narrow, checkable claims.** Only three grounds qualify: broken or hash mismatch, a specific false claim in the frozen description, or a preview that doesn't reproduce. Poor training results don't count.
-- **Per-task remedies.** Price is split evenly across tasks. A confirmed task is refunded once. Post-delivery refunds are capped at 50%, which limits "copy it, then claim everything".
-- **Bonds.** The buyer posts a bond equal to the requested refund (5–50 tUSDC). A rejected bond goes to the jurors and a neutral reserve, never to the seller, so sellers gain nothing from provoking disputes.
-- **Collateral per sale.** Each purchase reserves at least `caseFee + 10% of price` of the seller's stake, so one deposit can't back unlimited sales. If confirmed defects exceed 5% of tasks, an extra penalty is slashed.
-- **A cheap, bounded pre-purchase signal.** A fixed panel runs a fixed open harness inside the TEE and the report is signed. The seller pays for it (about $1.50–2.13 per preview, measured in [docs/PREVIEW_COST.md](docs/PREVIEW_COST.md)), and it is cached per bundle so it can't be re-rolled.
+## One important limitation
 
-The cost of this choice is that an honest buyer of a worthless environment recovers at most half the price. That is disclosed before purchase.
+The preview runs the market's reference models, not the buyer's own model. It gives buyers a common baseline, but cannot tell them how their particular model will perform or how much training on the environment will improve it.
+
+I want to add an option for on-chain inference that lets buyers upload their own models and evaluate them against the private tasks before purchasing. The goal is a fair run under committed evaluation rules, with verifiable results and no private task details released to the buyer. That would measure the buyer's actual model performance on the environment. This is future work; the current implementation only supports the reference panel.
+
+## Selling
+
+Use [sell.sh](sell.sh) from the repository root with Node.js 22 or newer. The current market runs on Base Sepolia with test USDC.
+
+Prepare an environment folder using [py-repair-kit](seller-workspace/py-repair-kit/README.md) as a layout example. Include the source in `src/`, task definitions and hidden tests in `tasks/`, reference fixes in `solutions/`, and the environment interface and grading code in `grader/`. Add `requirements.lock`, an immutable image reference in `IMAGE_DIGEST`, and the public listing files `listing/description.json` and `listing/manifest.template.json`. The description contains the specific claims buyers will evaluate; the manifest describes how to run the environment. Optional holdout tasks go in `audit-tasks/` and are excluded from the buyer's download.
+
+Check the folder and package it locally first:
+
+```bash
+./sell.sh /path/to/my-environment --dry-run
+```
+
+Then create a seller wallet and list the environment:
+
+```bash
+./sell.sh /path/to/my-environment --new-wallet --price 100 --collateral 100
+```
+
+The script saves the new wallet's private key as `SELLER_PK` in the repository's `.env`; back it up, since this wallet receives your proceeds. To use an existing wallet, set `SELLER_PK` in `.env` and omit `--new-wallet`.
+
+The script installs its dependencies, tops up the wallet through the test faucet, packages and encrypts the environment, uploads it to the TEE for validation, creates the on-chain listing, deposits collateral, and requests the signed preview. Once the report is attached, it prints the listing URL. If a step fails, rerun the command without `--new-wallet` to resume completed steps. Keep enough unreserved collateral available for additional purchases.

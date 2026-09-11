@@ -1,0 +1,229 @@
+{
+  "type": "envmarket.provenance.v1",
+  "environmentId": "humanevalfix-8",
+  "environmentVersion": "humanevalfix-8@1.0.0",
+  "origin": "third-party open-source dataset, converted",
+  "authoredBy": "the listing seller (conversion, grader, packaging); upstream content by the HumanEvalPack and HumanEval authors",
+  "authoredFor": "this EnvMarket listing (conversion); upstream content is public",
+  "createdAt": "2026-09-10",
+  "upstreamSources": [
+    {
+      "name": "HumanEvalPack (HumanEvalFix, Python split)",
+      "dataset": "bigcode/humanevalpack",
+      "url": "https://huggingface.co/datasets/bigcode/humanevalpack",
+      "revision": "9a41762f73a8cb23bb5811b73d5aab164efcf378",
+      "revisionDate": "2025-08-19T20:35:51Z",
+      "config": "python",
+      "split": "test",
+      "file": "python/test-00000-of-00001.parquet",
+      "fileSha256": "ed5f15d789156e21222bfcd556c425a39042355c84ae1e8b058abd6a3d7f8075",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2023 Muennighoff (OctoPack, https://github.com/bigcode-project/octopack)",
+      "citation": "Muennighoff et al., OctoPack: Instruction Tuning Code Large Language Models, arXiv:2308.07124 (2023)",
+      "fieldsUsed": [
+        "task_id",
+        "prompt",
+        "canonical_solution",
+        "buggy_solution",
+        "bug_type",
+        "failure_symptoms",
+        "entry_point",
+        "test",
+        "example_test"
+      ],
+      "modified": "converted to repair-episode format"
+    },
+    {
+      "name": "OpenAI HumanEval (origin of the HumanEvalPack Python problems, canonical solutions and tests)",
+      "url": "https://github.com/openai/human-eval",
+      "license": "MIT",
+      "copyright": "Copyright (c) OpenAI (https://openai.com)",
+      "citation": "Chen et al., Evaluating Large Language Models Trained on Code, arXiv:2107.03374 (2021)",
+      "modified": "converted to repair-episode format (via HumanEvalPack)"
+    }
+  ],
+  "modifications": [
+    "module = upstream prompt + canonical_solution (src/, solutions/) or + buggy_solution (overlay/), with a 2-line header comment pointing to the MIT notices",
+    "hidden test = upstream test field; the trailing check(<entry_point>) call is replaced by one pytest test function; import lines and a docstring are added",
+    "visible test = 1-2 asserts copied from upstream example_test (the docstring examples), wrapped as pytest tests",
+    "task statement written by the seller; upstream bug_type is recorded in task.json but not shown in the statement"
+  ],
+  "copiedCode": [
+    "HumanEvalPack python rows listed in taskMap (prompt, canonical_solution, buggy_solution, test, example_test), MIT"
+  ],
+  "copiedIssueText": [],
+  "thirdPartyComponents": [
+    {
+      "name": "pytest",
+      "version": "8.3.5",
+      "license": "MIT",
+      "use": "test runner (grading and visible tests only)",
+      "modified": false
+    },
+    {
+      "name": "pluggy",
+      "version": "1.6.0",
+      "license": "MIT",
+      "use": "pytest dependency",
+      "modified": false
+    },
+    {
+      "name": "iniconfig",
+      "version": "2.3.0",
+      "license": "MIT",
+      "use": "pytest dependency",
+      "modified": false
+    },
+    {
+      "name": "packaging",
+      "version": "26.3",
+      "license": "Apache-2.0 OR BSD-2-Clause",
+      "use": "pytest dependency",
+      "modified": false
+    },
+    {
+      "name": "python:3.12-slim",
+      "digest": "sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea",
+      "license": "PSF-2.0 and Debian package licenses",
+      "use": "runtime base image",
+      "modified": false
+    }
+  ],
+  "generationMethod": "scripts/build_from_upstream.py downloads the pinned HumanEvalPack python parquet file, checks its sha256, applies eligibility rules E1-E5 and draws a seeded sample of 10 rows (8 purchased, 2 audit). The grader and environment driver are the seller's py-repair-kit grader with only names changed.",
+  "contamination": "HumanEval (2021) and HumanEvalPack (2023) are public benchmarks. Models may have seen these functions, solutions and tests during training.",
+  "auditTasks": {
+    "count": 2,
+    "curation": "seller-selected by the same seeded draw (not independently curated)"
+  },
+  "funders": [],
+  "relatedParties": [],
+  "conflicts": [],
+  "selection": {
+    "script": "scripts/build_from_upstream.py",
+    "sourceFile": "https://huggingface.co/datasets/bigcode/humanevalpack/resolve/9a41762f73a8cb23bb5811b73d5aab164efcf378/python/test-00000-of-00001.parquet",
+    "sourceFileSha256": "ed5f15d789156e21222bfcd556c425a39042355c84ae1e8b058abd6a3d7f8075",
+    "eligibilityRules": [
+      "E1 failure_symptoms == 'incorrect output'",
+      "E2 hidden test does not use random",
+      "E3 example_test is asserts-only",
+      "E4 canonical passes full test and all examples",
+      "E5 buggy fails full test and at least one example",
+      "E6 entry_point usable as a lowercase module name"
+    ],
+    "eligibleCount": 132,
+    "rowsConsidered": 164,
+    "exclusionCounts": {
+      "E1 failure_symptoms": 4,
+      "E2 random in test": 4,
+      "E3 example_test not asserts-only": 5,
+      "E5 buggy passes every example": 13,
+      "E5 buggy probe timed out or crashed": 1,
+      "E6 entry point not a module name": 5
+    },
+    "method": "random.Random(20260910).sample(eligible_in_upstream_order, 10); first 8 purchased, last 2 audit; ids assigned in ascending upstream order within each group",
+    "seed": 20260910,
+    "pythonVersionUsed": "3.12.14"
+  },
+  "taskMap": [
+    {
+      "taskId": "T1",
+      "set": "purchased",
+      "upstreamTaskId": "Python/3",
+      "humanEvalId": "HumanEval/3",
+      "entryPoint": "below_zero",
+      "module": "src/hefix/below_zero.py",
+      "bugType": "operator misuse",
+      "hiddenAssertCount": 6
+    },
+    {
+      "taskId": "T2",
+      "set": "purchased",
+      "upstreamTaskId": "Python/20",
+      "humanEvalId": "HumanEval/20",
+      "entryPoint": "find_closest_elements",
+      "module": "src/hefix/find_closest_elements.py",
+      "bugType": "operator misuse",
+      "hiddenAssertCount": 5
+    },
+    {
+      "taskId": "T3",
+      "set": "purchased",
+      "upstreamTaskId": "Python/31",
+      "humanEvalId": "HumanEval/31",
+      "entryPoint": "is_prime",
+      "module": "src/hefix/is_prime.py",
+      "bugType": "value misuse",
+      "hiddenAssertCount": 13
+    },
+    {
+      "taskId": "T4",
+      "set": "purchased",
+      "upstreamTaskId": "Python/46",
+      "humanEvalId": "HumanEval/46",
+      "entryPoint": "fib4",
+      "module": "src/hefix/fib4.py",
+      "bugType": "value misuse",
+      "hiddenAssertCount": 4
+    },
+    {
+      "taskId": "T5",
+      "set": "purchased",
+      "upstreamTaskId": "Python/74",
+      "humanEvalId": "HumanEval/74",
+      "entryPoint": "total_match",
+      "module": "src/hefix/total_match.py",
+      "bugType": "variable misuse",
+      "hiddenAssertCount": 11
+    },
+    {
+      "taskId": "T6",
+      "set": "purchased",
+      "upstreamTaskId": "Python/75",
+      "humanEvalId": "HumanEval/75",
+      "entryPoint": "is_multiply_prime",
+      "module": "src/hefix/is_multiply_prime.py",
+      "bugType": "value misuse",
+      "hiddenAssertCount": 10
+    },
+    {
+      "taskId": "T7",
+      "set": "purchased",
+      "upstreamTaskId": "Python/107",
+      "humanEvalId": "HumanEval/107",
+      "entryPoint": "even_odd_palindrome",
+      "module": "src/hefix/even_odd_palindrome.py",
+      "bugType": "value misuse",
+      "hiddenAssertCount": 8
+    },
+    {
+      "taskId": "T8",
+      "set": "purchased",
+      "upstreamTaskId": "Python/112",
+      "humanEvalId": "HumanEval/112",
+      "entryPoint": "reverse_delete",
+      "module": "src/hefix/reverse_delete.py",
+      "bugType": "operator misuse",
+      "hiddenAssertCount": 9
+    },
+    {
+      "taskId": "A1",
+      "set": "audit",
+      "upstreamTaskId": "Python/24",
+      "humanEvalId": "HumanEval/24",
+      "entryPoint": "largest_divisor",
+      "module": "audit-tasks/A1/overlay/hefix/largest_divisor.py",
+      "bugType": "operator misuse",
+      "hiddenAssertCount": 5
+    },
+    {
+      "taskId": "A2",
+      "set": "audit",
+      "upstreamTaskId": "Python/49",
+      "humanEvalId": "HumanEval/49",
+      "entryPoint": "modp",
+      "module": "audit-tasks/A2/overlay/hefix/modp.py",
+      "bugType": "value misuse",
+      "hiddenAssertCount": 7
+    }
+  ]
+}
