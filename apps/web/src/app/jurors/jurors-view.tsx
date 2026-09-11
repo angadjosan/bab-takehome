@@ -7,21 +7,18 @@ import { useAccount } from "wagmi";
 import { DeploymentGate } from "@/components/gate";
 import { DepositAction, WithdrawAction } from "@/components/token-action";
 import { RequireWallet } from "@/components/tx";
-import { AddressLink, Card, Notice, Skeleton, Stat, cx } from "@/components/ui";
-import { fmtUsdc, pct } from "@/lib/format";
+import { AddressLink, Card, Chip, IconArrowRight, Notice, PageHeader, Skeleton, Stat, cx } from "@/components/ui";
+import { fmtUsdc, fmtWindow, pct } from "@/lib/format";
 import { fetchJurorInfo, fetchJurors, useMarketEvents, useMarketParams, type JurorInfo } from "@/lib/market";
 import { ClaimBanner } from "../purchase/[id]/purchase-view";
 
 export function JurorsView() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Jurors</h1>
-        <p className="mt-1 max-w-3xl text-sm text-muted">
-          “Description is false” disputes go to three jurors drawn at random from this approved, staked pool (buyer and seller excluded). Each seat locks stake; revealing jurors are paid from the case fee,
-          the minority and non-revealers are slashed. The owner approves juror addresses; anyone approved can stake.
-        </p>
-      </div>
+    <div className="space-y-8">
+      <PageHeader title="Jurors">
+        When a buyer says a listing’s description is false, three jurors drawn at random from this pool decide. Each juror stakes tUSDC per case, is paid for revealing a vote, and loses part of
+        the stake for voting with the minority or not revealing. The market owner approves juror addresses.
+      </PageHeader>
       <DeploymentGate>
         <Body />
       </DeploymentGate>
@@ -54,32 +51,43 @@ function Body() {
   return (
     <>
       <ClaimBanner />
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <Card title="Juror pool" subtitle="From jurorList() and jurorInfo(); eligibility is free stake ≥ the per-seat stake (a deposit made after a draw’s selection block sits out that draw).">
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <section aria-labelledby="pool-title" className="min-w-0 space-y-4">
+          <h2 id="pool-title" className="text-sm font-semibold text-ink">
+            Juror pool
+          </h2>
           {jurors.isLoading ? (
-            <Skeleton className="h-40" />
+            <Skeleton className="h-48" />
           ) : jurors.error ? (
-            <Notice tone="bad">{(jurors.error as Error).message}</Notice>
+            <Notice tone="bad" title="Couldn’t read the juror pool">
+              {(jurors.error as Error).message.split("\n")[0]} Reload the page to try again.
+            </Notice>
           ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <Stat label="Registered" value={jurors.data!.length} />
-                <Stat label="Eligible now" value={totals.eligible} hint="3 needed per round" />
-                <Stat label="Staked" value={fmtUsdc(totals.total)} />
-                <Stat label="Locked in cases" value={fmtUsdc(totals.locked)} />
+            <>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
+                <Stat label="Approved" value={jurors.data!.length} />
+                <Stat label="Can be drawn now" value={totals.eligible} hint="3 needed per case" />
+                <Stat label="Staked" value={fmtUsdc(totals.total, { symbol: false })} />
+                <Stat label="Locked in cases" value={fmtUsdc(totals.locked, { symbol: false })} />
               </div>
               {jurors.data!.length === 0 ? (
                 <p className="text-sm text-muted">No jurors approved yet.</p>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[520px] text-sm">
+                <div className="card overflow-x-auto">
+                  <table className="data-table min-w-[520px]">
                     <thead>
-                      <tr className="text-left text-xs text-muted">
-                        <th className="py-1.5 font-medium">Juror</th>
-                        <th className="py-1.5 font-medium">Status</th>
-                        <th className="py-1.5 text-right font-medium">Total</th>
-                        <th className="py-1.5 text-right font-medium">Locked</th>
-                        <th className="py-1.5 text-right font-medium">Free</th>
+                      <tr>
+                        <th scope="col">Juror</th>
+                        <th scope="col">Status</th>
+                        <th scope="col" className="text-right">
+                          Staked
+                        </th>
+                        <th scope="col" className="text-right">
+                          Locked
+                        </th>
+                        <th scope="col" className="text-right">
+                          Free
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -90,73 +98,85 @@ function Body() {
                   </table>
                 </div>
               )}
-            </div>
+              <p className="text-xs text-muted">
+                A juror can be drawn when their free stake covers one case{seatStake !== undefined ? ` (${fmtUsdc(seatStake)})` : ""}. A deposit made after a draw’s selection block sits out that draw.
+              </p>
+            </>
           )}
-        </Card>
+        </section>
 
         <aside className="space-y-6">
-          <Card title="Your juror stake" subtitle={seatStake !== undefined ? `Per seat: ${fmtUsdc(seatStake)} locked while a case is open.` : undefined}>
-            <RequireWallet why="Connect the juror wallet to see and manage its stake.">
+          <Card title="Your juror stake" subtitle={seatStake !== undefined ? `Each case locks ${fmtUsdc(seatStake)} until it’s decided.` : undefined}>
+            <RequireWallet why="Sign in with the juror wallet to see and manage its stake.">
               {!me.data ? (
                 <Skeleton className="h-24" />
               ) : !me.data.approved ? (
-                <Notice tone="neutral" title="This address is not an approved juror">
-                  The market owner approves juror addresses (approveJuror). Anyone can see the pool; only approved addresses can stake and be drawn.
+                <Notice tone="neutral" title="This address isn’t an approved juror">
+                  The market owner approves juror addresses. Anyone can browse the pool; only approved addresses can stake and be drawn.
                 </Notice>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <div className="grid grid-cols-3 gap-3">
-                    <Stat label="Total" value={fmtUsdc(me.data.total, { symbol: false })} />
+                    <Stat label="Staked" value={fmtUsdc(me.data.total, { symbol: false })} />
                     <Stat label="Locked" value={fmtUsdc(me.data.locked, { symbol: false })} />
                     <Stat label="Free" value={fmtUsdc(me.data.free, { symbol: false })} />
                   </div>
-                  <div>
-                    <div className="section-title mb-1">Deposit stake</div>
-                    <DepositAction label="Deposit stake" functionName="depositJurorStake" hint={seatStake !== undefined ? `≥ ${fmtUsdc(seatStake)} free to be drawn` : undefined} />
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-medium text-ink">Add stake</div>
+                    <DepositAction label="Deposit" functionName="depositJurorStake" hint={seatStake !== undefined ? `keep at least ${fmtUsdc(seatStake)} free to be drawn` : undefined} />
                   </div>
-                  <div>
-                    <div className="section-title mb-1">Withdraw free stake</div>
-                    <WithdrawAction label="Withdraw stake" functionName="withdrawJurorStake" max={me.data.free} />
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-medium text-ink">Withdraw free stake</div>
+                    <WithdrawAction label="Withdraw" functionName="withdrawJurorStake" max={me.data.free} />
                   </div>
                 </div>
               )}
             </RequireWallet>
           </Card>
+
           {address && (
-            <Card title="Your seats" subtitle="Cases this wallet was drawn for (JurorsSelected events).">
+            <Card title="Your cases" subtitle="Disputes this wallet was drawn for.">
               {mySeats.length === 0 ? (
                 <p className="text-sm text-muted">None yet.</p>
               ) : (
-                <ul className="space-y-1 text-sm">
+                <ul className="-my-1 divide-y divide-line">
                   {mySeats.map((s) => (
                     <li key={`${s.disputeId}-${s.round}`}>
-                      <Link href={`/dispute/${s.disputeId}`} className="link">
-                        Dispute #{s.disputeId}
-                      </Link>{" "}
-                      <span className="text-xs text-muted">round {s.round}</span>
+                      <Link href={`/dispute/${s.disputeId}`} className="group flex items-center justify-between py-2 text-sm">
+                        <span className="text-ink group-hover:underline group-hover:decoration-line-strong group-hover:underline-offset-[3px]">Dispute #{s.disputeId}</span>
+                        <span className="flex items-center gap-1.5 text-xs text-muted">
+                          round {s.round} <IconArrowRight className="h-3 w-3" />
+                        </span>
+                      </Link>
                     </li>
                   ))}
                 </ul>
               )}
             </Card>
           )}
+
           {params.data && (
-            <Card title="Juror economics">
-              <dl className="kv text-[13px]">
-                <dt>Stake per seat</dt>
-                <dd>{fmtUsdc(params.data.jurorStake)}</dd>
-                <dt>Participation</dt>
-                <dd>{fmtUsdc(params.data.participationFee)} per revealing juror, from the case fee</dd>
-                <dt>Minority slash</dt>
-                <dd>{pct(params.data.minoritySlashBps)} of seat stake → majority</dd>
-                <dt>Non-reveal slash</dt>
-                <dd>{pct(params.data.nonRevealSlashBps)} of seat stake → reserve</dd>
-                <dt>Windows</dt>
+            <section aria-labelledby="econ-title" className="space-y-3 px-1">
+              <h2 id="econ-title" className="text-sm font-semibold text-ink">
+                How jurors are paid
+              </h2>
+              <dl className="kv">
+                <dt>Stake per case</dt>
+                <dd className="font-mono tabular-nums">{fmtUsdc(params.data.jurorStake)}</dd>
+                <dt>Revealed vote</dt>
                 <dd>
-                  commit {params.data.commitWindow} s · reveal {params.data.revealWindow} s
+                  <span className="font-mono tabular-nums">{fmtUsdc(params.data.participationFee)}</span> from the case fee
+                </dd>
+                <dt>Minority vote</dt>
+                <dd>loses {pct(params.data.minoritySlashBps)} of the case stake to the majority</dd>
+                <dt>No reveal</dt>
+                <dd>loses {pct(params.data.nonRevealSlashBps)} of the case stake to the reserve</dd>
+                <dt>Voting time</dt>
+                <dd>
+                  {fmtWindow(params.data.commitWindow)} to vote, then {fmtWindow(params.data.revealWindow)} to reveal
                 </dd>
               </dl>
-            </Card>
+            </section>
           )}
         </aside>
       </div>
@@ -166,17 +186,19 @@ function Body() {
 
 function JurorRow({ j, seatStake, me }: { j: JurorInfo; seatStake?: bigint; me?: string }) {
   const eligible = j.approved && seatStake !== undefined && j.free >= seatStake;
+  const isMe = me?.toLowerCase() === j.address.toLowerCase();
   return (
-    <tr className={cx("border-t border-line", me?.toLowerCase() === j.address.toLowerCase() && "bg-accent-soft")}>
-      <td className="py-1.5">
-        <AddressLink address={j.address} />
+    <tr className={cx(isMe && "bg-accent-soft")}>
+      <td>
+        <span className="inline-flex items-center gap-2">
+          <AddressLink address={j.address} />
+          {isMe && <Chip tone="accent">you</Chip>}
+        </span>
       </td>
-      <td className="py-1.5">
-        {!j.approved ? <span className="badge badge-neutral">not approved</span> : eligible ? <span className="badge badge-ok">eligible</span> : <span className="badge badge-warn">stake too low</span>}
-      </td>
-      <td className="py-1.5 text-right tabular-nums">{fmtUsdc(j.total, { symbol: false })}</td>
-      <td className="py-1.5 text-right tabular-nums">{fmtUsdc(j.locked, { symbol: false })}</td>
-      <td className="py-1.5 text-right tabular-nums">{fmtUsdc(j.free, { symbol: false })}</td>
+      <td>{!j.approved ? <Chip>not approved</Chip> : eligible ? <Chip tone="ok">can be drawn</Chip> : <Chip tone="warn">stake too low</Chip>}</td>
+      <td className="text-right font-mono">{fmtUsdc(j.total, { symbol: false })}</td>
+      <td className="text-right font-mono">{fmtUsdc(j.locked, { symbol: false })}</td>
+      <td className="text-right font-mono">{fmtUsdc(j.free, { symbol: false })}</td>
     </tr>
   );
 }

@@ -1,78 +1,119 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useMemo, useState } from "react";
 import { DeploymentGate } from "@/components/gate";
 import { EventList } from "@/components/events";
-import { Card, Notice, Skeleton, cx } from "@/components/ui";
+import { Notice, PageHeader, Skeleton, cx } from "@/components/ui";
 import { useMarketEvents } from "@/lib/market";
-import { deployment } from "@/lib/config";
 
 const FILTERS: { key: string; label: string; names: string[] | null }[] = [
   { key: "all", label: "All", names: null },
   { key: "listings", label: "Listings", names: ["ListingCreated", "VersionCreated", "VersionActiveSet", "ReportAttached", "CollateralDeposited", "CollateralWithdrawn"] },
   { key: "purchases", label: "Purchases", names: ["Purchased", "Delivered", "RefundedUndelivered", "PurchaseSettled", "Rated"] },
-  { key: "disputes", label: "Disputes & jurors", names: ["DisputeOpened", "SelectionArmed", "JurorsSelected", "VoteCommitted", "VoteRevealed", "JurorPaid", "JurorSlashed", "RoundFailed", "FallbackNoQuorum", "VerifierTimeout", "MechanicalResolved", "DisputeResolved"] },
+  {
+    key: "disputes",
+    label: "Disputes",
+    names: ["DisputeOpened", "SelectionArmed", "JurorsSelected", "VoteCommitted", "VoteRevealed", "JurorPaid", "JurorSlashed", "RoundFailed", "FallbackNoQuorum", "VerifierTimeout", "MechanicalResolved", "DisputeResolved"],
+  },
   { key: "money", label: "Payouts", names: ["Credited", "Withdrawn", "TreasuryWithdrawn", "ReserveWithdrawn"] },
 ];
 
 export default function ActivityPage() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Market activity</h1>
-        <p className="mt-1 text-sm text-muted">Every EnvMarket event, read from the chain in chunked block ranges and decoded in your browser. Refreshes every 12 seconds.</p>
-      </div>
+    <div className="space-y-8">
+      <PageHeader title="Activity">Every market event, read from the chain and decoded in your browser. The list updates every 12 seconds.</PageHeader>
       <DeploymentGate>
-        <Feed />
+        <Suspense fallback={<FeedSkeleton />}>
+          <Feed />
+        </Suspense>
       </DeploymentGate>
+    </div>
+  );
+}
+
+function FeedSkeleton() {
+  return (
+    <div className="card space-y-3 p-4" aria-busy="true">
+      <span className="sr-only">Loading events…</span>
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="flex items-start gap-3">
+          <Skeleton className="mt-1.5 h-1.5 w-1.5 rounded-full" />
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-3 w-1/3" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
 function Feed() {
   const q = useMarketEvents();
-  const [filter, setFilter] = useState("all");
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const requested = params.get("filter");
+  const filter = FILTERS.some((f) => f.key === requested) ? requested! : "all";
   const [limit, setLimit] = useState(60);
+  const current = FILTERS.find((x) => x.key === filter)!;
   const list = useMemo(() => {
-    const f = FILTERS.find((x) => x.key === filter)!;
     const all = q.data ?? [];
-    return (f.names ? all.filter((e) => f.names!.includes(e.eventName)) : all).slice().reverse();
-  }, [q.data, filter]);
+    return (current.names ? all.filter((e) => current.names!.includes(e.eventName)) : all).slice().reverse();
+  }, [q.data, current]);
+
+  function setFilter(key: string) {
+    const sp = new URLSearchParams(params.toString());
+    if (key === "all") sp.delete("filter");
+    else sp.set("filter", key);
+    const qs = sp.toString();
+    setLimit(60);
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }
 
   return (
-    <Card
-      title={q.data ? `${list.length} event${list.length === 1 ? "" : "s"}` : "Loading events…"}
-      subtitle={deployment ? `From block ${deployment.startBlock.toString()}` : undefined}
-      action={
-        <div className="flex flex-wrap gap-1">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div role="group" aria-label="Filter events" className="flex max-w-full overflow-x-auto rounded-md border border-line bg-panel p-0.5">
           {FILTERS.map((f) => (
-            <button key={f.key} className={cx("rounded-md px-2.5 py-1 text-xs", filter === f.key ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-panel-2")} onClick={() => setFilter(f.key)}>
+            <button
+              key={f.key}
+              type="button"
+              aria-pressed={filter === f.key}
+              onClick={() => setFilter(f.key)}
+              className={cx(
+                "h-7 cursor-pointer rounded px-3 text-[13px] whitespace-nowrap transition-colors duration-150",
+                filter === f.key ? "bg-panel-2 font-medium text-ink" : "text-muted hover:text-ink",
+              )}
+            >
               {f.label}
             </button>
           ))}
         </div>
-      }
-    >
+        <span className="font-mono text-xs text-muted tabular-nums" aria-live="polite">
+          {q.data ? `${list.length} event${list.length === 1 ? "" : "s"}` : "Loading…"}
+        </span>
+      </div>
+
       {q.error ? (
-        <Notice tone="bad" title="Could not read events">
-          {(q.error as Error).message.split("\n")[0]}
+        <Notice tone="bad" title="Couldn’t read events from the chain">
+          {(q.error as Error).message.split("\n")[0]} Reload the page to try again.
         </Notice>
       ) : q.isLoading ? (
-        <div className="space-y-2">
-          <Skeleton className="h-10" />
-          <Skeleton className="h-10" />
-          <Skeleton className="h-10" />
-        </div>
+        <FeedSkeleton />
       ) : (
-        <>
-          <EventList events={list.slice(0, limit)} empty="Nothing here yet." />
+        <div className="card px-4 sm:px-5">
+          <EventList events={list.slice(0, limit)} empty={filter === "all" ? "No events yet." : `No ${current.label.toLowerCase()} events yet.`} />
           {list.length > limit && (
-            <button className="btn btn-sm mt-3" onClick={() => setLimit((l) => l + 100)}>
-              Show more
-            </button>
+            <div className="border-t border-line py-3">
+              <button className="btn btn-sm" onClick={() => setLimit((l) => l + 100)}>
+                Show more
+              </button>
+            </div>
           )}
-        </>
+        </div>
       )}
-    </Card>
+    </div>
   );
 }

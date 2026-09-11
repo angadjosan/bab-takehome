@@ -2,34 +2,38 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { encodeAbiParameters, keccak256, parseAbiParameters, type Address, type Hex } from "viem";
 import { useAccount, useSignMessage } from "wagmi";
 import { DeploymentGate } from "@/components/gate";
 import { EventList } from "@/components/events";
 import { RequireWallet, TxStatus, useTx } from "@/components/tx";
-import { AddressLink, Card, Countdown, Empty, HashValue, Notice, Skeleton, Spinner, Verified, cx, useNow, TxLink } from "@/components/ui";
+import {
+  AddressLink,
+  Card,
+  Chip,
+  Countdown,
+  DetailSection,
+  Details,
+  Empty,
+  HashValue,
+  IconCheck,
+  Notice,
+  PageHeader,
+  Skeleton,
+  Spinner,
+  Stat,
+  TxLink,
+  Verified,
+  cx,
+  useNow,
+  type Tone,
+} from "@/components/ui";
 import { marketAbi } from "@/lib/abi";
 import { blockUrl, CHAIN_ID, deployment } from "@/lib/config";
 import { useHealth } from "@/lib/docs";
 import { fmtTime, fmtUsdc, maskToIndexes, pct } from "@/lib/format";
-import {
-  DISPUTE_STATUS,
-  GROUND_HELP,
-  GROUND_LABEL,
-  VERDICTS,
-  eventsForDispute,
-  isMechanical,
-  isZeroHash,
-  readOptional,
-  useBlockNumber,
-  useDispute,
-  useMarketEvents,
-  usePurchase,
-  type Dispute,
-  type Purchase,
-  type Seat,
-} from "@/lib/market";
+import { eventsForDispute, isMechanical, isZeroHash, readOptional, useBlockNumber, useDispute, useMarketEvents, usePurchase, type Dispute, type Purchase, type Seat } from "@/lib/market";
 import type { MarketEvent } from "@/lib/client";
 import { eqHash, sha256Hex } from "@/lib/crypto";
 import { fetchBlob, fetchRationale, getFindings, loadLocalEvidence, requestCasePacket, type CasePacket, type RationaleDoc } from "@/lib/tee";
@@ -40,6 +44,39 @@ function parseId(id: string): bigint | null {
 }
 
 const isEmptyAddr = (a: string) => /^0x0+$/.test(a);
+const roundSeats = (d: Dispute, round = d.round) => d.seats.slice((round - 1) * 3, round * 3);
+
+/** "task 2" · "tasks 2 and 4" · "tasks 1, 2 and 4" */
+function taskList(mask: bigint) {
+  const ix = maskToIndexes(mask).map((i) => i + 1);
+  if (!ix.length) return { text: "no tasks", n: 0 };
+  if (ix.length === 1) return { text: `task ${ix[0]}`, n: 1 };
+  return { text: `tasks ${ix.slice(0, -1).join(", ")} and ${ix[ix.length - 1]}`, n: ix.length };
+}
+
+/** One plain sentence for the claim, by ground. */
+function claimSentence(d: Dispute) {
+  const t = taskList(d.taskMask);
+  const one = t.n === 1;
+  const what =
+    d.ground === 1
+      ? one
+        ? "is broken or doesn’t match the listing"
+        : "are broken or don’t match the listing"
+      : d.ground === 2
+        ? one
+          ? "contradicts the description"
+          : "contradict the description"
+        : one
+          ? "doesn’t reproduce its preview score"
+          : "don’t reproduce their preview scores";
+  return `The buyer says ${t.text} ${what}`;
+}
+
+function outcomeLabel(d: Dispute): { text: string; tone: Tone } {
+  if (d.fallbackNoQuorum) return { text: "Closed, no fault", tone: "neutral" };
+  return d.verdict === 1 ? { text: "Buyer wins", tone: "ok" } : { text: "Seller wins", tone: "neutral" };
+}
 
 export function DisputeView({ id }: { id: string }) {
   return (
@@ -52,128 +89,254 @@ export function DisputeView({ id }: { id: string }) {
 function Inner({ id, raw }: { id: bigint | null; raw: string }) {
   const d = useDispute(id);
   const p = usePurchase(d.data?.purchaseId ?? null);
-  if (id === null) return <Empty title={`“${raw}” is not a dispute id`} />;
-  if (d.isLoading || (d.data && p.isLoading)) return <Skeleton className="h-96" />;
-  if (d.error || !d.data) return <Empty title={`Dispute #${raw} not found`}>{(d.error as Error)?.message}</Empty>;
-  if (!p.data) return <Empty title="Purchase not found">{(p.error as Error)?.message}</Empty>;
+  if (id === null) return <Empty title={`“${raw}” isn’t a dispute number`}>Dispute numbers are whole numbers, like /dispute/1.</Empty>;
+  if (d.isLoading || (d.data && p.isLoading))
+    return (
+      <div className="max-w-4xl space-y-6" aria-busy="true">
+        <span className="sr-only">Loading dispute…</span>
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-9 w-3/4" />
+        <Skeleton className="h-16" />
+        <Skeleton className="h-64" />
+      </div>
+    );
+  if (d.error || !d.data)
+    return (
+      <Empty title={`Dispute #${raw} not found`} action={<Link href="/activity?filter=disputes" className="btn btn-sm">See all disputes</Link>}>
+        {(d.error as Error)?.message?.split("\n")[0] ?? "There is no dispute with that number on this market."}
+      </Empty>
+    );
+  if (!p.data) return <Empty title="The purchase behind this dispute wasn’t found">{(p.error as Error)?.message?.split("\n")[0]}</Empty>;
   return <Body d={d.data} p={p.data} />;
 }
 
 function Body({ d, p }: { d: Dispute; p: Purchase }) {
+  const { address } = useAccount();
   const events = useMarketEvents();
   const mine = useMemo(() => (events.data ? eventsForDispute(events.data, d.id) : []), [events.data, d.id]);
   const resolved = d.status === 3;
-  const verdictTone = d.verdict === 1 ? "badge-ok" : d.verdict === 2 ? "badge-neutral" : "badge-warn";
+  const mechanical = isMechanical(d.ground);
+  const hasSeat = !!address && d.status === 2 && roundSeats(d).some((s) => s.juror.toLowerCase() === address.toLowerCase());
+  const status = resolved ? outcomeLabel(d) : { text: d.status === 1 ? "Waiting for jury" : mechanical ? "Under review" : "Jury voting", tone: "warn" as Tone };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <Link href={`/purchase/${p.id}`} className="text-xs text-muted hover:text-ink">
-          ← Purchase #{p.id.toString()}
-        </Link>
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Dispute #{d.id.toString()}</h1>
-          <span className="badge badge-warn">{GROUND_LABEL[d.ground]}</span>
-          <span className={cx("badge", resolved ? verdictTone : "badge-info")}>{resolved ? VERDICTS[d.verdict] : DISPUTE_STATUS[d.status]}</span>
-          {d.fallbackNoQuorum && <span className="badge badge-neutral">no-fault fallback</span>}
-        </div>
-        <p className="mt-2 max-w-3xl text-sm text-muted">{GROUND_HELP[d.ground]}</p>
-      </div>
+    <div className="max-w-4xl space-y-10">
+      <PageHeader
+        back={{ href: `/purchase/${p.id}`, label: `Purchase #${p.id.toString()}` }}
+        eyebrow={`Dispute #${d.id.toString()}`}
+        title={claimSentence(d)}
+        meta={
+          <>
+            <Chip tone={status.tone} dot>
+              {status.text}
+            </Chip>
+            <span>
+              Asks for <span className="font-mono text-ink tabular-nums">{fmtUsdc(d.requested)}</span> back
+            </span>
+            <span>
+              <span className="font-mono text-ink tabular-nums">{fmtUsdc(d.bond)}</span> deposit
+            </span>
+            <Link href={`/listing/${p.versionId}`} className="link">
+              Environment #{p.versionId.toString()}
+            </Link>
+          </>
+        }
+      >
+        {mechanical
+          ? "The TEE verifier re-checks the disputed tasks and signs a finding. No people or jurors are involved."
+          : "Three staked AI jurors, drawn at random, decide. They vote in secret, then reveal their votes."}
+      </PageHeader>
 
       <ClaimBanner />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="min-w-0 space-y-6">
-          <ClaimCard d={d} p={p} />
-          {isMechanical(d.ground) ? (
-            <>
-              <MechanicalCard d={d} events={mine} />
-              <FindingsCard d={d} />
-            </>
-          ) : (
-            <>
-              <MyJurySeat d={d} />
-              <JuryCard d={d} events={mine} />
-              <RationalesCard d={d} />
-            </>
-          )}
-          {resolved && <OutcomeCard d={d} p={p} />}
-        </div>
-        <aside className="space-y-6">
-          <Card title="Purchase">
-            <dl className="kv text-[13px]">
-              <dt>Purchase</dt>
-              <dd>
-                <Link href={`/purchase/${p.id}`} className="link">
-                  #{p.id.toString()}
-                </Link>{" "}
-                <StateBadge state={p.state} />
-              </dd>
-              <dt>Buyer</dt>
-              <dd>
-                <AddressLink address={p.buyer} seller />
-              </dd>
-              <dt>Seller</dt>
-              <dd>
-                <AddressLink address={p.seller} seller />
-              </dd>
-              <dt>Price</dt>
-              <dd>{fmtUsdc(p.price)}</dd>
-              <dt>Version</dt>
-              <dd>
-                <Link href={`/listing/${p.versionId}`} className="link">
-                  #{p.versionId.toString()}
-                </Link>
-              </dd>
-            </dl>
-          </Card>
-          <Card title="Dispute history">{events.isLoading ? <Skeleton className="h-24" /> : <EventList events={[...mine].reverse()} compact />}</Card>
-        </aside>
-      </div>
+      <Stages d={d} />
+
+      {!mechanical && <MyJurySeat d={d} />}
+      {mechanical ? <MechanicalCard d={d} events={mine} /> : <JuryCard d={d} events={mine} primary={!hasSeat} />}
+      {resolved && <OutcomeCard d={d} p={p} />}
+      <ClaimCard d={d} p={p} />
+
+      <Details summary="Details: randomness, evidence hash, jurors’ addresses and transactions">
+        <DetailSection title="Parties">
+          <dl className="kv">
+            <dt>Purchase</dt>
+            <dd className="flex flex-wrap items-center gap-2">
+              <Link href={`/purchase/${p.id}`} className="link">
+                #{p.id.toString()}
+              </Link>
+              <StateBadge state={p.state} />
+            </dd>
+            <dt>Buyer</dt>
+            <dd>
+              <AddressLink address={p.buyer} seller />
+            </dd>
+            <dt>Seller</dt>
+            <dd>
+              <AddressLink address={p.seller} seller />
+            </dd>
+            <dt>Price paid</dt>
+            <dd className="font-mono tabular-nums">{fmtUsdc(p.price)}</dd>
+          </dl>
+        </DetailSection>
+        <DetailSection title="Evidence" hint="The buyer’s evidence is stored privately by the TEE. Only its sha256 is public, on-chain.">
+          <HashValue value={d.evidenceHash} />
+        </DetailSection>
+        {mechanical ? (
+          <>
+            <MechanicalDetails events={mine} />
+            <FindingsSection d={d} />
+          </>
+        ) : (
+          <>
+            <JuryDetails d={d} events={mine} />
+            <RationalesSection d={d} />
+            <DetailSection title="How jurors are paid">
+              <p className="text-xs leading-relaxed text-muted">
+                Each seat locks {fmtUsdc(d.jurorStake)} of stake. A juror who reveals earns up to {fmtUsdc(d.participationFee)} from the case fee; the rest, plus {pct(d.minoritySlashBps)} of each
+                minority juror’s stake, goes to the majority. A juror who doesn’t reveal loses {pct(d.nonRevealSlashBps)} of the stake to the reserve. Agreeing with the majority doesn’t make a
+                vote correct, and jurors may share a base model’s mistakes.
+              </p>
+            </DetailSection>
+          </>
+        )}
+        <DetailSection title="History">{events.isLoading ? <Skeleton className="h-24" /> : <EventList events={[...mine].reverse()} />}</DetailSection>
+      </Details>
     </div>
   );
 }
+
+/* --------------------------------- progress --------------------------------- */
+
+type StageState = "done" | "active" | "todo" | "skipped";
+type Stage = { label: string; state: StageState; note?: ReactNode };
+const SR_STATE: Record<StageState, string> = { done: "done", active: "in progress", todo: "not started", skipped: "skipped" };
+
+function Stages({ d }: { d: Dispute }) {
+  const now = useNow();
+  const resolved = d.status === 3;
+  let stages: Stage[];
+  if (isMechanical(d.ground)) {
+    stages = [
+      { label: "Reported", state: "done", note: fmtTime(d.openedAt) },
+      {
+        label: "Under review",
+        state: resolved ? "done" : "active",
+        note: resolved ? undefined : now > d.verifierDeadline ? "Deadline passed" : (
+          <>
+            Due in <Countdown to={d.verifierDeadline} />
+          </>
+        ),
+      },
+      { label: "Decided", state: resolved ? "done" : "todo", note: resolved ? fmtTime(d.resolvedAt) : undefined },
+    ];
+  } else {
+    const rs = roundSeats(d);
+    const drawn = d.seats.some((s) => !isEmptyAddr(s.juror));
+    const anyCommit = d.seats.some((s) => !isZeroHash(s.commitment));
+    const anyReveal = d.seats.some((s) => s.revealed);
+    const voting = d.status === 2;
+    const allCommitted = rs.every((s) => !isZeroHash(s.commitment));
+    const allRevealed = rs.every((s) => s.revealed);
+    const commitPhase = voting && !allCommitted && now <= d.commitDeadline;
+    const revealPhase = voting && !commitPhase;
+    stages = [
+      { label: "Reported", state: "done", note: fmtTime(d.openedAt) },
+      {
+        label: d.round === 2 ? "Jury drawn (round 2)" : "Jury drawn",
+        state: d.status === 1 ? "active" : drawn ? "done" : resolved ? "skipped" : "todo",
+        note: d.status === 1 ? `Draw by ${fmtTime(d.selectionDeadline)}` : undefined,
+      },
+      {
+        label: "Votes cast",
+        state: commitPhase ? "active" : voting ? "done" : resolved ? (anyCommit ? "done" : "skipped") : "todo",
+        note: commitPhase ? (
+          <>
+            Closes in <Countdown to={d.commitDeadline} />
+          </>
+        ) : undefined,
+      },
+      {
+        label: "Votes revealed",
+        state: revealPhase ? (allRevealed ? "done" : "active") : resolved ? (anyReveal ? "done" : "skipped") : "todo",
+        note:
+          revealPhase && !allRevealed ? (
+            <>
+              Closes in <Countdown to={d.revealDeadline} doneText="closed" />
+            </>
+          ) : undefined,
+      },
+      { label: "Decided", state: resolved ? "done" : "todo", note: resolved ? fmtTime(d.resolvedAt) : undefined },
+    ];
+  }
+  return (
+    <section aria-label="Progress">
+      <ol className="grid gap-4 sm:auto-cols-fr sm:grid-flow-col sm:gap-0">
+        {stages.map((s, i) => (
+          <li key={s.label} aria-current={s.state === "active" ? "step" : undefined} className="flex gap-3 sm:flex-col sm:gap-2.5">
+            <div className="flex items-center sm:w-full">
+              <StageDot state={s.state} />
+              {i < stages.length - 1 && <span aria-hidden className={cx("mx-2 hidden h-px flex-1 sm:block", s.state === "done" ? "bg-ok/40" : "bg-line")} />}
+            </div>
+            <div className="min-w-0 sm:pr-3">
+              <div className={cx("text-[13px] font-medium", s.state === "todo" || s.state === "skipped" ? "text-muted" : "text-ink")}>
+                {s.label}
+                <span className="sr-only">, {SR_STATE[s.state]}</span>
+              </div>
+              {s.note && <div className="mt-0.5 text-xs text-muted tabular-nums">{s.note}</div>}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function StageDot({ state }: { state: StageState }) {
+  if (state === "done")
+    return (
+      <span aria-hidden className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ok-soft text-ok">
+        <IconCheck className="h-3 w-3" />
+      </span>
+    );
+  if (state === "active")
+    return (
+      <span aria-hidden className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-accent">
+        <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+      </span>
+    );
+  return <span aria-hidden className={cx("h-5 w-5 shrink-0 rounded-full border border-line-strong", state === "skipped" && "border-dashed")} />;
+}
+
+/* ---------------------------------- the claim ---------------------------------- */
 
 function ClaimCard({ d, p }: { d: Dispute; p: Purchase }) {
   const [local, setLocal] = useState<string | null>(null);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage only exists client-side
   useEffect(() => setLocal(loadLocalEvidence(d.id)), [d.id]);
   const localOk = local !== null && eqHash(sha256Hex(local), d.evidenceHash);
+  const tasks = maskToIndexes(d.taskMask).map((i) => i + 1);
   return (
-    <Card title="The claim" subtitle={`Opened ${fmtTime(d.openedAt)} by the buyer before the challenge deadline.`}>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Mini label="Tasks disputed" value={maskToIndexes(d.taskMask).map((i) => `#${i + 1}`).join(", ")} hint={`of ${p.taskCount}`} />
-        <Mini label="Requested refund" value={fmtUsdc(d.requested)} hint={`cap ${pct(p.refundCapBps)} of price`} />
-        <Mini label="Buyer bond" value={fmtUsdc(d.bond)} hint="returned if upheld" />
-        <Mini label="Case fee" value={fmtUsdc(d.caseFee)} hint="paid by the loser" />
+    <Card title="The claim" subtitle={`Reported ${fmtTime(d.openedAt)}, inside the buyer’s protection window.`}>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
+        <Stat label="Tasks" value={tasks.join(", ") || "—"} hint={`of ${p.taskCount}`} />
+        <Stat label="Refund asked" value={fmtUsdc(d.requested, { symbol: false })} hint={`capped at ${pct(p.refundCapBps)} of the price`} />
+        <Stat label="Buyer’s deposit" value={fmtUsdc(d.bond, { symbol: false })} hint="returned if the buyer wins" />
+        <Stat label="Case fee" value={fmtUsdc(d.caseFee, { symbol: false })} hint="paid by the side that loses" />
       </div>
-      <div className="mt-5">
-        <div className="section-title">Evidence</div>
-        <div className="mt-1 text-xs text-muted">
-          evidenceHash <HashValue value={d.evidenceHash} />
-        </div>
+      <div className="mt-6 border-t border-line pt-5">
+        <h3 className="text-[13px] font-medium text-ink">Evidence</h3>
         {localOk ? (
-          <div className="mt-2 rounded-lg border border-line bg-panel-2 p-3">
-            <div className="mb-1 text-[11px] text-muted">✓ your copy, kept in this browser; matches the on-chain evidenceHash. Seated jurors receive it inside the TEE’s case packet.</div>
-            <pre className="whitespace-pre-wrap break-words font-mono text-xs">{local}</pre>
-          </div>
+          <>
+            <p className="mt-1 text-xs text-muted">Your copy, saved in this browser. Seated jurors read it inside the case file the TEE sends them.</p>
+            <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-panel-2 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{local}</pre>
+          </>
         ) : (
-          <p className="mt-2 text-xs text-muted">
-            The evidence is private: the buyer uploaded it to the TEE, which gives it only to seated jurors (inside a signed case packet) and to the mechanical verifier. Only its hash is public.
+          <p className="mt-1 text-[13px] text-muted">
+            Private. The buyer uploaded it to the TEE, which shows it only to the seated jurors and the verifier.
           </p>
         )}
       </div>
     </Card>
-  );
-}
-
-function Mini({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
-  return (
-    <div>
-      <div className="section-title">{label}</div>
-      <div className="mt-0.5 font-semibold tabular-nums">{value}</div>
-      {hint && <div className="text-[11px] text-muted">{hint}</div>}
-    </div>
   );
 }
 
@@ -186,59 +349,70 @@ function MechanicalCard({ d, events }: { d: Dispute; events: MarketEvent[] }) {
   const pending = d.status === 2;
   return (
     <Card
-      title="Mechanical review"
-      subtitle={d.ground === 1 ? "The TEE verifier re-checks hashes, the key, the build, and declared execution." : "The TEE runner repeats the committed reference protocol and compares against the signed preview."}
+      title="Review"
+      subtitle={d.ground === 1 ? "The TEE verifier re-checks the files, the key, the build, and how the environment runs." : "The TEE re-runs the preview with the same models and settings and compares the scores."}
     >
       {pending ? (
-        <div className="space-y-3 text-sm">
+        <div className="space-y-4 text-sm">
           <p className="flex items-start gap-2 text-muted">
             <Spinner className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            Under review. The verifier signs a MechanicalFinding (upheld, confirmed task mask, findings hash) that the contract checks against an authorized verifier address.
+            <span>
+              Under review. The verifier has until {fmtTime(d.verifierDeadline)} (<Countdown to={d.verifierDeadline} doneText="passed" />) to sign a finding.
+            </span>
           </p>
-          <dl className="kv">
-            <dt>Verifier deadline</dt>
-            <dd>
-              {fmtTime(d.verifierDeadline)} · <Countdown to={d.verifierDeadline} doneText="passed" />
-            </dd>
-          </dl>
           {now > d.verifierDeadline && (
             <>
-              <Notice tone="warn" title="The verifier did not answer in time">
-                Anyone can apply the precommitted no-fault fallback: the buyer’s bond is returned in full, no refund, and the purchase settles normally. A runner outage proves neither side at fault.
+              <Notice tone="warn" title="The verifier missed its deadline">
+                Anyone can now close the dispute with the agreed no-fault outcome. The buyer gets the deposit back, there is no refund, and the purchase completes normally.
               </Notice>
-              <RequireWallet why="Connect any wallet; this is permissionless.">
-                <button className="btn btn-primary" disabled={tx.busy} onClick={() => tx.run("Timeout", { address: deployment!.market, abi: marketAbi, functionName: "timeoutMechanical", args: [d.id] })}>
-                  Apply verifier-timeout fallback
+              <RequireWallet why="Anyone can close it. Sign in to send the transaction.">
+                <button className="btn btn-primary" disabled={tx.busy} onClick={() => tx.run("Close with no-fault outcome", { address: deployment!.market, abi: marketAbi, functionName: "timeoutMechanical", args: [d.id] })}>
+                  {tx.busy ? "Closing…" : "Close with no-fault outcome"}
                 </button>
               </RequireWallet>
-              <TxStatus state={tx.state} />
+              <div aria-live="polite">
+                <TxStatus state={tx.state} />
+              </div>
             </>
           )}
         </div>
       ) : res ? (
-        <dl className="kv text-sm">
-          <dt>Finding</dt>
-          <dd>{res.args.upheld ? "Upheld: defect confirmed" : "Rejected: no defect confirmed"}</dd>
-          <dt>Confirmed tasks</dt>
-          <dd>{maskToIndexes(BigInt(res.args.confirmedMask as bigint)).map((i) => `#${i + 1}`).join(", ") || "none"}</dd>
-          <dt>Findings hash</dt>
-          <dd>
-            <HashValue value={String(res.args.findingsHash)} />
-          </dd>
-          <dt>Transaction</dt>
-          <dd>
-            <TxLink hash={res.transactionHash} />
-          </dd>
-        </dl>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <Chip tone={res.args.upheld ? "ok" : "neutral"} dot>
+            {res.args.upheld ? "Defect confirmed" : "No defect found"}
+          </Chip>
+          <span className="text-muted">
+            Confirmed: {maskToIndexes(BigInt(res.args.confirmedMask as bigint)).map((i) => `task ${i + 1}`).join(", ") || "none"}
+          </span>
+        </div>
       ) : (
-        <p className="text-sm text-muted">{d.fallbackNoQuorum ? "Resolved by the verifier-timeout fallback." : "No finding recorded."}</p>
+        <p className="text-sm text-muted">{d.fallbackNoQuorum ? "Closed with the no-fault outcome after the verifier missed its deadline." : "No finding recorded."}</p>
       )}
     </Card>
   );
 }
 
+function MechanicalDetails({ events }: { events: MarketEvent[] }) {
+  const res = events.find((e) => e.eventName === "MechanicalResolved");
+  if (!res) return null;
+  return (
+    <DetailSection title="Signed finding">
+      <dl className="kv">
+        <dt>Findings hash</dt>
+        <dd>
+          <HashValue value={String(res.args.findingsHash)} />
+        </dd>
+        <dt>Transaction</dt>
+        <dd>
+          <TxLink hash={res.transactionHash} />
+        </dd>
+      </dl>
+    </DetailSection>
+  );
+}
+
 /** Public findings JSON (aggregates only) from the TEE; its sha256 is the on-chain findingsHash. */
-function FindingsCard({ d }: { d: Dispute }) {
+function FindingsSection({ d }: { d: Dispute }) {
   const q = useQuery({
     queryKey: ["findings", d.id.toString(), d.findingsHash],
     refetchInterval: d.status === 3 ? false : 10_000,
@@ -250,19 +424,19 @@ function FindingsCard({ d }: { d: Dispute }) {
       return { findings: JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>, computed: sha256Hex(bytes), source: "blob store" as const, tx: null };
     },
   });
-  if (q.isLoading) return null;
-  if (!q.data) return d.status === 3 ? null : null;
+  if (q.isLoading || !q.data) return null;
   const f = q.data.findings as Record<string, unknown>;
   const onChain = !isZeroHash(d.findingsHash);
   return (
-    <Card
-      title="Verifier findings"
-      subtitle={`Published by the TEE (${q.data.source}); aggregates only, no audit data.`}
-      action={onChain ? <Verified ok={eqHash(q.data.computed, d.findingsHash)} okText="sha256 = on-chain findingsHash" badText="hash ≠ on-chain" /> : <span className="badge badge-neutral">not on-chain yet</span>}
-    >
-      <dl className="kv text-sm">
+    <DetailSection title="Verifier findings" hint={`Published by the TEE (${q.data.source}). Totals only, no audit data.`}>
+      <div className="mb-3">
+        {onChain ? <Verified ok={eqHash(q.data.computed, d.findingsHash)} okText="sha256 matches the on-chain findingsHash" badText="hash doesn’t match the chain" /> : <Chip>not on-chain yet</Chip>}
+      </div>
+      <dl className="kv">
         <dt>Result</dt>
-        <dd>{f.upheld ? "upheld" : "rejected"} · confirmed tasks {maskToIndexes(BigInt(String(f.confirmedMask ?? "0"))).map((i) => `#${i + 1}`).join(", ") || "none"}</dd>
+        <dd>
+          {f.upheld ? "upheld" : "rejected"} · confirmed {maskToIndexes(BigInt(String(f.confirmedMask ?? "0"))).map((i) => `task ${i + 1}`).join(", ") || "none"}
+        </dd>
         <dt>Rule</dt>
         <dd className="text-xs">{String(f.rule ?? "—")}</dd>
         <dt>Sandbox</dt>
@@ -275,10 +449,10 @@ function FindingsCard({ d }: { d: Dispute }) {
         <dd className="text-xs">{String((f.attestation as { kind?: string } | undefined)?.kind ?? "—")}</dd>
       </dl>
       <details className="mt-3">
-        <summary className="cursor-pointer text-xs text-accent">Full findings JSON</summary>
-        <pre className="mt-2 max-h-80 overflow-auto rounded bg-panel-2 p-3 text-[11px]">{JSON.stringify(f, null, 2)}</pre>
+        <summary className="cursor-pointer text-xs text-muted hover:text-ink">Full findings JSON</summary>
+        <pre className="mt-2 max-h-80 overflow-auto rounded-md bg-panel-2 p-3 font-mono text-[11px]">{JSON.stringify(f, null, 2)}</pre>
       </details>
-    </Card>
+    </DetailSection>
   );
 }
 
@@ -303,9 +477,9 @@ function commitmentOf(disputeId: bigint, round: number, verdict: 1 | 2, salt: He
 }
 
 /**
- * If the connected wallet holds a seat in the current round: its commit/reveal status, the TEE case
- * packet (signed challenge), and a manual commit → reveal with the salt kept in this browser. This
- * is an alternative to running the juror agent for that key — don't do both for the same juror.
+ * If the connected wallet holds a seat in the current round: its vote status, the TEE case packet
+ * (signed challenge), and a manual commit → reveal with the salt kept in this browser. This is an
+ * alternative to running the juror agent for that key — don't do both for the same juror.
  */
 function MyJurySeat({ d }: { d: Dispute }) {
   const { address } = useAccount();
@@ -315,14 +489,15 @@ function MyJurySeat({ d }: { d: Dispute }) {
   const [secret, setSecret] = useState<VoteSecret | null>(null);
   const [choice, setChoice] = useState<1 | 2 | 0>(0);
   const [err, setErr] = useState<string | null>(null);
-  const roundSeats = d.seats.slice((d.round - 1) * 3, d.round * 3);
-  const seat = address ? roundSeats.find((s) => s.juror.toLowerCase() === address.toLowerCase()) : undefined;
+  const name = useId();
+  const rs = roundSeats(d);
+  const seat = address ? rs.find((s) => s.juror.toLowerCase() === address.toLowerCase()) : undefined;
   // eslint-disable-next-line react-hooks/set-state-in-effect -- the vote secret lives in localStorage
   useEffect(() => setSecret(address && seat ? loadSecret(d.id, d.round, address) : null), [address, seat, d.id, d.round]);
   if (!address || !seat || d.status !== 2) return null;
 
   const committed = !isZeroHash(seat.commitment);
-  const allCommitted = roundSeats.every((s) => !isZeroHash(s.commitment));
+  const allCommitted = rs.every((s) => !isZeroHash(s.commitment));
   const commitOpen = now <= d.commitDeadline && !committed;
   const revealOpen = committed && !seat.revealed && (now > d.commitDeadline || allCommitted) && now <= d.revealDeadline;
   const secretMatches = !!secret && eqHash(secret.commitment, seat.commitment);
@@ -334,76 +509,113 @@ function MyJurySeat({ d }: { d: Dispute }) {
     const commitment = commitmentOf(d.id, d.round, choice, salt, address);
     const onchain = (await readOptional("commitmentFor", [d.id, d.round, choice, salt, address])) as Hex | undefined;
     if (onchain && !eqHash(onchain, commitment)) {
-      setErr("The contract computes a different commitment; not committing.");
+      setErr("The contract computes a different vote seal, so nothing was sent. Reload the page and try again.");
       return;
     }
     // persist BEFORE sending: losing the salt means you cannot reveal and your stake is slashed
     const s = { verdict: choice, salt, commitment };
     saveSecret(d.id, d.round, address, s);
     setSecret(s);
-    await commit.run("Commit vote", { address: deployment!.market, abi: marketAbi, functionName: "commitVote", args: [d.id, commitment] });
+    await commit.run("Cast vote", { address: deployment!.market, abi: marketAbi, functionName: "commitVote", args: [d.id, commitment] });
   }
 
   return (
-    <Card title={`Your seat · round ${d.round}`} subtitle="You are drawn on this panel. Read the case packet, then commit a sealed vote and reveal it.">
-      <div className="space-y-4 text-sm">
-        <div className="flex flex-wrap gap-2">
-          <span className={cx("badge", committed ? "badge-ok" : "badge-warn")}>{committed ? "committed" : "not committed"}</span>
-          <span className={cx("badge", seat.revealed ? "badge-ok" : "badge-neutral")}>{seat.revealed ? `revealed: ${seat.vote === 1 ? "Uphold" : "Reject"}` : "not revealed"}</span>
-          <span className="text-xs text-muted">
-            commit by {fmtTime(d.commitDeadline)} · reveal by {fmtTime(d.revealDeadline)}
-          </span>
+    <section aria-labelledby="seat-title" className="space-y-5 rounded-md border border-accent/40 bg-panel p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 id="seat-title" className="text-base font-semibold text-ink">
+            You’re on this jury
+          </h2>
+          <p className="mt-1 text-[13px] text-muted">
+            Read the case, then vote. Vote by {fmtTime(d.commitDeadline)}, reveal by {fmtTime(d.revealDeadline)}.
+          </p>
         </div>
-        <Notice tone="neutral">
-          If a juror agent (services/jurors) runs with this key it votes by itself. Vote manually only for a key no agent is using: each seat can commit once, and only the holder of the salt can reveal.
-        </Notice>
+        <div className="flex flex-wrap gap-1.5">
+          <Chip tone={committed ? "ok" : "warn"} dot>
+            {committed ? "Vote cast" : "Not voted yet"}
+          </Chip>
+          {seat.revealed && <Chip tone="ok">Revealed: {seat.vote === 1 ? "uphold" : "reject"}</Chip>}
+        </div>
+      </div>
 
-        <CasePacketView disputeId={d.id} juror={address} />
+      <CasePacketView disputeId={d.id} juror={address} />
 
-        {commitOpen && (
-          <div className="rounded-lg border border-line p-3">
-            <div className="font-medium">Commit a sealed vote</div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {([1, 2] as const).map((v) => (
-                <label key={v} className={cx("flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5", choice === v ? "border-accent bg-accent-soft" : "border-line")}>
-                  <input type="radio" checked={choice === v} onChange={() => setChoice(v)} />
-                  {v === 1 ? "Uphold (the claim is false)" : "Reject (the description holds)"}
-                </label>
-              ))}
-            </div>
-            <p className="mt-2 text-xs text-muted">A random 32-byte salt is generated and kept in this browser’s localStorage; the chain only sees keccak256(disputeId, round, verdict, salt, you).</p>
-            <button className="btn btn-primary btn-sm mt-2" disabled={!choice || commit.busy} onClick={doCommit}>
-              Commit vote
-            </button>
-            {err && <p className="mt-1 text-xs text-bad">{err}</p>}
+      {commitOpen && (
+        <fieldset className="space-y-3">
+          <legend className="text-[13px] font-medium text-ink">Your vote</legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {([1, 2] as const).map((v) => (
+              <label
+                key={v}
+                className={cx(
+                  "flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors duration-150",
+                  choice === v ? "border-accent/60 bg-accent-soft" : "border-line hover:border-line-strong",
+                )}
+              >
+                <input type="radio" name={`${name}-vote`} className="mt-1 accent-[var(--accent)]" checked={choice === v} onChange={() => setChoice(v)} />
+                <span>
+                  <span className="font-medium text-ink">{v === 1 ? "Uphold" : "Reject"}</span>
+                  <span className="mt-0.5 block text-xs text-muted">{v === 1 ? "The buyer is right: the description is false." : "The description holds for these tasks."}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-muted">
+            Your vote stays hidden until everyone has voted. A random secret is saved in this browser; you need it to reveal, so vote from the browser you’ll reveal from.
+          </p>
+          <button className="btn btn-primary" disabled={!choice || commit.busy} onClick={doCommit}>
+            {commit.busy ? "Casting vote…" : "Cast hidden vote"}
+          </button>
+          {err && (
+            <p role="alert" className="text-xs text-bad">
+              {err}
+            </p>
+          )}
+          <div aria-live="polite">
             <TxStatus state={commit.state} />
           </div>
-        )}
+        </fieldset>
+      )}
 
-        {committed && !seat.revealed && (
-          <div className="rounded-lg border border-line p-3">
-            <div className="font-medium">Reveal</div>
-            {!secret ? (
-              <p className="mt-1 text-xs text-muted">This browser has no salt for your commitment (committed elsewhere, e.g. by the juror agent). Only the holder of the salt can reveal.</p>
-            ) : !secretMatches ? (
-              <p className="mt-1 text-xs text-bad">The salt stored here does not match your on-chain commitment.</p>
-            ) : revealOpen ? (
-              <>
-                <p className="mt-1 text-xs text-muted">Reveals {secret.verdict === 1 ? "Uphold" : "Reject"} with the stored salt.</p>
-                <button className="btn btn-primary btn-sm mt-2" disabled={reveal.busy} onClick={() => reveal.run("Reveal vote", { address: deployment!.market, abi: marketAbi, functionName: "revealVote", args: [d.id, secret.verdict, secret.salt] })}>
-                  Reveal vote
-                </button>
+      {committed && !seat.revealed && (
+        <div className="space-y-2">
+          <h3 className="text-[13px] font-medium text-ink">Reveal your vote</h3>
+          {!secret ? (
+            <p className="text-xs text-muted">This browser doesn’t have the secret for your vote. It was cast elsewhere, for example by the juror agent, and only that holder can reveal it.</p>
+          ) : !secretMatches ? (
+            <p className="text-xs text-bad">The secret saved here doesn’t match your vote on-chain, so it can’t reveal it.</p>
+          ) : revealOpen ? (
+            <>
+              <p className="text-xs text-muted">Reveals “{secret.verdict === 1 ? "uphold" : "reject"}” using the secret saved in this browser.</p>
+              <button
+                className="btn btn-primary"
+                disabled={reveal.busy}
+                onClick={() => reveal.run("Reveal vote", { address: deployment!.market, abi: marketAbi, functionName: "revealVote", args: [d.id, secret.verdict, secret.salt] })}
+              >
+                {reveal.busy ? "Revealing…" : "Reveal vote"}
+              </button>
+              <div aria-live="polite">
                 <TxStatus state={reveal.state} />
-              </>
-            ) : (
-              <p className="mt-1 text-xs text-muted">
-                {now > d.revealDeadline ? "The reveal window has closed." : <>Reveal opens when the commit window closes (<Countdown to={d.commitDeadline} />) or once all three seats have committed.</>}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-    </Card>
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-muted">
+              {now > d.revealDeadline ? (
+                "The reveal window has closed."
+              ) : (
+                <>
+                  Reveals open when voting closes (<Countdown to={d.commitDeadline} />) or once all three jurors have voted.
+                </>
+              )}
+            </p>
+          )}
+        </div>
+      )}
+
+      <p className="text-xs text-muted">
+        If a juror agent runs with this key, it votes on its own. Vote here only for a key no agent uses: each seat votes once, and only the browser holding the secret can reveal.
+      </p>
+    </section>
   );
 }
 
@@ -417,9 +629,12 @@ function CasePacketView({ disputeId, juror }: { disputeId: bigint; juror: Addres
   const claims = (pk?.disputedClaims as { id: string; text: string }[] | undefined) ?? [];
   const ev = pk?.evidence as { text?: string | null; verified?: boolean } | undefined;
   return (
-    <div className="rounded-lg border border-line p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="font-medium">Case packet</div>
+    <div className="space-y-3 border-t border-line pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-[13px] font-medium text-ink">Case file</h3>
+          <p className="mt-0.5 text-xs text-muted">Your wallet signs a one-time message so the TEE can check your seat. It then sends the case file it signed.</p>
+        </div>
         <button
           className="btn btn-sm"
           disabled={busy}
@@ -435,25 +650,28 @@ function CasePacketView({ disputeId, juror }: { disputeId: bigint; juror: Addres
             }
           }}
         >
-          {busy ? <Spinner className="h-3.5 w-3.5" /> : null} {cp ? "Fetch again" : "Sign challenge & fetch"}
+          {busy ? <Spinner className="h-3.5 w-3.5" /> : null} {busy ? "Opening…" : cp ? "Reload case file" : "Open case file"}
         </button>
       </div>
-      <p className="mt-1 text-xs text-muted">Your wallet signs a one-time EIP-191 challenge; the TEE checks you hold a seat on the current round and returns the packet it signed.</p>
-      {err && <p className="mt-2 break-words text-xs text-bad">{err}</p>}
+      {err && (
+        <p role="alert" className="text-xs text-bad [overflow-wrap:anywhere]">
+          {err}
+        </p>
+      )}
       {cp && pk && (
-        <div className="mt-3 space-y-3 text-xs">
+        <div className="space-y-4 text-[13px]">
           <div className="flex flex-wrap gap-1.5">
-            <Verified ok={cp.hashOk} okText="sha256 = packetHash" badText="packet hash mismatch" />
-            <Verified ok={!!cp.packetSigner && eqHash(cp.packetSigner, health.data?.signer)} okText="signed by the TEE signer" badText="signer ≠ TEE" />
-            {ev && <Verified ok={!!ev.verified} okText="evidence = on-chain hash" badText="evidence unverified" />}
+            <Verified ok={cp.hashOk && !!cp.packetSigner && eqHash(cp.packetSigner, health.data?.signer)} okText="Signed by the TEE" badText="Signature doesn’t check out" />
+            {ev && <Verified ok={!!ev.verified} okText="Evidence matches the chain" badText="Evidence unverified" />}
           </div>
           {claims.length > 0 && (
             <div>
-              <div className="section-title">Disputed claims (frozen description)</div>
-              <ul className="mt-1 space-y-1">
+              <div className="section-title">Disputed claims</div>
+              <ul className="mt-2 space-y-1.5">
                 {claims.map((c) => (
-                  <li key={c.id} className="rounded border border-line px-2 py-1">
-                    <span className="font-mono font-semibold text-accent">{c.id}</span> {c.text}
+                  <li key={c.id} className="flex gap-2.5">
+                    <span className="shrink-0 font-mono text-xs font-medium text-accent">{c.id}</span>
+                    <span className="text-ink">{c.text}</span>
                   </li>
                 ))}
               </ul>
@@ -461,13 +679,13 @@ function CasePacketView({ disputeId, juror }: { disputeId: bigint; juror: Addres
           )}
           {ev?.text && (
             <div>
-              <div className="section-title">Buyer evidence</div>
-              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-panel-2 p-2">{ev.text}</pre>
+              <div className="section-title">Buyer’s evidence</div>
+              <pre className="mt-2 max-h-56 overflow-auto rounded-md bg-panel-2 p-3 font-mono text-xs whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{ev.text}</pre>
             </div>
           )}
           <details>
-            <summary className="cursor-pointer text-accent">Full packet (bundle facts, excerpts, delivery record)</summary>
-            <pre className="mt-2 max-h-96 overflow-auto rounded bg-panel-2 p-2 text-[11px]">{JSON.stringify(pk, null, 2)}</pre>
+            <summary className="cursor-pointer text-xs text-muted hover:text-ink">Full case file (bundle facts, excerpts, delivery record)</summary>
+            <pre className="mt-2 max-h-96 overflow-auto rounded-md bg-panel-2 p-3 font-mono text-[11px]">{JSON.stringify(pk, null, 2)}</pre>
           </details>
         </div>
       )}
@@ -477,7 +695,7 @@ function CasePacketView({ disputeId, juror }: { disputeId: bigint; juror: Addres
 
 /* ------------------------------------ jury ------------------------------------ */
 
-function JuryCard({ d, events }: { d: Dispute; events: MarketEvent[] }) {
+function JuryCard({ d, events, primary }: { d: Dispute; events: MarketEvent[]; primary: boolean }) {
   const now = useNow();
   const block = useBlockNumber();
   const select = useTx();
@@ -489,165 +707,183 @@ function JuryCard({ d, events }: { d: Dispute; events: MarketEvent[] }) {
   const voting = d.status === 2;
   const cur = block.data;
   const canSelect = awaiting && cur !== undefined && cur > d.selectionBlock;
-  const roundSeats = d.seats.slice((d.round - 1) * 3, d.round * 3);
-  const allRevealed = roundSeats.every((s) => s.revealed);
+  const allRevealed = roundSeats(d).every((s) => s.revealed);
   const canTally = voting && (now > d.revealDeadline || allRevealed);
 
   return (
-    <Card title="AI jury (commit–reveal)" subtitle="Three approved, staked jurors are drawn at random, excluding the buyer and seller. Votes are sealed, then revealed.">
-      <div className="space-y-5">
+    <Card title="Jury" subtitle="Three staked AI jurors, drawn at random. The buyer and the seller can’t sit on it.">
+      <div className="space-y-6">
         {awaiting && (
-          <div className="rounded-lg border border-line p-4 text-sm">
-            <div className="font-medium">Round {d.round}: waiting for the random draw</div>
-            <p className="mt-1 text-muted">
-              Randomness comes from <span className="font-mono">keccak256(blockhash({d.selectionBlock.toString()}), prevrandao, disputeId, round)</span>, a block that did not exist when the dispute was
-              opened.{" "}
+          <div className="space-y-3 text-[13px]">
+            <p className="text-muted">
+              {d.round === 2 && "Round 1 didn’t reach a majority, so a new jury is drawn without the round 1 jurors. "}
+              The jury is drawn with randomness from a block that didn’t exist when the problem was reported, so nobody can pick the jurors.{" "}
               {cur !== undefined &&
-                (cur > d.selectionBlock ? (
-                  <>Block {d.selectionBlock.toString()} is mined, so anyone can draw the panel now.</>
-                ) : (
-                  <>
-                    Current block {cur.toString()}; {(d.selectionBlock - cur + 1n).toString()} more to go.
-                  </>
-                ))}
+                (cur > d.selectionBlock ? "That block is mined, so anyone can draw the jury now." : `${(d.selectionBlock - cur + 1n).toString()} more block${d.selectionBlock - cur + 1n === 1n ? "" : "s"} to go.`)}
             </p>
-            {blockUrl(d.selectionBlock) && (
-              <a href={blockUrl(d.selectionBlock)!} target="_blank" rel="noreferrer" className="link text-xs">
-                selection block {d.selectionBlock.toString()}
-              </a>
-            )}
-            <p className="mt-1 text-xs text-muted">If three eligible jurors can’t be seated by {fmtTime(d.selectionDeadline)}, the round counts as failed (selecting after that records the failure).</p>
-            <RequireWallet why="Drawing the panel is permissionless; any wallet can submit it.">
-              <button className="btn btn-primary mt-3" disabled={!canSelect || select.busy} onClick={() => select.run("Select jurors", { address: m, abi: marketAbi, functionName: "selectJurors", args: [d.id] })}>
-                Select jurors
+            <p className="text-xs text-muted">If three jurors can’t be seated by {fmtTime(d.selectionDeadline)}, this round fails.</p>
+            <RequireWallet why="Anyone can draw the jury. Sign in to send the transaction.">
+              <button className={cx("btn", primary && "btn-primary")} disabled={!canSelect || select.busy} onClick={() => select.run("Draw the jury", { address: m, abi: marketAbi, functionName: "selectJurors", args: [d.id] })}>
+                {select.busy ? "Drawing…" : "Draw the jury"}
               </button>
             </RequireWallet>
-            <TxStatus state={select.state} />
+            <div aria-live="polite">
+              <TxStatus state={select.state} />
+            </div>
           </div>
         )}
 
         {rounds.map((r) => {
           const sel = selections.find((e) => Number(e.args.round) === r);
-          const seats = d.seats.slice((r - 1) * 3, r * 3);
+          const seats = roundSeats(d, r);
           if (!sel && seats.every((s) => isEmptyAddr(s.juror))) return null;
-          const isCur = r === d.round && voting;
           const commitDl = sel ? Number(sel.args.commitDeadline) : d.commitDeadline;
           const revealDl = sel ? Number(sel.args.revealDeadline) : d.revealDeadline;
           return (
-            <div key={r} className="rounded-lg border border-line">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2.5 text-sm">
-                <span className="font-medium">
-                  Round {r} {r === 2 && <span className="text-xs font-normal text-muted">(fresh panel, round-1 jurors excluded)</span>}
-                </span>
+            <div key={r} className="space-y-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-muted">
+                <span className="text-[13px] font-medium text-ink">{rounds.length > 1 ? `Round ${r}` : "Jurors"}</span>
                 {sel && (
-                  <span className="text-xs text-muted">
-                    seed <HashValue value={String(sel.args.seed ?? "")} /> · <TxLink hash={sel.transactionHash} label="draw tx" />
+                  <span className="tabular-nums">
+                    Vote by {fmtTime(commitDl)} · reveal by {fmtTime(revealDl)}
                   </span>
                 )}
               </div>
-              {sel && (
-                <div className="grid grid-cols-2 gap-3 border-b border-line px-4 py-2.5 text-xs">
-                  <div>
-                    <span className="text-muted">Commit deadline</span>
-                    <div>
-                      {fmtTime(commitDl)} {isCur && <>· <Countdown to={commitDl} doneText="closed" /></>}
-                    </div>
-                  </div>
-                  <div>
-                    <span className="text-muted">Reveal deadline</span>
-                    <div>
-                      {fmtTime(revealDl)} {isCur && <>· <Countdown to={revealDl} doneText="closed" /></>}
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[520px] text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-muted">
-                      <th className="px-4 py-2 font-medium">Seat</th>
-                      <th className="px-4 py-2 font-medium">Juror</th>
-                      <th className="px-4 py-2 font-medium">Commit</th>
-                      <th className="px-4 py-2 font-medium">Reveal</th>
-                      <th className="px-4 py-2 font-medium">Paid / slashed</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {seats.map((s, i) => (
-                      <SeatRow key={i} i={i} s={s} events={events} round={r} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ul className="divide-y divide-line rounded-md border border-line">
+                {seats.map((s, i) => (
+                  <SeatRow key={i} i={i} s={s} />
+                ))}
+              </ul>
             </div>
           );
         })}
 
         {voting && (
-          <div className="rounded-lg bg-panel-2 p-4 text-sm">
-            <div className="font-medium">Tally</div>
-            <p className="mt-1 text-muted">
-              Anyone can tally once the reveal deadline passes (or earlier if all three revealed). A strict majority of ≥ 2 reveals decides. Otherwise non-revealers are slashed and{" "}
-              {d.round === 1 ? "a fresh round-2 panel is drawn" : "the no-quorum fallback applies: bond returned, no refund, purchase settles normally"}.
+          <div className="space-y-3 border-t border-line pt-5 text-[13px]">
+            <p className="text-muted">
+              Anyone can count the votes after the reveal deadline, or as soon as all three are revealed. A majority of at least two revealed votes decides. Without one, jurors who didn’t reveal lose
+              part of their stake and {d.round === 1 ? "a new jury is drawn" : "the dispute closes with no refund and the buyer’s deposit returned"}.
             </p>
-            <RequireWallet why="Tallying is permissionless.">
-              <button className="btn btn-primary mt-3" disabled={!canTally || tally.busy} onClick={() => tally.run("Tally", { address: m, abi: marketAbi, functionName: "tallyDispute", args: [d.id] })}>
-                Tally votes
-              </button>
-              {!canTally && (
-                <span className="ml-3 text-xs text-muted">
-                  available in <Countdown to={d.revealDeadline} />
-                </span>
-              )}
+            <RequireWallet why="Anyone can count the votes. Sign in to send the transaction.">
+              <div className="flex flex-wrap items-center gap-3">
+                <button className={cx("btn", primary && canTally && "btn-primary")} disabled={!canTally || tally.busy} onClick={() => tally.run("Count the votes", { address: m, abi: marketAbi, functionName: "tallyDispute", args: [d.id] })}>
+                  {tally.busy ? "Counting…" : "Count the votes"}
+                </button>
+                {!canTally && (
+                  <span className="text-xs text-muted">
+                    Available in <Countdown to={d.revealDeadline} />
+                  </span>
+                )}
+              </div>
             </RequireWallet>
-            <TxStatus state={tally.state} />
+            <div aria-live="polite">
+              <TxStatus state={tally.state} />
+            </div>
           </div>
         )}
-
-        <p className="text-xs text-muted">
-          Juror economics (snapshotted): stake {fmtUsdc(d.jurorStake)} locked per seat; each revealing juror earns up to {fmtUsdc(d.participationFee)} from the case fee; the rest plus {pct(d.minoritySlashBps)} of each
-          minority seat’s stake goes to the majority; non-revealers lose {pct(d.nonRevealSlashBps)} of their stake to the reserve. Agreement with the majority does not establish truth; jurors may share a base
-          model’s mistakes.
-        </p>
       </div>
     </Card>
   );
 }
 
-function SeatRow({ i, s, events, round }: { i: number; s: Seat; events: MarketEvent[]; round: number }) {
+function SeatRow({ i, s }: { i: number; s: Seat }) {
   const empty = isEmptyAddr(s.juror);
-  const commitEv = events.find((e) => e.eventName === "VoteCommitted" && Number(e.args.round) === round && String(e.args.juror).toLowerCase() === s.juror.toLowerCase());
-  const revealEv = events.find((e) => e.eventName === "VoteRevealed" && Number(e.args.round) === round && String(e.args.juror).toLowerCase() === s.juror.toLowerCase());
+  const committed = !isZeroHash(s.commitment);
+  const status: { text: string; tone: Tone } = empty
+    ? { text: "Not drawn", tone: "neutral" }
+    : s.revealed
+      ? s.vote === 1
+        ? { text: "Voted to uphold", tone: "ok" }
+        : { text: "Voted to reject", tone: "info" }
+      : committed
+        ? { text: "Voted (hidden)", tone: "accent" }
+        : { text: "Waiting", tone: "neutral" };
   return (
-    <tr className="border-t border-line">
-      <td className="px-4 py-2.5 text-muted">{i + 1}</td>
-      <td className="px-4 py-2.5">{empty ? <span className="text-faint">not drawn</span> : <AddressLink address={s.juror} />}</td>
-      <td className="px-4 py-2.5">
-        {!isZeroHash(s.commitment) ? (
-          <span className="inline-flex items-center gap-1">
-            <span className="badge badge-ok">sealed</span>
-            {commitEv && <TxLink hash={commitEv.transactionHash} label="tx" />}
-          </span>
-        ) : (
-          <span className="badge badge-neutral">—</span>
-        )}
-      </td>
-      <td className="px-4 py-2.5">
-        {s.revealed ? (
-          <span className="inline-flex items-center gap-1">
-            <span className={cx("badge", s.vote === 1 ? "badge-ok" : "badge-bad")}>{s.vote === 1 ? "Uphold" : "Reject"}</span>
-            {revealEv && <TxLink hash={revealEv.transactionHash} label="tx" />}
-          </span>
-        ) : (
-          <span className="badge badge-neutral">hidden</span>
-        )}
-      </td>
-      <td className="px-4 py-2.5 text-xs tabular-nums">
-        {s.reward > 0n && <span className="text-ok">+{fmtUsdc(s.reward)}</span>}
-        {s.slashed > 0n && <span className="ml-2 text-bad">−{fmtUsdc(s.slashed)}</span>}
-        {s.reward === 0n && s.slashed === 0n && <span className="text-faint">—</span>}
-      </td>
-    </tr>
+    <li className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
+      <span className="text-ink">Juror {i + 1}</span>
+      <span className="flex items-center gap-3">
+        {s.reward > 0n && <span className="font-mono text-xs text-ok tabular-nums">+{fmtUsdc(s.reward, { symbol: false })}</span>}
+        {s.slashed > 0n && <span className="font-mono text-xs text-bad tabular-nums">−{fmtUsdc(s.slashed, { symbol: false })}</span>}
+        <Chip tone={status.tone} dot>
+          {status.text}
+        </Chip>
+      </span>
+    </li>
+  );
+}
+
+/** Jury randomness and per-seat addresses and transactions, for the Details panel. */
+function JuryDetails({ d, events }: { d: Dispute; events: MarketEvent[] }) {
+  const selections = events.filter((e) => e.eventName === "JurorsSelected");
+  const rounds = [1, 2].filter((r) => selections.some((e) => Number(e.args.round) === r) || roundSeats(d, r).some((s) => !isEmptyAddr(s.juror)));
+  const selUrl = blockUrl(d.selectionBlock);
+  return (
+    <>
+      <DetailSection title="Jury draw" hint="Seats come from keccak256(blockhash(selectionBlock), prevrandao, disputeId, round). On Base a single sequencer produces blocks and could in principle bias this.">
+        <dl className="kv">
+          <dt>Selection block</dt>
+          <dd className="font-mono tabular-nums">
+            {selUrl ? (
+              <a href={selUrl} target="_blank" rel="noreferrer" className="link">
+                {d.selectionBlock.toString()}
+              </a>
+            ) : (
+              d.selectionBlock.toString()
+            )}
+          </dd>
+          {selections.map((sel) => (
+            <SelectionRow key={sel.transactionHash} sel={sel} />
+          ))}
+        </dl>
+      </DetailSection>
+      {rounds.length > 0 && (
+        <DetailSection title="Jurors">
+          <div className="overflow-x-auto rounded-md border border-line">
+            <table className="data-table min-w-[520px]">
+              <thead>
+                <tr>
+                  <th scope="col">Seat</th>
+                  <th scope="col">Address</th>
+                  <th scope="col">Vote tx</th>
+                  <th scope="col">Reveal tx</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rounds.flatMap((r) =>
+                  roundSeats(d, r).map((s, i) => {
+                    const lc = s.juror.toLowerCase();
+                    const commitEv = events.find((e) => e.eventName === "VoteCommitted" && Number(e.args.round) === r && String(e.args.juror).toLowerCase() === lc);
+                    const revealEv = events.find((e) => e.eventName === "VoteRevealed" && Number(e.args.round) === r && String(e.args.juror).toLowerCase() === lc);
+                    return (
+                      <tr key={`${r}-${i}`}>
+                        <td className="text-muted">
+                          {rounds.length > 1 ? `R${r} · ` : ""}Juror {i + 1}
+                        </td>
+                        <td>{isEmptyAddr(s.juror) ? <span className="text-faint">not drawn</span> : <AddressLink address={s.juror} />}</td>
+                        <td>{commitEv ? <TxLink hash={commitEv.transactionHash} /> : <span className="text-faint">—</span>}</td>
+                        <td>{revealEv ? <TxLink hash={revealEv.transactionHash} /> : <span className="text-faint">—</span>}</td>
+                      </tr>
+                    );
+                  }),
+                )}
+              </tbody>
+            </table>
+          </div>
+        </DetailSection>
+      )}
+    </>
+  );
+}
+
+function SelectionRow({ sel }: { sel: MarketEvent }) {
+  return (
+    <>
+      <dt>Round {String(sel.args.round)} seed</dt>
+      <dd className="flex flex-wrap items-center gap-2">
+        <HashValue value={String(sel.args.seed ?? "")} />
+        <TxLink hash={sel.transactionHash} label="draw tx" />
+      </dd>
+    </>
   );
 }
 
@@ -661,10 +897,11 @@ const ratKey = (id: bigint) => `envmarket.rationales.${CHAIN_ID}.${deployment?.m
  * pointer, so a rationale is looked up by that hash and checked against the chain here: same
  * chain/market/dispute, a seat in that round, the revealed vote and the seat's commitment.
  */
-function RationalesCard({ d }: { d: Dispute }) {
+function RationalesSection({ d }: { d: Dispute }) {
   const [hashes, setHashes] = useState<string[]>([]);
   const [input, setInput] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const inputId = useId();
   // eslint-disable-next-line react-hooks/set-state-in-effect -- remembered hashes live in localStorage
   useEffect(() => setHashes(JSON.parse((typeof window !== "undefined" && window.localStorage.getItem(ratKey(d.id))) || "[]")), [d.id]);
   const anyRevealed = d.seats.some((s) => s.revealed);
@@ -672,7 +909,7 @@ function RationalesCard({ d }: { d: Dispute }) {
   function add() {
     const m = input.match(/(?:0x)?([0-9a-fA-F]{64})/);
     if (!m) {
-      setErr("Paste the rationale’s sha256 (64 hex) or its /blobs/ URL.");
+      setErr("Paste the explanation’s sha256 (64 hex characters) or its /blobs/ URL.");
       return;
     }
     const h = `0x${m[1].toLowerCase()}`;
@@ -683,32 +920,54 @@ function RationalesCard({ d }: { d: Dispute }) {
     setErr(null);
   }
   return (
-    <Card title="Published juror rationales" subtitle="Each juror agent publishes its screened rationale after its own reveal (never before, so it can’t leak a sealed vote).">
+    <DetailSection title="Juror explanations" hint="Each juror agent publishes a screened explanation after its own reveal, never before, so it can’t leak a hidden vote. There is no on-chain pointer yet: the agent logs the file’s sha256 when it uploads.">
       <div className="space-y-3">
         {hashes.map((h) => (
           <RationaleItem key={h} hash={h as Hex} d={d} />
         ))}
-        <div className="flex gap-2">
-          <input className="input font-mono text-xs" placeholder="rationale sha256 or blob URL (from the juror’s log)" value={input} onChange={(e) => setInput(e.target.value)} />
-          <button className="btn btn-sm shrink-0" onClick={add} disabled={!input}>
-            Verify & show
-          </button>
-        </div>
-        {err && <p className="text-xs text-bad">{err}</p>}
-        <p className="text-xs text-muted">
-          Rationales have no on-chain pointer yet: a juror agent logs “published rationale … sha256 0x…” when it uploads one. The document is fetched from the TEE blob store and checked against the chain below.
-        </p>
+        <form
+          className="space-y-1.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            add();
+          }}
+        >
+          <label htmlFor={inputId} className="block text-xs text-muted">
+            Explanation sha256 or blob URL, from the juror’s log
+          </label>
+          <div className="flex gap-2">
+            <input
+              id={inputId}
+              name="rationale-hash"
+              autoComplete="off"
+              spellCheck={false}
+              className="input font-mono"
+              placeholder="0x… or https://…/blobs/…"
+              value={input}
+              aria-invalid={!!err}
+              onChange={(e) => setInput(e.target.value)}
+            />
+            <button type="submit" className="btn shrink-0" disabled={!input}>
+              Check and show
+            </button>
+          </div>
+          {err && (
+            <p role="alert" className="text-xs text-bad">
+              {err}
+            </p>
+          )}
+        </form>
       </div>
-    </Card>
+    </DetailSection>
   );
 }
 
 function RationaleItem({ hash, d }: { hash: Hex; d: Dispute }) {
   const q = useQuery({ queryKey: ["rationale", hash], queryFn: () => fetchRationale(hash), staleTime: Infinity, retry: 0 });
   if (q.isLoading) return <Skeleton className="h-16" />;
-  if (q.error || !q.data) return <Notice tone="bad">{(q.error as Error)?.message ?? "not found"}</Notice>;
+  if (q.error || !q.data) return <Notice tone="bad">{(q.error as Error)?.message ?? "Not found in the blob store. Check the hash and try again."}</Notice>;
   const r: RationaleDoc = q.data.doc;
-  const seats = d.seats.slice((r.round - 1) * 3, r.round * 3);
+  const seats = roundSeats(d, r.round);
   const seat = seats.find((s) => s.juror.toLowerCase() === r.juror.toLowerCase());
   const checks: [string, boolean][] = [
     ["sha256 matches", q.data.hashOk],
@@ -718,29 +977,34 @@ function RationaleItem({ hash, d }: { hash: Hex; d: Dispute }) {
     ["commitment = seat commitment", !!seat && eqHash(seat.commitment, r.commitment)],
   ];
   return (
-    <div className="rounded-lg border border-line p-3 text-sm">
+    <div className="space-y-2 rounded-md border border-line p-3 text-[13px]">
       <div className="flex flex-wrap items-center gap-2">
         <AddressLink address={r.juror} />
-        <span className={cx("badge", r.verdict === "Uphold" ? "badge-ok" : "badge-bad")}>{r.verdict}</span>
+        <Chip tone={r.verdict === "Uphold" ? "ok" : "info"}>{r.verdict}</Chip>
         <span className="text-xs text-muted">
-          round {r.round} · confidence {r.confidence} · {r.model?.resolved ?? r.model?.requested ?? "model ?"} · prompt {r.promptVersion}
+          round {r.round} · confidence {r.confidence} · {r.model?.resolved ?? r.model?.requested ?? "model unknown"} · prompt {r.promptVersion}
         </span>
       </div>
-      <p className="mt-2 leading-relaxed">{r.rationale}</p>
+      <p className="leading-relaxed text-ink">{r.rationale}</p>
       {r.citedFacts.length > 0 && (
-        <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-muted">
+        <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted">
           {r.citedFacts.map((f) => (
             <li key={f}>{f}</li>
           ))}
         </ul>
       )}
-      <div className="mt-2 flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap gap-1.5">
         {checks.map(([label, ok]) => (
-          <Verified key={label} ok={ok} okText={label} badText={`✗ ${label}`} />
+          <Verified key={label} ok={ok} okText={label} badText={label} />
         ))}
       </div>
-      <p className="mt-1 text-[11px] text-muted">
-        packet sha256 <HashValue value={r.packetSha256} /> · reveal <TxLink hash={r.revealTx} /> ·{" "}
+      <p className="flex flex-wrap items-center gap-x-2 text-[11px] text-muted">
+        <span>
+          case file sha256 <HashValue value={r.packetSha256} />
+        </span>
+        <span>
+          reveal <TxLink hash={r.revealTx} />
+        </span>
         <a className="link" href={q.data.url} target="_blank" rel="noreferrer">
           raw
         </a>
@@ -753,35 +1017,39 @@ function RationaleItem({ hash, d }: { hash: Hex; d: Dispute }) {
 
 function OutcomeCard({ d, p }: { d: Dispute; p: Purchase }) {
   const upheld = d.verdict === 1;
+  const o = outcomeLabel(d);
   const jurorPaid = d.seats.reduce((a, s) => a + s.reward, 0n);
   const jurorSlashed = d.seats.reduce((a, s) => a + s.slashed, 0n);
-  const rows: [string, string, string][] = [
-    ["Refund to buyer", fmtUsdc(d.refund), upheld ? `${maskToIndexes(d.confirmedMask).length} confirmed task(s) × per-task price, within the cap` : "none"],
-    ["Bond", fmtUsdc(d.bond), upheld || d.fallbackNoQuorum ? "returned to the buyer in full" : `case fee taken from it; remainder → neutral reserve`],
-    ["Seller proceeds", fmtUsdc(p.sellerProceeds), "retained price minus marketplace fee"],
-    ["Marketplace fee", fmtUsdc(p.fee), "to treasury"],
-    ["Seller penalties", fmtUsdc(p.penalties), "extra collateral slash → neutral reserve"],
-    ["Case fee", fmtUsdc(d.caseFee), upheld ? "paid from seller collateral" : d.fallbackNoQuorum ? "not charged (no fault)" : "paid from the buyer’s bond"],
+  const confirmed = maskToIndexes(d.confirmedMask).map((i) => i + 1);
+  const rows: [string, bigint, string][] = [
+    ["Refund to the buyer", d.refund, upheld ? `${confirmed.length} confirmed task${confirmed.length === 1 ? "" : "s"} at the per-task price, within the cap` : "none"],
+    ["Buyer’s deposit", d.bond, upheld || d.fallbackNoQuorum ? "returned in full" : "case fee taken from it, the rest goes to a neutral reserve"],
+    ["Seller receives", p.sellerProceeds, "what the buyer paid, less refund and market fee"],
+    ["Market fee", p.fee, "to the treasury"],
+    ["Seller penalty", p.penalties, "taken from the seller’s collateral into the reserve"],
+    ["Case fee", d.caseFee, upheld ? "paid from the seller’s collateral" : d.fallbackNoQuorum ? "not charged" : "paid from the buyer’s deposit"],
   ];
   if (!isMechanical(d.ground)) {
-    rows.push(["Juror rewards", fmtUsdc(jurorPaid), "participation + majority share"]);
-    rows.push(["Juror slashes", fmtUsdc(jurorSlashed), "minority / non-reveal"]);
+    rows.push(["Paid to jurors", jurorPaid, "revealing jurors and the majority"]);
+    rows.push(["Taken from jurors", jurorSlashed, "minority votes and jurors who didn’t reveal"]);
   }
   return (
-    <Card title="Outcome & settlement" subtitle={`Resolved ${fmtTime(d.resolvedAt)}. All payouts are credited as claimable balances and withdrawn by each party.`}>
-      <div className={cx("mb-4 rounded-lg px-4 py-3 text-sm", upheld ? "bg-ok-soft text-ok" : "bg-panel-2 text-muted")}>
-        <span className="font-semibold">{VERDICTS[d.verdict]}</span>
-        {d.fallbackNoQuorum && " · resolved by the precommitted no-quorum / timeout fallback"}
-        {upheld && d.confirmedMask > 0n && ` · confirmed tasks ${maskToIndexes(d.confirmedMask).map((i) => `#${i + 1}`).join(", ")}`}
+    <Card title="Outcome" subtitle={`Decided ${fmtTime(d.resolvedAt)}. Each party withdraws its share from its market balance.`}>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Chip tone={o.tone} dot>
+          {o.text}
+        </Chip>
+        {upheld && confirmed.length > 0 && <span className="text-[13px] text-muted">Confirmed defects: {confirmed.map((i) => `task ${i}`).join(", ")}</span>}
+        {d.fallbackNoQuorum && <span className="text-[13px] text-muted">Closed with the agreed no-fault outcome.</span>}
       </div>
       <dl className="divide-y divide-line text-sm">
         {rows.map(([k, v, hint]) => (
-          <div key={k} className="flex items-start justify-between gap-3 py-2">
-            <dt>
-              {k}
-              <div className="text-[11px] text-muted">{hint}</div>
+          <div key={k} className="flex items-start justify-between gap-4 py-2.5">
+            <dt className="min-w-0">
+              <span className="text-ink">{k}</span>
+              <span className="mt-0.5 block text-xs text-muted">{hint}</span>
             </dt>
-            <dd className="font-semibold tabular-nums">{v}</dd>
+            <dd className="shrink-0 font-mono tabular-nums text-ink">{fmtUsdc(v)}</dd>
           </div>
         ))}
       </dl>
