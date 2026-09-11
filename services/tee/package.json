@@ -1,0 +1,32 @@
+{
+  "name": "@envmarket/tee",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Trusted service for the RL Environment Market (EigenCompute TEE): upload, preview runner, validator, key-delivery relay, mechanical verifier, evidence server",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "dev": "TEE_MODE=local-dev tsx src/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "e2e": "tsx scripts/local-e2e.ts"
+  },
+  "dependencies": {
+    "@envmarket/shared": "file:../../packages/shared",
+    "@hono/node-server": "^1.14.4",
+    "@noble/ciphers": "^2.4.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "hono": "^4.8.3",
+    "jose": "^6.1.3",
+    "tsx": "^4.23.13",
+    "viem": "^2.56.3",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
