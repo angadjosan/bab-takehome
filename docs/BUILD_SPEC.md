@@ -5,8 +5,8 @@ interfaces here exactly so parallel work integrates. If you must deviate, record
 the "Change log" at the bottom of this file in the same commit.
 
 **Hard rule from the founder: nothing is mocked.** Testnet (Base Sepolia, a test ERC-20 standing in
-for USDC) is fine, but every component must really work: real TEE deployment + attestation on
-EigenLayer (EigenCompute), real LLM inference for reference runs / validator / jurors, real
+for USDC) is fine, but every component must really work: real TEE deployment + attestation (Phala
+Cloud dstack Intel TDX; see "TEE — FINAL" below), real LLM inference for reference runs / validator / jurors, real
 on-chain randomness for juror selection, real encryption and delivery, real disputes and
 settlement. A local dev mode is allowed (e.g. running the TEE service on a laptop for tests), but
 it must be labeled truthfully in reports (`attestation.kind = "none-local-dev"`) and is never the
@@ -18,9 +18,42 @@ Supersedes the mainnet section below (kept for history). TAKEHOME.md requires a 
 - **Contracts: Base Sepolia (84532)**, explorer https://sepolia.basescan.org, RPC `BASE_SEPOLIA_RPC=https://sepolia.base.org`.
   Token = our `TestUSDC` ("Test USDC (no value)", 6 decimals) with the public rate-limited `faucet()` so
   reviewers can try every flow from the web app. Params = the demo table (price 100 tUSDC etc.) unless noted.
-- **TEE: EigenCompute `sepolia` environment** (`ecloud ... --environment sepolia`; AppController on Ethereum
-  Sepolia; same real Intel TDX confidential VMs + KMS + attestation; verify dashboard verify-sepolia.eigencloud.xyz).
-  Billing credits are wallet-wide (already active). Deploy gas from the eigen wallet's Sepolia ETH.
+- **TEE: Phala Cloud (dstack, Intel TDX)**. This supersedes EigenCompute; see "TEE — FINAL" below.
+
+## TEE — FINAL (founder decision, 2026-09-11): Phala Cloud dstack, Intel TDX
+
+Supersedes the EigenCompute `sepolia` choice above: EigenCompute's app quota
+(`AppController.getMaxActiveAppsPerUser`) needs manual EigenLabs approval and was still 0.
+- **Platform:** Phala Cloud dstack CVM, `tdx.large` (4 vCPU / 8 GB), production OS `dstack-0.5.9`
+  (never a DEV image), default Phala KMS (`--kms phala`: no wallet, no chain coupling).
+  - CLI `phala@1.1.22`; `services/tee/scripts/phala-deploy.sh build|deploy|update`.
+  - Compose: `services/tee/phala/docker-compose.yml`, image pinned by digest, dstack socket mounted,
+    `/data` volume, `cap_add: SYS_ADMIN` + `seccomp:unconfined` for the unshare sandbox layer.
+  - Live record: `deployments/phala-tee.json`.
+- **Selector:** `TEE_VENDOR=eigencompute|phala|local`. When unset: `MNEMONIC` → eigencompute;
+  `/var/run/dstack.sock` → phala; else local. There is no silent fallback.
+- **Keys (phala):** `@phala/dstack-sdk` **0.5.8, pinned** (v0 `GetKey`; the unreleased 0.6 v1
+  derivation differs). `GetKey("envmarket/tee/v1", "envmarket.tee.root")` → 32-byte secp256k1
+  signer, deterministic per app id. X25519 / storage keys = HKDF of those bytes, exactly as in the
+  other modes. `keySource = "dstack-kms"`.
+- **Attestation (phala):** new report kind **`phala-dstack-tdx`** (shared `ATTESTATION_KINDS`).
+  - Binding = canonical `{type: "envmarket.tee.binding.v1", vendor: "phala", signer, encPubKey, chainId, market, appId}`.
+  - Quote = dstack `GetQuote(sha512(binding))`: a raw Intel DCAP TDX quote with 64-byte `report_data` at quote offset 568.
+  - `quoteDigest = sha256(quote bytes)`, `verifyUrl = https://trust.phala.com/app/<appId>`.
+  - `/attestation` also serves `eventLog`, `composeHash`, `appCompose`, `osImageHash` and the KMS key signature chain.
+  - Per-report quote over `sha512({type: "envmarket.report.attestation.v1", versionId, reportHash})`.
+- **Third-party verification** (`apps/web` `/api/attestation/verify`; server-side because Phala's API has no CORS):
+  - Phala's verifier (`POST https://cloud-api.phala.com/api/v1/attestations/verify {hex}` → `quote.verified`);
+  - report_data = sha512(binding);
+  - RTMR3 replay: dstack 0.5.9 serves empty event digests; recompute
+    `sha384(u32le(type)‖":"‖event‖":"‖payload)`;
+  - app-id / compose-hash events;
+  - compose pins the image by digest and equals the published record;
+  - `binding.signer` holds isRunner / isRelay / isVerifier on-chain (read by the route itself).
+- **Trust:** the Phala KMS operator is trusted, and the developer can push a new compose/image to the
+  same app. The signer stays the same across updates (checked live), but a new app id means a new signer.
+- **EigenCompute** stays a documented, working alternative (`TEE_VENDOR=eigencompute`,
+  `scripts/eigen-deploy.sh`, unchanged binding and JWT attestation). It is blocked on quota.
 - **Inference: Fireworks** — unchanged, real models (glm-5p3, kimi-k3, qwen3p8-max; validator deepseek-v4-pro-0813).
 - Web default `NEXT_PUBLIC_CHAIN_ID=84532` with faucet button. Mainnet code paths stay supported but unused.
 
@@ -307,6 +340,22 @@ Chain watcher loop: on `Purchased` → build wrapper, wrap key, sign `DeliveryRe
 
 ## Change log
 - (builders append here)
+- **TEE → Phala Cloud (2026-09-11, founder decision; see "TEE — FINAL"):**
+  - **Code:**
+    - services/tee: `TEE_VENDOR`, dstack keys + quote attestation (`PhalaAttestor`, `EigenAttestor`
+      unchanged). `@phala/dstack-sdk` 0.5.8 lives in the `services/tee/dstack` dependency island
+      (its imports need `@noble` 1.x; the service uses 2.x).
+    - shared: `ATTESTATION_KINDS` gains `phala-dstack-tdx`.
+    - agents: log lines (for Phala, `quoteDigest` = sha256 of the quote bytes).
+    - web: `/api/attestation/verify` plus a badge/panel for the new kind.
+  - **Deployed:** app `4099f96ab07de8666f8a63a0f48e40aa9883eda3`, signer
+    `0x51EDE7C81B66c4395AEfbdb2d626928018D393c7`, image `sha256:8afca4d8…7ad4` (commit 757a2e4).
+    - The quote verifies with Phala's public verifier, the TD debug bit is off, and the OS is
+      `dstack-0.5.9`.
+    - A first app (`9313848a…`) got the DEV OS from the CLI's auto-selection. `update` cannot change
+      the OS, so that app was deleted and replaced.
+  - **Upgrade behaviour:** a PUBLIC_URL `update` changed the compose hash and kept the signer and
+    X25519 key. Roles are granted by the EnvMarket owner, not by the deploy.
 - **contracts (2026-09-10):**
   - *USDC address fixed.* The Base USDC address above was 39 hex digits. Corrected to
     `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (Circle docs; on-chain `symbol()=USDC`, `decimals()=6`).
