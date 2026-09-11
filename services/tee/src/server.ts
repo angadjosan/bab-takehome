@@ -5,6 +5,7 @@ import { KEYWRAP_MAGIC, sha256Hex, UPLOAD_KEYWRAP_INFO } from '@envmarket/shared
 import { processUpload, UploadError } from './bundle.ts';
 import type { Ctx } from './context.ts';
 import { casePacket, storeEvidence } from './evidence.ts';
+import { listRationales, storeRationale } from './rationales.ts';
 import { errMsg, logger } from './log.ts';
 import { attachStoredReport, disclosures, getStoredReport, HttpError, previewPreconditions, previewState, previewVersion, protocolCommitment, protocolSpec, quotePreview } from './preview.ts';
 import { getCacheEntry, importSealed, listCacheKeys, type SealedCacheExport } from './cache.ts';
@@ -201,6 +202,10 @@ export function buildApp(ctx: Ctx, watcher: Watcher | null): Hono {
   // ------------------------------------------------------------------ evidence
   app.post('/evidence-upload', async (c) => c.json(storeEvidence(ctx, await jsonBody(c))));
   app.post('/evidence/:disputeId', async (c) => c.json(bigintSafe(await casePacket(ctx, parseId(c.req.param('disputeId')), await jsonBody(c)))));
+
+  // ------------------------------------------------------------------ juror rationales (public after reveal)
+  app.post('/rationales/:disputeId', async (c) => c.json(await storeRationale(ctx, parseId(c.req.param('disputeId')), await jsonBody(c))));
+  app.get('/rationales/:disputeId', async (c) => c.json(await listRationales(ctx, parseId(c.req.param('disputeId')))));
 
   // ------------------------------------------------------------------ findings (public)
   app.get('/findings/:disputeId', (c) => {

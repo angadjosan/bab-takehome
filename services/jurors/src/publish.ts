@@ -90,11 +90,34 @@ export async function putBlob(teeUrl: string, bytes: Uint8Array): Promise<{ sha2
   return { sha256: expected, url: `${teeUrl.replace(/\/+$/, '')}/blobs/${expected}` };
 }
 
+/**
+ * POST /rationales/:disputeId on the TEE: the exact canonical text plus an EIP-191 signature by the
+ * juror over its sha256. The TEE indexes it per dispute (served by GET /rationales/:disputeId once
+ * this juror's reveal is on-chain), so clients find rationales without an on-chain pointer.
+ * Returns null when the TEE predates the endpoint (404), so the caller can fall back to PUT /blobs.
+ */
+export async function postRationale(teeUrl: string, disputeId: string, text: string, sign: (hash: Hex) => Promise<Hex>): Promise<{ sha256: Hex; url: string } | null> {
+  const expected = sha256Hex(new TextEncoder().encode(text));
+  const res = await fetch(`${teeUrl.replace(/\/+$/, '')}/rationales/${disputeId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ docJson: text, signature: await sign(expected) }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`POST /rationales -> HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const body = (await res.json()) as { sha256?: string; url?: string };
+  if (!body.sha256 || body.sha256.toLowerCase() !== expected) throw new Error(`TEE indexed sha256 ${body.sha256}, expected ${expected}`);
+  return { sha256: expected, url: body.url ?? `${teeUrl.replace(/\/+$/, '')}/blobs/${expected}` };
+}
+
 export async function publishRationale(a: {
   dataDir: string;
   teeUrl?: string;
   doc: RationaleDoc;
   log: (line: string) => void;
+  /** EIP-191 signer for the TEE's /rationales endpoint (the juror's own key). */
+  sign?: (hash: Hex) => Promise<Hex>;
 }): Promise<{ file: string; sha256: Hex; blobUrl?: string }> {
   const text = canonical(a.doc);
   const bytes = new TextEncoder().encode(text);
@@ -104,9 +127,10 @@ export async function publishRationale(a: {
   let blobUrl: string | undefined;
   if (a.teeUrl) {
     try {
-      blobUrl = (await putBlob(a.teeUrl, bytes)).url;
+      const indexed = a.sign ? await postRationale(a.teeUrl, a.doc.disputeId, text, a.sign) : null;
+      blobUrl = indexed ? indexed.url : (await putBlob(a.teeUrl, bytes)).url;
     } catch (e) {
-      a.log(`rationale blob upload failed (kept locally): ${(e as Error).message}`);
+      a.log(`rationale upload failed (kept locally): ${(e as Error).message}`);
     }
   }
   a.log(`published rationale dispute ${a.doc.disputeId} round ${a.doc.round}: sha256 ${sha256}${blobUrl ? ` -> ${blobUrl}` : ''} (${file})`);

@@ -361,7 +361,13 @@ export class Juror {
       commitment: rr.commitment,
       revealTx: (rr.revealTx ?? '0x') as Hex,
     });
-    const pub = await publishRationale({ dataDir: this.o.dataDir, teeUrl: this.o.teeUrl, doc, log: (l) => this.log(l) });
+    const pub = await publishRationale({
+      dataDir: this.o.dataDir,
+      teeUrl: this.o.teeUrl,
+      doc,
+      log: (l) => this.log(l),
+      sign: (hash) => this.o.clients.account.signMessage({ message: { raw: hash } }),
+    });
     this.store.update(() => (rr.rationalePublished = { file: pub.file, sha256: pub.sha256, blobUrl: pub.blobUrl }));
   }
 
