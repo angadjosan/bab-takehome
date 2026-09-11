@@ -194,6 +194,17 @@ describe('model resolution', () => {
     expect(parseModelVersion(P + 'glm-4p6', 'glm').slice(0, 2)).toEqual([4, 6]);
     expect(parseModelVersion(P + 'kimi-k2-instruct-0905', 'kimi')).toEqual([2, 0, 0, 0, 905]);
     expect(parseModelVersion(P + 'qwen2p5-72b-instruct', 'qwen').slice(0, 2)).toEqual([2, 5]);
+    // ids pinned in BUILD_SPEC (verified on Fireworks 2026-09-10)
+    expect(parseModelVersion(P + 'glm-5p3', 'glm').slice(0, 2)).toEqual([5, 3]);
+    expect(parseModelVersion(P + 'kimi-k3', 'kimi').slice(0, 2)).toEqual([3, 0]);
+    expect(parseModelVersion(P + 'qwen3p8-max', 'qwen').slice(0, 2)).toEqual([3, 8]);
+    expect(parseModelVersion(P + 'deepseek-v4p1-flash', 'deepseek').slice(0, 2)).toEqual([4, 1]);
+  });
+
+  it('pinned panel ids win over older family members', () => {
+    const list = ['glm-5p3', 'glm-5p2', 'glm-4p6', 'kimi-k3', 'kimi-k2-instruct-0905', 'qwen3p8-max', 'qwen3-235b-a22b-instruct-2507'].map((id) => ({ id: P + id }));
+    const r = pickNewestModels(list, ['glm', 'kimi', 'qwen']);
+    expect([r.glm!.id, r.kimi!.id, r.qwen!.id]).toEqual([P + 'glm-5p3', P + 'kimi-k3', P + 'qwen3p8-max']);
   });
 
   it('picks the newest per family by version when created is absent', () => {
