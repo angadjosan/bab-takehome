@@ -18,8 +18,9 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson, LlmError, sha256Hex, type ChatMessage, type ChatTool, type LlmClient } from '@envmarket/shared';
 import type { Ctx } from './context.ts';
+import { usageCostUsd } from './cost.ts';
 import { errMsg, logger } from './log.ts';
-import { grantDir, nextUid, runSandboxed, scratchDir, spawnSandboxed } from './sandbox.ts';
+import { grantDir, grantTraverse, nextUid, runSandboxed, scratchDir, spawnSandboxed } from './sandbox.ts';
 
 export const HARNESS_ID = 'envmarket.harness.v1';
 
@@ -180,6 +181,8 @@ export interface EpisodeSpec {
   maxTokens: number;
   actionBudget: number;
   timeBudgetSec: number;
+  /** per-episode token bound (docs/PREVIEW_COST.md fullBudgetIn/Out); null = unbounded (local models) */
+  tokenBudget?: { in: number; out: number } | null;
 }
 
 export interface EpisodeInputs {
@@ -215,7 +218,9 @@ export interface EpisodeResult {
   actions: Array<{ type: string; path?: string; ok: boolean }>;
   llmCalls: number;
   servedModels: string[];
-  usage: { promptTokens: number; completionTokens: number };
+  usage: { promptTokens: number; completionTokens: number; cachedPromptTokens: number; costUsd: number | null };
+  /** stopped because the next call could exceed the per-episode token bound (counts as failed) */
+  tokenBudgetExceeded: boolean;
   seedSent: boolean;
   startedAt: string;
   finishedAt: string;
@@ -248,7 +253,7 @@ function buildKit(root: string, payloadDir: string, taskSourceDir: string, taskI
   return { kit, taskRoot };
 }
 
-async function chat(client: LlmClient, spec: EpisodeSpec, messages: ChatMessage[], seed: number | undefined, timeoutMs: number) {
+async function chat(client: LlmClient, spec: EpisodeSpec, messages: ChatMessage[], seed: number | undefined, timeoutMs: number, maxTokens: number) {
   return client.chat({
     model: spec.model,
     messages,
@@ -256,9 +261,15 @@ async function chat(client: LlmClient, spec: EpisodeSpec, messages: ChatMessage[
     toolChoice: 'auto',
     temperature: spec.temperature,
     seed,
-    maxTokens: spec.maxTokens,
+    maxTokens,
     timeoutMs,
   });
+}
+
+const TOOLS_CHARS = JSON.stringify(AGENT_TOOLS).length;
+/** Conservative prompt-token estimate for the next call (3 chars/token; measured ≈ 3.5). */
+export function estimatePromptTokens(messages: ChatMessage[]): number {
+  return Math.ceil((JSON.stringify(messages).length + TOOLS_CHARS) / 3);
 }
 
 /** Grade a workspace dir with the task's hidden tests in a fresh sandboxed process. */
@@ -274,6 +285,8 @@ export async function gradeWorkspace(
   const uid = nextUid(ctx.sandbox);
   const tmp = path.join(scratch, 'gtmp');
   fs.mkdirSync(tmp, { recursive: true });
+  grantTraverse(ctx.sandbox, scratch, uid);
+  for (let d = path.dirname(workspaceDir); d.startsWith(scratch) && d !== scratch; d = path.dirname(d)) grantTraverse(ctx.sandbox, d, uid);
   grantDir(ctx.sandbox, kit, uid, false);
   grantDir(ctx.sandbox, workspaceDir, uid, false);
   grantDir(ctx.sandbox, tmp, uid, true);
@@ -331,7 +344,8 @@ export async function runEpisode(ctx: Ctx, client: LlmClient, spec: EpisodeSpec,
     actions: [],
     llmCalls: 0,
     servedModels: [],
-    usage: { promptTokens: 0, completionTokens: 0 },
+    usage: { promptTokens: 0, completionTokens: 0, cachedPromptTokens: 0, costUsd: null },
+    tokenBudgetExceeded: false,
     seedSent: true,
     startedAt,
     finishedAt: startedAt,
@@ -348,6 +362,7 @@ export async function runEpisode(ctx: Ctx, client: LlmClient, spec: EpisodeSpec,
     const { kit, taskRoot } = buildKit(scratch, inputs.payloadDir, inputs.taskSourceDir, spec.taskId, false);
     fs.mkdirSync(epDir, { recursive: true });
     const uid = nextUid(ctx.sandbox);
+    grantTraverse(ctx.sandbox, scratch, uid);
     grantDir(ctx.sandbox, kit, uid, false);
     grantDir(ctx.sandbox, epDir, uid, true);
     const handle = spawnSandboxed(ctx.sandbox, {
@@ -373,20 +388,32 @@ export async function runEpisode(ctx: Ctx, client: LlmClient, spec: EpisodeSpec,
     let seed: number | undefined = spec.seed;
     while (!done && result.llmCalls < maxCalls && Date.now() < deadline) {
       const remaining = Math.max(10_000, deadline - Date.now());
+      // token bound: never start a call that could push the episode past fullBudgetIn / fullBudgetOut
+      let maxTokens = spec.maxTokens;
+      if (spec.tokenBudget) {
+        const outLeft = spec.tokenBudget.out - result.usage.completionTokens;
+        if (result.usage.promptTokens + estimatePromptTokens(messages) > spec.tokenBudget.in || outLeft < 256) {
+          result.tokenBudgetExceeded = true;
+          break;
+        }
+        maxTokens = Math.min(maxTokens, outLeft);
+      }
       let r;
       try {
-        r = await chat(client, spec, messages, seed, Math.min(240_000, remaining + 30_000));
+        r = await chat(client, spec, messages, seed, Math.min(240_000, remaining + 30_000), maxTokens);
       } catch (e) {
         if (seed !== undefined && e instanceof LlmError && e.status === 400 && /seed/i.test(JSON.stringify(e.body ?? e.message))) {
           seed = undefined; // provider rejects `seed`: recorded as seedSent=false
           result.seedSent = false;
-          r = await chat(client, spec, messages, undefined, Math.min(240_000, remaining + 30_000));
+          r = await chat(client, spec, messages, undefined, Math.min(240_000, remaining + 30_000), maxTokens);
         } else throw e;
       }
       result.llmCalls++;
       if (!result.servedModels.includes(r.model)) result.servedModels.push(r.model);
       result.usage.promptTokens += r.usage.promptTokens ?? 0;
       result.usage.completionTokens += r.usage.completionTokens ?? 0;
+      const rawUsage = r.usage.raw as { prompt_tokens_details?: { cached_tokens?: number } } | null;
+      result.usage.cachedPromptTokens += Number(rawUsage?.prompt_tokens_details?.cached_tokens ?? 0) || 0;
       messages.push(r.message);
       if (r.toolCalls.length === 0) {
         if (++idle >= MAX_IDLE_TURNS) break;
@@ -433,7 +460,7 @@ export async function runEpisode(ctx: Ctx, client: LlmClient, spec: EpisodeSpec,
     session = null;
 
     // ---------------------------------------------------------------- phase B: grade
-    const termination = result.termination ?? 'incomplete';
+    const termination = result.termination ?? (result.tokenBudgetExceeded ? 'token_budget' : 'incomplete');
     const g = await gradeWorkspace(ctx, inputs, spec.taskId, path.join(workdir, 'workspace'), termination, scratch);
     if (!g.summary) throw new Error(g.error ?? 'grading failed');
     result.grade = g.summary;
@@ -450,6 +477,7 @@ export async function runEpisode(ctx: Ctx, client: LlmClient, spec: EpisodeSpec,
     logger.warn('episode infra failure', { jobId: spec.jobId, error: result.error });
   } finally {
     session?.close();
+    result.usage.costUsd = usageCostUsd(spec.model, result.usage);
     result.finishedAt = new Date().toISOString();
     result.transcriptHash = sha256Hex(canonicalJson(messages as unknown as object[]));
     ctx.priv.put('episodes', spec.jobId.replace(/[^A-Za-z0-9._:-]/g, '_'), { spec, result, messages });

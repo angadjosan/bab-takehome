@@ -127,12 +127,30 @@ function pyVersion(bin: string): string {
 }
 
 /** Give a directory tree to `uid` (linux-root) or make it writable for the container uid (docker). */
+/**
+ * Give a directory tree to one phase.
+ * linux-root: writable → owned by the phase uid (0700 dirs); read-only → owned by root, group = the
+ * phase uid's private group, `u=rwX,g=rX,o=` — the phase can read but not modify, copies it makes
+ * are owner-writable (graders copy trees with shutil, which preserves modes), and every other uid
+ * (other episodes) is locked out.
+ * docker: permissive modes; isolation comes from the per-container mounts.
+ */
 export function grantDir(info: SandboxInfo, dir: string, uid: number, writable: boolean): void {
   if (info.kind === 'linux-root') {
-    spawnSync('chown', ['-R', `${uid}:${uid}`, dir]);
-    spawnSync('chmod', ['-R', writable ? 'u+rwX,go-rwx' : 'u+rX,u-w,go-rwx', dir]);
+    spawnSync('chown', ['-R', writable ? `${uid}:${uid}` : `0:${uid}`, dir]);
+    spawnSync('chmod', ['-R', writable ? 'u+rwX,go-rwx' : 'u+rwX,g+rX,g-w,o-rwx', dir]);
   } else {
     spawnSync('chmod', ['-R', writable ? 'a+rwX' : 'a+rX', dir]);
+  }
+}
+
+/** Let the phase uid traverse (not list or write) a parent directory it does not own. */
+export function grantTraverse(info: SandboxInfo, dir: string, uid: number): void {
+  if (info.kind === 'linux-root') {
+    spawnSync('chown', [`0:${uid}`, dir]);
+    spawnSync('chmod', ['0710', dir]);
+  } else {
+    spawnSync('chmod', ['a+x', dir]);
   }
 }
 
@@ -186,7 +204,13 @@ function buildCommand(info: SandboxInfo, o: RunOptions): { cmd: string; argv: st
 /** Long-lived process (JSON-lines protocol over stdin/stdout). */
 export function spawnSandboxed(info: SandboxInfo, o: RunOptions): { child: ChildProcess; kill: () => void } {
   const { cmd, argv, name } = buildCommand(info, o);
-  const child = spawn(cmd, argv, { cwd: info.kind === 'docker' ? undefined : o.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: info.kind === 'docker' ? process.env : {} });
+  // linux-root: a fixed, secret-free env (PATH only) so the service's own env (MNEMONIC is already
+  // deleted; API keys, RPC URLs) never reaches the wrapper chain; the python child gets `env -i`.
+  const child = spawn(cmd, argv, {
+    cwd: info.kind === 'docker' ? undefined : o.cwd,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: info.kind === 'docker' ? process.env : { PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' },
+  });
   const kill = () => {
     if (name) spawnSync('docker', ['kill', name], { stdio: 'ignore', timeout: 15_000 });
     try {

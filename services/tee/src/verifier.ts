@@ -24,6 +24,7 @@ import { canonicalJson, fromBase64, indicesFromMask, sha256Hex, signMechanicalFi
 import type { Hex } from 'viem';
 import { loadUpload, openAudit, openBundle, runTaskChecks, type Check, type TaskCheckRow } from './bundle.ts';
 import { domainOf, requireChain, type Ctx } from './context.ts';
+import { tokenBudgetFor } from './cost.ts';
 import { gradeWorkspace, runEpisode, type EpisodeResult } from './harness.ts';
 import { errMsg, logger } from './log.ts';
 import { llmClient } from './models.ts';
@@ -179,6 +180,7 @@ async function verifyRepro(ctx: Ctx, disputeId: bigint, d: { taskMask: bigint; p
             maxTokens: ctx.cfg.preview.maxTokens,
             actionBudget: ctx.cfg.preview.actionBudget,
             timeBudgetSec: ctx.cfg.preview.episodeTimeSec,
+            tokenBudget: tokenBudgetFor(m.resolved!),
           },
           inputs,
         ),

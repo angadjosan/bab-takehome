@@ -87,12 +87,21 @@ export { ZERO32 };
 
 /** EnvMarket ABI: shared (packages/shared/src/abi) or, in dev before it is synced, contracts/out. */
 export function marketAbi(repoRoot: string | null): Abi {
-  if (hasAbi('EnvMarket')) return loadAbi('EnvMarket');
+  const has = (abi: Abi, name: string) => abi.some((x) => 'name' in x && x.name === name);
+  const shared = hasAbi('EnvMarket') ? loadAbi('EnvMarket') : null;
+  let built: Abi | null = null;
   if (repoRoot) {
     const p = path.join(repoRoot, 'contracts', 'out', 'EnvMarket.sol', 'EnvMarket.json');
-    if (existsSync(p)) return (JSON.parse(readFileSync(p, 'utf8')) as { abi: Abi }).abi;
+    if (existsSync(p)) built = (JSON.parse(readFileSync(p, 'utf8')) as { abi: Abi }).abi;
   }
+  // dev: prefer the freshly built ABI when shared's copy predates the seller-paid preview functions
+  if (built && (!shared || (!has(shared, 'requestPreview') && has(built, 'requestPreview')))) return built;
+  if (shared) return shared;
   throw new Error('EnvMarket ABI not found (packages/shared/src/abi/EnvMarket.json)');
+}
+
+export function abiHas(abi: Abi, name: string): boolean {
+  return abi.some((x) => 'name' in x && x.name === name);
 }
 
 export class Chain_ {

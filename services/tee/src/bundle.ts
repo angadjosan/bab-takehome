@@ -42,6 +42,7 @@ import type { Hex } from 'viem';
 import type { Ctx } from './context.ts';
 import { errMsg, logger } from './log.ts';
 import { NETDENY, RUNTIME_DIR, grantDir, nextUid, prepareVenv, runSandboxed, scratchDir } from './sandbox.ts';
+import { buildValidatorInput, collectFiles } from './validator.ts';
 
 export interface Check {
   name: string;
@@ -97,6 +98,8 @@ export interface UploadRecord {
   graderDigest: Hex;
   bundleDigest: Hex;
   requirementsLock: string;
+  /** length of the validator input built from this bundle (quotes) */
+  validatorInputChars?: number;
   bundleKey: Hex;
   auditKey: Hex;
   salts: SaltsFile;
@@ -472,6 +475,13 @@ export async function processUpload(ctx: Ctx, body: Record<string, any>): Promis
     need('preflight.graderImports', !!preflight.imports?.ok, preflight.imports?.error);
     need('preflight.hiddenTestsCollect', [...preflight.purchased, ...preflight.audit].every((r) => (r.hiddenTestCount ?? 0) > 0));
 
+    // size of the validator input (for preview quotes; docs/PREVIEW_COST.md validatorInputChars)
+    const validatorInputChars = buildValidatorInput({
+      files: collectFiles(payload).filter((f) => !f.path.startsWith('solutions/')),
+      descriptionJson: new TextDecoder().decode(descBytes),
+      preflight: { dependencies: preflight.dependencies.ok, graderImports: preflight.imports?.ok, purchased: preflight.purchased, auditTaskCount: auditTaskIds.length, sandbox: preflight.sandbox },
+    }).length;
+
     // ---------------------------------------------------------------- store
     const uploadId = ciphertextHash;
     ctx.blobs.put(encBundle);
@@ -499,6 +509,7 @@ export async function processUpload(ctx: Ctx, body: Record<string, any>): Promis
       graderDigest,
       bundleDigest,
       requirementsLock,
+      validatorInputChars,
       bundleKey: bytesToHex(bundleKey),
       auditKey: bytesToHex(auditKey),
       salts,

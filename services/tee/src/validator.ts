@@ -16,6 +16,7 @@ import {
   WITHHELD_EXPLANATION,
   type LlmClient,
 } from '@envmarket/shared';
+import { usageCostUsd } from './cost.ts';
 import { errMsg } from './log.ts';
 
 export const VALIDATOR_PROMPT_VERSION = 'envmarket.validator.v1';
@@ -244,7 +245,16 @@ export interface ValidatorResult {
   promptHash: `0x${string}`;
   explanation: string;
   screening: { passed: boolean; reasons: string[] };
-  private: { raw: unknown; structured: ValidatorOutput | null; rendered: string | null; droppedItems: number; error: string | null; servedModel: string | null };
+  private: {
+    raw: unknown;
+    structured: ValidatorOutput | null;
+    rendered: string | null;
+    droppedItems: number;
+    error: string | null;
+    servedModel: string | null;
+    usage?: { promptTokens: number; completionTokens: number; cachedPromptTokens: number };
+    costUsd?: number;
+  };
 }
 
 export async function runValidator(
@@ -281,12 +291,20 @@ export async function runValidator(
     });
     const rendered = renderExplanation(r.value);
     const screening = screenExplanation(rendered.text, idx);
+    const usage = r.results.reduce(
+      (u, x) => ({
+        promptTokens: u.promptTokens + (x.usage.promptTokens ?? 0),
+        completionTokens: u.completionTokens + (x.usage.completionTokens ?? 0),
+        cachedPromptTokens: u.cachedPromptTokens + (Number((x.usage.raw as { prompt_tokens_details?: { cached_tokens?: number } } | null)?.prompt_tokens_details?.cached_tokens ?? 0) || 0),
+      }),
+      { promptTokens: 0, completionTokens: 0, cachedPromptTokens: 0 },
+    );
     return {
       ...base,
       model,
       explanation: screening.passed ? rendered.text : WITHHELD_EXPLANATION,
       screening,
-      private: { raw: r.result.content, structured: r.value, rendered: rendered.text, droppedItems: rendered.dropped, error: null, servedModel: r.result.model },
+      private: { raw: r.result.content, structured: r.value, rendered: rendered.text, droppedItems: rendered.dropped, error: null, servedModel: r.result.model, usage, costUsd: usageCostUsd(model, usage) },
     };
   } catch (e) {
     return {

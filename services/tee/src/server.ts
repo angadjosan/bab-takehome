@@ -6,7 +6,8 @@ import { processUpload, UploadError } from './bundle.ts';
 import type { Ctx } from './context.ts';
 import { casePacket, storeEvidence } from './evidence.ts';
 import { errMsg, logger } from './log.ts';
-import { attachStoredReport, disclosures, getStoredReport, HttpError, previewPreconditions, previewState, previewVersion, protocolSpec } from './preview.ts';
+import { attachStoredReport, disclosures, getStoredReport, HttpError, previewPreconditions, previewState, previewVersion, protocolSpec, quotePreview } from './preview.ts';
+import { getCacheEntry, importSealed, listCacheKeys, type SealedCacheExport } from './cache.ts';
 import { serveDelivery } from './relay.ts';
 import { normHash } from './store.ts';
 import { RateLimiter } from './util.ts';
@@ -148,8 +149,28 @@ export function buildApp(ctx: Ctx, watcher: Watcher | null): Hono {
       return c.json({ status: 'running', versionId: versionId.toString(), poll: `/reports/${versionId}` }, 202);
     }
     const { stored, cached: wasCached } = await previewVersion(ctx, versionId);
-    return c.json({ cached: wasCached, report: stored.report, reportJson: stored.reportJson, reportHash: stored.reportHash, signature: stored.signature, signer: stored.signer, attachTx: stored.attachTx, attachError: stored.attachError, attestationToken: stored.attestationToken, disclosures: disclosures(ctx, ctx.cfg.llm.provider), reportUrl: `${ctx.cfg.publicUrl}/blobs/${stored.reportHash.slice(2)}` });
+    return c.json({ cached: wasCached, report: stored.report, reportJson: stored.reportJson, reportHash: stored.reportHash, signature: stored.signature, signer: stored.signer, attachTx: stored.attachTx, attachError: stored.attachError, attestationToken: stored.attestationToken, reusedCache: stored.reusedCache, cacheKey: stored.cacheKey, inferenceCostUsd: stored.inferenceCostUsd, feePaidUsdc: stored.feePaidUsdc, quoteHash: stored.quoteHash, disclosures: disclosures(ctx, ctx.cfg.llm.provider), reportUrl: `${ctx.cfg.publicUrl}/blobs/${stored.reportHash.slice(2)}` });
   });
+  app.get('/preview/quote/:versionId', async (c) => c.json(await quotePreview(ctx, parseId(c.req.param('versionId')))));
+
+  // ------------------------------------------------------------------ preview cache (sealed import)
+  app.post('/preview-cache/import', async (c) => {
+    try {
+      return c.json(await importSealed(ctx, (await jsonBody(c)) as SealedCacheExport));
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      throw new HttpError(400, errMsg(e));
+    }
+  });
+  app.get('/preview-cache', (c) =>
+    c.json(
+      listCacheKeys(ctx).map((k) => {
+        const e = getCacheEntry(ctx, `0x${k}`);
+        return e ? { key: e.key, environmentVersion: e.environmentVersion, bundleHash: e.keyInput.bundleHash, auditRoot: e.keyInput.auditRoot, protocolId: e.keyInput.protocolId, models: e.keyInput.panel, originalRunAt: e.original.runAt, originalVersionId: e.original.versionId, originalChainId: e.original.chainId, attestationKind: e.original.attestationKind, producer: e.producer } : { key: `0x${k}` };
+      }),
+    ),
+  );
+
   app.post('/preview/:versionId/attach', async (c) => {
     const s = await attachStoredReport(ctx, parseId(c.req.param('versionId')));
     return c.json({ reportHash: s.reportHash, attachTx: s.attachTx });
@@ -163,7 +184,7 @@ export function buildApp(ctx: Ctx, watcher: Watcher | null): Hono {
       if (st.state === 'failed') return c.json({ status: 'failed', error: st.error, details: bigintSafe(st.details ?? null) }, 500);
       throw new HttpError(404, 'no report for this version yet');
     }
-    return c.json({ report: s.report, reportJson: s.reportJson, reportHash: s.reportHash, signature: s.signer ? s.signature : null, signer: s.signer, attachTx: s.attachTx, attestationToken: s.attestationToken, disclosures: disclosures(ctx, ctx.cfg.llm.provider), reportUrl: `${ctx.cfg.publicUrl}/blobs/${s.reportHash.slice(2)}` });
+    return c.json({ report: s.report, reportJson: s.reportJson, reportHash: s.reportHash, signature: s.signer ? s.signature : null, signer: s.signer, attachTx: s.attachTx, attestationToken: s.attestationToken, reusedCache: s.reusedCache, cacheKey: s.cacheKey, inferenceCostUsd: s.inferenceCostUsd, feePaidUsdc: s.feePaidUsdc, quoteHash: s.quoteHash, disclosures: disclosures(ctx, ctx.cfg.llm.provider), reportUrl: `${ctx.cfg.publicUrl}/blobs/${s.reportHash.slice(2)}` });
   });
 
   // ------------------------------------------------------------------ delivery

@@ -42,6 +42,9 @@ tests, grading and signing. It does not protect model inference. Local dev mode
 | `GET /blobs/<64hex>` | A content-addressed public doc or ciphertext. |
 | `POST /seller/upload` | See below. Returns `{uploadId, stored{…digests, ciphertextUrl, blobBaseUrl}, checks[], preflight}`; HTTP 400 with `checks[]` on any mismatch. |
 | `POST /preview/:versionId[?async=1]` | Returns `{cached, report, reportJson, reportHash, signature, signer, attachTx, attestationToken, disclosures}`. With `async=1` it returns 202 and you poll `GET /reports/:versionId`. Rate limits (fresh runs only): `PREVIEW_RATE_PER_LISTING_PER_HOUR`, `PREVIEW_RATE_GLOBAL_PER_HOUR`. |
+| `GET /preview/quote/:versionId` | Signed quote `{quote, quoteHash, signature}`. `quoteHash` = sha256 of the canonical quote JSON, signed EIP-191 with the raw hash. The quote holds `cached`, `episodes`, `estimatedCostUsd`, `quoteUsd`, `worstCaseUsd`, `feeUsdc` (base units), `minPreviewFee`, `estimatedRunSec` and `validUntil` (15 min). The seller then calls `requestPreview(versionId, feeUsdc, quoteHash)`. |
+| `POST /preview-cache/import` | Imports a sealed cache export (`scripts/export-preview-cache.ts`). The entry must be sealed to this service's key and signed by it or by a `PREVIEW_CACHE_TRUSTED_SIGNERS` address. |
+| `GET /preview-cache` | Public metadata of cached runs: key, bundleHash, models, original run and attestation kind. |
 | `GET /reports/:versionId` | The signed report. Returns 202 `{status:"running"}` while running and 500 `{status:"failed"}` on failure. |
 | `POST /preview/:versionId/attach` | Submits `attachReport` for a stored report (for `SUBMIT_TXS=0` runs or a failed attach). |
 | `GET /deliveries/:purchaseId` | `{wrapper (canonical JSON), wrapperHash, wrappedKey (base64 EMKW1), wrappedKeyHash, ciphertextUrl, bundleHash, relay, deliveredTx}`. Served only when the purchase is Delivered on-chain with the same `wrapperHash` and `wrappedKeyHash`. |
@@ -126,6 +129,44 @@ fails, whether the reference solution passes, the file list with sha256s, and so
 come excerpts: masked `task.json` files and any files the claim or evidence names. It never
 includes audit tasks, and every access is logged.
 
+## Paid previews, quotes and the preview cache
+
+**Payment.** `EnvMarket.attachReport` reverts unless the seller has paid for the preview. The flow is:
+1. `GET /preview/quote/:versionId`;
+2. `requestPreview(versionId, feeUsdc, quoteHash)` on-chain;
+3. `POST /preview/:versionId`.
+
+Before any inference, the service checks `previewInfo(versionId)`:
+- paid, not released and not reclaimed;
+- `quoteHash` is a quote this service issued for this version;
+- `fee ≥ quote.feeUsdc`;
+- paid before `quote.validUntil`;
+- the estimated run fits before `previewDeadline(versionId)`.
+
+If any check fails it returns HTTP 402 (or 409 for the deadline). `attachReport`, which releases the fee to `previewFeeRecipient`, is submitted immediately after signing.
+
+**Cost** (`src/cost.ts`) uses the constants and formulas in `docs/PREVIEW_COST.md`:
+- `quote = ceilToCent(episodeCost × 1.5 + validatorCost)`;
+- `worstCase` = every episode at its full budget, plus the validator at its ceiling;
+- a cached run's fee is the contract's `minPreviewFee`.
+
+The harness enforces the per-model `fullBudgetIn`/`fullBudgetOut` token bound. It never starts a call that could push cumulative prompt tokens past `fullBudgetIn` (estimated at 3 chars/token), and it caps `max_tokens` at the remaining `fullBudgetOut`. So `worstCase` is a real bound. An episode stopped this way counts as failed.
+
+Actual usage (prompt, cached prompt and completion tokens) and USD cost are stored per episode and for the validator in the private run records. `/preview` and `/reports` return `inferenceCostUsd` (actual; 0 when a cached run is reused) and `feePaidUsdc`. They go into `report.json` too once the shared schema has those fields.
+
+**Inference runs once per environment.** A completed run (with no infra failures) is stored as a signed, encrypted cache entry. Its key is `(bundleHash, auditRoot, protocol id, harnessDigest, promptDigest, validator promptHash, panel model ids, validator model)`; versionId, market and chain are not part of it. Any later version with the same key, on any listing, contract or chain, is served from it:
+- `report.json` is rebuilt for the new `versionId` with the original jobs, run dates and scores, and freshly signed;
+- it records `cachedFrom {originalRunAt, originalVersionId, originalChainId}` once shared's schema has the field, and a disclosure note in `uncertainty` until then;
+- reuse never upgrades trust: a run made in local dev yields reports labeled `none-local-dev`, even when an EigenCompute deployment re-signs them.
+
+To seed another deployment, run:
+
+```bash
+tsx scripts/export-preview-cache.ts --data-dir .data --to-url https://<tee> --out ./cache-export --post
+```
+
+That seals each entry to the target's X25519 key, and the target must list the producer address in `PREVIEW_CACHE_TRUSTED_SIGNERS`. Alternatively, copy the files into the target's `PREVIEW_CACHE_IMPORT_DIR`. `PreviewNotReproducible` disputes still re-run real inference.
+
 ## Sandbox
 
 | Where | How seller code runs |
@@ -155,6 +196,9 @@ network but runs no seller code; everything after it is offline.
 | `PREVIEW_RATE_PER_LISTING_PER_HOUR` (3), `PREVIEW_RATE_GLOBAL_PER_HOUR` (12) | optional | Preview rate limits. |
 | `SANDBOX` (`auto`/`docker`/`unshare`), `SANDBOX_IMAGE` | optional | Sandbox selection. |
 | `LLM_PROVIDER=ollama`, `LOCAL_AGENT_MODEL`, `LOCAL_VALIDATOR_MODEL` | local dev only | Harness check without a Fireworks key. It is labeled in the report and refused when `MNEMONIC` is set. |
+| `PREVIEW_CACHE_TRUSTED_SIGNERS` | optional | Comma-separated producer addresses whose sealed preview-cache exports are accepted (this service's own signer is always trusted). |
+| `PREVIEW_CACHE_IMPORT_DIR` | optional | A directory of sealed exports, imported at startup. |
+| `VALIDATOR_MODEL` | optional | Exact validator id. By default the pinned `deepseek-v4-pro` is probed first; if it isn't served, the service uses its dated snapshot `-0813`, then the newest serving DeepSeek, then gpt-oss, and records the substitution. |
 | `RUNNER_PK` | local dev only | Signer when no `MNEMONIC` is present. Reports are then labeled `none-local-dev`. |
 
 ## Run locally

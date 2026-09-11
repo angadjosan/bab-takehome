@@ -1,5 +1,7 @@
 /** Entry point: `tsx src/main.ts` (Docker CMD) or `npm run dev` (local dev, labeled none-local-dev). */
+import * as path from 'node:path';
 import { serve } from '@hono/node-server';
+import { importCacheDir } from './cache.ts';
 import { Attestor } from './attestation.ts';
 import { Chain_, marketAbi } from './chain.ts';
 import { loadConfig } from './config.ts';
@@ -30,6 +32,10 @@ export async function startService(overrides: Partial<Record<string, string>> = 
   const attestor = new Attestor(process.env, keys.account.address, keys.encPublicKey, keys.source, cfg.chainId, cfg.market);
   await attestor.refresh();
   const ctx: Ctx = { cfg, keys, blobs, priv, sandbox, chain, attestor, workRoot, cacheRoot };
+  if (cfg.rawEnv.PREVIEW_CACHE_IMPORT_DIR) {
+    const n = await importCacheDir(ctx, path.resolve(cfg.rawEnv.PREVIEW_CACHE_IMPORT_DIR));
+    logger.info('preview cache import dir processed', { imported: n });
+  }
 
   logger.info('service starting', {
     signer: keys.account.address,

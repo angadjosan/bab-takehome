@@ -26,7 +26,8 @@ import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createPublicClient, createWalletClient, getAddress, http as viemHttp, parseEventLogs, type Abi, type Address, type Hex } from 'viem';
+import { createPublicClient, createWalletClient, getAddress, http as viemHttp, parseEventLogs, recoverMessageAddress, type Abi, type Address, type Hex } from 'viem';
+import { marketAbi as loadMarketAbi } from '../src/chain.ts';
 import { privateKeyToAccount } from 'viem/accounts';
 import { anvil as anvilChain } from 'viem/chains';
 import {
@@ -130,7 +131,7 @@ const TEE_SIGNER = acct('runner').address;
 const useFireworks = !!cfg.env.FIREWORKS_API_KEY && process.env.E2E_LLM !== 'ollama';
 
 const publicClient = createPublicClient({ chain: anvilChain, transport: viemHttp(RPC) });
-const marketAbi = loadAbi('EnvMarket') as Abi;
+const marketAbi = loadMarketAbi(ROOT);
 const tokenAbi = loadAbi('TestUSDC') as Abi;
 let MARKET: Address;
 let TOKEN: Address;
@@ -268,8 +269,18 @@ async function listVersion(pkg: PackageResult, listingId: bigint | null): Promis
   return ev.args.versionId;
 }
 
-async function preview(versionId: bigint, pkg: PackageResult) {
-  log(`preview v${versionId}: running the reference panel (${useFireworks ? 'Fireworks' : 'local Ollama harness check'}) …`);
+async function preview(versionId: bigint, pkg: PackageResult, reuseOf?: { versionId: bigint; report: ReturnType<typeof parseReport> }) {
+  const unpaid = await httpJson('POST', `${TEE}/preview/${versionId}`);
+  check(unpaid.status === 402, `preview refused before the seller pays (HTTP ${unpaid.status})`);
+  const q = await httpJson('GET', `${TEE}/preview/quote/${versionId}`);
+  check(q.status === 200 && sha256Hex(canonicalJson(q.json.quote)) === q.json.quoteHash, 'signed quote: quoteHash = sha256(canonical quote JSON)');
+  check((await recoverMessageAddress({ message: { raw: q.json.quoteHash }, signature: q.json.signature })) === TEE_SIGNER, 'quote signed by the TEE signer');
+  const fee = BigInt(q.json.quote.feeUsdc);
+  log(`quote v${versionId}: cached=${q.json.quote.cached} episodes=${q.json.quote.episodes} est $${q.json.quote.estimatedCostUsd} fee ${fee} (${q.json.quote.costModel})`);
+  if (reuseOf) check(q.json.quote.cached === true && q.json.quote.episodes === 0 && q.json.quote.estimatedCostUsd === 0, 'same bundle + protocol: quote is cached with ~zero inference cost');
+  if (fee > 0n) await send('seller', TOKEN, tokenAbi, 'approve', [MARKET, fee]);
+  await send('seller', MARKET, marketAbi, 'requestPreview', [versionId, fee, q.json.quoteHash]);
+  log(`preview v${versionId}: ${reuseOf ? 'expecting reuse of the cached run' : `running the reference panel (${useFireworks ? 'Fireworks' : 'local Ollama harness check'})`} …`);
   const start = await httpJson('POST', `${TEE}/preview/${versionId}?async=1`);
   check(start.status === 202 || start.status === 200, `preview accepted (HTTP ${start.status}${start.status >= 400 ? ' ' + JSON.stringify(start.json).slice(0, 400) : ''})`);
   const done = await waitFor(
@@ -299,6 +310,12 @@ async function preview(versionId: bigint, pkg: PackageResult) {
   if (useFireworks) check(report.models.filter((m) => m.status === 'run').length === 3 && report.models.every((m) => m.provider === 'fireworks'), 'all three pinned panel models ran on Fireworks');
   const again = await httpJson('POST', `${TEE}/preview/${versionId}`);
   check(again.status === 200 && again.json.cached === true && again.json.reportHash === done.reportHash, 'second preview request served from cache');
+  if (reuseOf) {
+    check(JSON.stringify(report.jobs) === JSON.stringify(reuseOf.report.jobs) && JSON.stringify(report.models) === JSON.stringify(reuseOf.report.models), 'reused report keeps the original jobIds, run dates and scores');
+    const cf = (report as unknown as { cachedFrom?: { originalVersionId: string } }).cachedFrom;
+    check(cf ? cf.originalVersionId === reuseOf.versionId.toString() : report.uncertainty.includes(`version ${reuseOf.versionId}`), `report marks reuse (${cf ? 'cachedFrom' : 'disclosure note; shared schema has no cachedFrom yet'})`);
+    check(report.createdAt !== reuseOf.report.createdAt && done.reportHash !== undefined, 'reused report is freshly signed for the new versionId');
+  }
   return report;
 }
 
@@ -434,7 +451,21 @@ async function main(): Promise<void> {
   const versionId = await listVersion(pkg, null);
   log(`listing created: version ${versionId}`);
 
-  await preview(versionId, pkg);
+  const report1 = await preview(versionId, pkg);
+
+  // run inference once per environment: a new version with the same bundle reuses the cached run
+  const listingId1 = (await readM<{ listingId: bigint }>('getVersion', [versionId])).listingId;
+  const vReuse = await listVersion(pkg, listingId1);
+  const tReuse = Date.now();
+  await preview(vReuse, pkg, { versionId, report: report1 });
+  check(Date.now() - tReuse < 120_000, `cached preview for v${vReuse} took ${((Date.now() - tReuse) / 1000).toFixed(0)}s (no inference)`);
+  const exp = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/export-preview-cache.ts', '--data-dir', path.join(E2E, 'tee-data'), '--to-url', TEE, '--out', path.join(E2E, 'cache-export'), '--post'], {
+    cwd: TEE_DIR,
+    env: { ...process.env, MNEMONIC: '' },
+    encoding: 'utf8',
+  });
+  check(exp.status === 0 && /-> 200 /.test(exp.stdout), `sealed preview-cache export re-imported over HTTP (${exp.stdout.trim().split('\n').pop()?.slice(0, 160)})`);
+
   const pid = await buyAndReceive('buyer', versionId, pkg);
 
   log('restarting the TEE service (persistence + idempotent watcher) …');
