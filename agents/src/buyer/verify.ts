@@ -11,7 +11,7 @@ import {
   parseManifest,
   readTar,
   sha256Hex,
-  unwrapKey,
+  unwrapKeyAsync,
   writeTar,
   x25519PublicKey,
   type Manifest,
@@ -89,7 +89,7 @@ export const FORBIDDEN_PATH_RES: RegExp[] = [
 const SALT_CONTENT_RE = /"salts?"\s*:\s*[{"]/i;
 const KEY_CONTENT_RE = /"(bundleKey|auditKey|K_bundle|K_audit)"\s*:/;
 
-export function verifyDelivery(i: DeliveryInputs): VerifiedDelivery {
+export async function verifyDelivery(i: DeliveryInputs): Promise<VerifiedDelivery> {
   const checks: Check[] = [];
   const must = (name: string, cond: boolean, detail: string) => {
     if (!cond) throw new DeliveryVerificationError(name, detail);
@@ -139,11 +139,11 @@ export function verifyDelivery(i: DeliveryInputs): VerifiedDelivery {
   must('ciphertextHash', eq(cth, i.version.ciphertextHash), `sha256(ciphertext) ${cth} == listed ciphertextHash`);
   let key: Uint8Array;
   try {
-    key = unwrapKey({ blob: i.wrappedKey, recipientSecretKey: i.buyerEncSk, wrapperHash: p.wrapperHash });
+    key = await unwrapKeyAsync({ blob: i.wrappedKey, recipientSecretKey: i.buyerEncSk, wrapperHash: p.wrapperHash });
   } catch (e) {
     throw new DeliveryVerificationError('unwrapKey', (e as Error).message);
   }
-  checks.push({ name: 'unwrapKey', ok: true, detail: 'K_bundle unwrapped with BUYER_ENC_SK (HKDF salt = wrapperHash)' });
+  checks.push({ name: 'unwrapKey', ok: true, detail: 'K_bundle unwrapped with BUYER_ENC_SK (HPKE, aad = wrapperHash)' });
   let bundle: Uint8Array;
   try {
     bundle = decryptFile(key, i.ciphertext);

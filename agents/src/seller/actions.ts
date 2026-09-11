@@ -10,7 +10,7 @@ import {
   randomKey,
   sha256Hex,
   toBase64,
-  wrapKey,
+  wrapKeyAsync,
 } from '@envmarket/shared';
 import {
   approveExact,
@@ -61,8 +61,8 @@ export function eventsOf(ctx: Ctx, receipt: TransactionReceipt, eventName: strin
 // ------------------------------------------------------------------------------------ upload
 
 /**
- * Upload the encrypted bundle + audit asset to the TEE. K_bundle and K_audit are wrapped (EMKW1)
- * to the TEE's X25519 key from /health with HKDF salt = ciphertextHash and info
+ * Upload the encrypted bundle + audit asset to the TEE. K_bundle and K_audit are wrapped (EMKW2 /
+ * HPKE) to the TEE's X25519 key from /health with HPKE aad = ciphertextHash and info
  * "envmarket.upload.v1"; salts travel as EMENC1 under a third fresh key K_salts, also wrapped.
  * Every digest the TEE reports back is checked against our own commitments.
  */
@@ -76,15 +76,15 @@ export async function uploadVersion(dir: string, tee = new TeeClient()): Promise
   const encBundle = new Uint8Array(fs.readFileSync(path.join(dir, li.files.bundleCiphertext)));
   const encAudit = new Uint8Array(fs.readFileSync(path.join(dir, li.files.auditCiphertext)));
   const saltsKey = randomKey();
-  const wrap = (key: Hex | Uint8Array) => toBase64(wrapKey({ key, recipientPublicKey: health.encPubKey, wrapperHash: v.ciphertextHash, info: UPLOAD_KEYWRAP_INFO }));
+  const wrap = async (key: Hex | Uint8Array) => toBase64(await wrapKeyAsync({ key, recipientPublicKey: health.encPubKey, wrapperHash: v.ciphertextHash, info: UPLOAD_KEYWRAP_INFO }));
   const text = (rel: string) => fs.readFileSync(path.join(dir, rel), 'utf8');
   const body = {
     encryptedBundle: toBase64(encBundle),
     encryptedAudit: toBase64(encAudit),
-    wrappedBundleKey: wrap(keys.bundleKey),
-    wrappedAuditKey: wrap(keys.auditKey),
+    wrappedBundleKey: await wrap(keys.bundleKey),
+    wrappedAuditKey: await wrap(keys.auditKey),
     encryptedSalts: toBase64(encryptFile(saltsKey, new TextEncoder().encode(JSON.stringify(salts)))),
-    wrappedSaltsKey: wrap(saltsKey),
+    wrappedSaltsKey: await wrap(saltsKey),
     publicDocs: {
       'description.json': text(li.files.description),
       'manifest.json': text(li.files.manifest),

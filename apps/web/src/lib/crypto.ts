@@ -2,9 +2,7 @@ import { Aes256Gcm, CipherSuite, HkdfSha256 } from "@hpke/core";
 import { DhkemX25519HkdfSha256 } from "@hpke/dhkem-x25519";
 import { gcm } from "@noble/ciphers/aes.js";
 import { x25519 } from "@noble/curves/ed25519.js";
-import { expand, extract } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { concatBytes } from "@noble/hashes/utils.js";
 import canonicalize from "canonicalize";
 import { bytesToHex, hexToBytes, type Hex } from "viem";
 
@@ -81,7 +79,7 @@ function parseWrappedKey(blob: Uint8Array): { enc: Uint8Array; ct: Uint8Array } 
 let hpkeSuite: CipherSuite | undefined;
 const suite = () => (hpkeSuite ??= new CipherSuite({ kem: new DhkemX25519HkdfSha256(), kdf: new HkdfSha256(), aead: new Aes256Gcm() }));
 
-/** Unwrap the buyer-specific bundle key with @hpke/core (reference implementation, WebCrypto). */
+/** Unwrap the buyer-specific bundle key with @hpke/core (WebCrypto). */
 export async function unwrapBundleKeyAsync(blob: Uint8Array, secretKey: Hex, wrapperHash: Hex): Promise<Uint8Array> {
   const { enc, ct } = parseWrappedKey(blob);
   const s = suite();
@@ -89,34 +87,6 @@ export async function unwrapBundleKeyAsync(blob: Uint8Array, secretKey: Hex, wra
   const key = new Uint8Array(await s.open({ recipientKey, enc, info: KEYWRAP_INFO }, ct, hexToBytes(wrapperHash)));
   if (key.length !== 32) throw new Error(`Unwrapped key has unexpected length ${key.length}`);
   return key;
-}
-
-// Synchronous RFC 9180 base-mode open over @noble primitives, for synchronous callers. Byte-for-byte
-// the same as @hpke/core; packages/shared/test/web-crypto.test.ts checks both against shared's wrapKey.
-const i2osp2 = (n: number) => new Uint8Array([(n >> 8) & 0xff, n & 0xff]);
-const HPKE_V1 = utf8("HPKE-v1");
-const KEM_SUITE = concatBytes(utf8("KEM"), i2osp2(0x0020));
-const HPKE_SUITE = concatBytes(utf8("HPKE"), i2osp2(0x0020), i2osp2(0x0001), i2osp2(0x0002));
-const EMPTY = new Uint8Array(0);
-const labeledExtract = (sid: Uint8Array, salt: Uint8Array, label: string, ikm: Uint8Array) => extract(sha256, concatBytes(HPKE_V1, sid, utf8(label), ikm), salt);
-const labeledExpand = (sid: Uint8Array, prk: Uint8Array, label: string, info: Uint8Array, len: number) =>
-  expand(sha256, prk, concatBytes(i2osp2(len), HPKE_V1, sid, utf8(label), info), len);
-
-/** Unwrap the buyer-specific bundle key (synchronous; same result as unwrapBundleKeyAsync). */
-export function unwrapBundleKey(blob: Uint8Array, secretKey: Hex, wrapperHash: Hex): Uint8Array {
-  const { enc, ct } = parseWrappedKey(blob);
-  const skR = hexToBytes(secretKey);
-  const dh = x25519.getSharedSecret(skR, enc);
-  if (dh.every((b) => b === 0)) throw new Error("Wrapped key uses a low-order X25519 point");
-  const kemContext = concatBytes(enc, x25519.getPublicKey(skR));
-  const sharedSecret = labeledExpand(KEM_SUITE, labeledExtract(KEM_SUITE, EMPTY, "eae_prk", dh), "shared_secret", kemContext, 32);
-  const ctx = concatBytes(new Uint8Array([0]), labeledExtract(HPKE_SUITE, EMPTY, "psk_id_hash", EMPTY), labeledExtract(HPKE_SUITE, EMPTY, "info_hash", KEYWRAP_INFO));
-  const secret = labeledExtract(HPKE_SUITE, sharedSecret, "secret", EMPTY);
-  const key = labeledExpand(HPKE_SUITE, secret, "key", ctx, 32);
-  const nonce = labeledExpand(HPKE_SUITE, secret, "base_nonce", ctx, 12);
-  const out = gcm(key, nonce, hexToBytes(wrapperHash)).decrypt(ct);
-  if (out.length !== 32) throw new Error(`Unwrapped key has unexpected length ${out.length}`);
-  return out;
 }
 
 /** file = "EMENC1" ‖ nonce(12) ‖ ciphertext ‖ tag(16) */

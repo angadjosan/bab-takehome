@@ -6,22 +6,21 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { canonicalJson, encryptFile, generateX25519KeyPair, randomKey, sha256Hex, wrapKey } from '../src/index.ts';
+import { canonicalJson, encryptFile, generateX25519KeyPair, randomKey, sha256Hex, wrapKeyAsync } from '../src/index.ts';
 
 const WEB = fileURLToPath(new URL('../../../apps/web/', import.meta.url));
 const hasWeb = existsSync(`${WEB}node_modules/@hpke/core`) && existsSync(`${WEB}node_modules/canonicalize`);
 const loadWeb = () => import('../../../apps/web/src/lib/crypto.ts');
 
 describe.skipIf(!hasWeb)('apps/web crypto helpers interoperate with packages/shared', () => {
-  it('unwrapBundleKey (sync) and unwrapBundleKeyAsync (@hpke/core) open shared EMKW2; decryptBundle opens EMENC1', async () => {
+  it('unwrapBundleKeyAsync (@hpke/core) opens shared EMKW2; decryptBundle opens EMENC1', async () => {
     const web = await loadWeb();
     const buyer = generateX25519KeyPair();
     const k = randomKey();
     const wrapperHash = sha256Hex('wrapper');
-    const blob = wrapKey({ key: k, recipientPublicKey: buyer.publicKey, wrapperHash });
-    expect(web.unwrapBundleKey(blob, buyer.secretKey, wrapperHash)).toEqual(k);
+    const blob = await wrapKeyAsync({ key: k, recipientPublicKey: buyer.publicKey, wrapperHash });
     expect(await web.unwrapBundleKeyAsync(blob, buyer.secretKey, wrapperHash)).toEqual(k);
-    expect(() => web.unwrapBundleKey(blob, buyer.secretKey, sha256Hex('other'))).toThrow();
+    await expect(web.unwrapBundleKeyAsync(blob, buyer.secretKey, sha256Hex('other'))).rejects.toThrow();
     await expect(web.unwrapBundleKeyAsync(blob, generateX25519KeyPair().secretKey, wrapperHash)).rejects.toThrow();
     const pt = new TextEncoder().encode('bundle tar bytes');
     expect(web.decryptBundle(encryptFile(k, pt), k)).toEqual(pt);

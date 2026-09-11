@@ -46,7 +46,7 @@ import {
   signPreviewReport,
   taskHashOfDir,
   verifyEvidenceAuth,
-  wrapKey,
+  wrapKeyAsync,
   writeAndWait,
   type Clients,
 } from '@envmarket/shared';
@@ -331,7 +331,7 @@ async function main() {
     ciphertextHash,
     relay: relay.account.address,
   });
-  const wrapped = wrapKey({ key: kBundle, recipientPublicKey: base.encKeys.buyer!.publicKey, wrapperHash: w.wrapperHash });
+  const wrapped = await wrapKeyAsync({ key: kBundle, recipientPublicKey: base.encKeys.buyer!.publicKey, wrapperHash: w.wrapperHash });
   const wrappedKeyHash = sha256Hex(wrapped);
   const relaySig = await signDeliveryReceipt(relay.account, domain, {
     purchaseId,

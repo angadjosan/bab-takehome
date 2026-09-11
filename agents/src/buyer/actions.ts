@@ -345,7 +345,7 @@ export async function receive(ctx: Ctx, who: Who, purchaseId: bigint, opts: { ti
   if (!res.ok) throw new Error(`fetch ciphertext ${ctUrl} → HTTP ${res.status}`);
   const ciphertext = new Uint8Array(await res.arrayBuffer());
   const enc = encKeysFor(ctx, who);
-  const out = verifyDelivery({
+  const out = await verifyDelivery({
     chainId: ctx.chainId,
     market: ctx.market,
     purchaseId,

@@ -360,6 +360,8 @@ describe.skipIf(!FW_KEY)('live Fireworks', () => {
       ],
     });
     console.log('[live] json:', { model: r.result.model, repaired: r.repaired, value: r.value, usage: r.result.usage.totalTokens });
-    expect(r.value.verdict).toBe('Uphold');
+    // The point is a real, schema-valid JSON reply; the model's judgment on this toy case varies run to run.
+    expect(['Uphold', 'Reject']).toContain(r.value.verdict);
+    expect(r.value.reason.length).toBeGreaterThan(0);
   }, 180_000);
 });

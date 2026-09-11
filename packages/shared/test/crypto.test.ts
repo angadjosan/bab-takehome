@@ -9,17 +9,13 @@ import {
   encryptFile,
   generateX25519KeyPair,
   hexToBytes,
-  hpkeOpenBase,
-  hpkeSealBase,
   hpkeSuite,
   parseWrappedKey,
   randomKey,
   sha256Hex,
   unwrapKey,
-  unwrapKeyAsync,
   UPLOAD_KEYWRAP_INFO,
   wrapKey,
-  wrapKeyAsync,
   wrappedKeyHash,
   WRAPPED_KEY_LEN,
   x25519PublicKey,
@@ -118,28 +114,19 @@ else:
 `;
 const py = (args: Record<string, string>) => execFileSync(PY, ['-c', PYHPKE, JSON.stringify(args)], { encoding: 'utf8' }).trim();
 
-describe('EMKW2 (HPKE RFC 9180 key wrap)', () => {
+describe('EMKW2 (HPKE RFC 9180 key wrap, @hpke/core)', () => {
   const buyer = generateX25519KeyPair();
   const kBundle = randomKey();
   const wrapperHash = sha256Hex('{"type":"envmarket.delivery.v1"}');
 
-  it('RFC 9180 test vector (X25519 / HKDF-SHA256 / AES-256-GCM, base mode)', async () => {
-    expect(x25519PublicKey(`0x${RFC9180.skRm}`)).toBe(`0x${RFC9180.pkRm}`);
-    expect(x25519PublicKey(`0x${RFC9180.skEm}`)).toBe(`0x${RFC9180.pkEm}`);
-    const { enc: e, ct } = hpkeSealBase({
-      recipientPublicKey: `0x${RFC9180.pkRm}`,
-      info: h(RFC9180.info),
-      aad: h(RFC9180.aad),
-      plaintext: h(RFC9180.pt),
-      ephemeralSecretKey: `0x${RFC9180.skEm}`,
-    });
-    expect(bytesToHex(e)).toBe(`0x${RFC9180.enc}`);
-    expect(bytesToHex(ct)).toBe(`0x${RFC9180.ct}`);
-    expect(hpkeOpenBase({ recipientSecretKey: `0x${RFC9180.skRm}`, enc: h(RFC9180.enc), info: h(RFC9180.info), aad: h(RFC9180.aad), ct: h(RFC9180.ct) })).toEqual(h(RFC9180.pt));
-    // @hpke/core, importing the raw 32-byte X25519 key, opens the same vector.
+  it('RFC 9180 test vector (X25519 / HKDF-SHA256 / AES-256-GCM, base mode) through our suite', async () => {
     const s = hpkeSuite();
-    const recipientKey = await s.kem.deserializePrivateKey(h(RFC9180.skRm));
-    const pt = await s.open({ recipientKey, enc: h(RFC9180.enc), info: h(RFC9180.info) }, h(RFC9180.ct), h(RFC9180.aad));
+    expect(x25519PublicKey(`0x${RFC9180.skRm}`)).toBe(`0x${RFC9180.pkRm}`);
+    const ekm = { privateKey: await s.kem.deserializePrivateKey(h(RFC9180.skEm)), publicKey: await s.kem.deserializePublicKey(h(RFC9180.pkEm)) };
+    const sealed = await s.seal({ recipientPublicKey: await s.kem.deserializePublicKey(h(RFC9180.pkRm)), info: h(RFC9180.info), ekm }, h(RFC9180.pt), h(RFC9180.aad));
+    expect(bytesToHex(new Uint8Array(sealed.enc))).toBe(`0x${RFC9180.enc}`);
+    expect(bytesToHex(new Uint8Array(sealed.ct))).toBe(`0x${RFC9180.ct}`);
+    const pt = await s.open({ recipientKey: await s.kem.deserializePrivateKey(h(RFC9180.skRm)), enc: h(RFC9180.enc), info: h(RFC9180.info) }, h(RFC9180.ct), h(RFC9180.aad));
     expect(new Uint8Array(pt)).toEqual(h(RFC9180.pt));
   });
 
@@ -148,66 +135,55 @@ describe('EMKW2 (HPKE RFC 9180 key wrap)', () => {
     expect(buyer.publicKey).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
-  it('round trips; layout "EMKW2" ‖ enc(32) ‖ ct(48) = 85 bytes', () => {
-    const blob = wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash });
+  it('round trips; layout "EMKW2" ‖ enc(32) ‖ ct(48) = 85 bytes', async () => {
+    const blob = await wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash });
     expect(blob.length).toBe(WRAPPED_KEY_LEN);
     expect(WRAPPED_KEY_LEN).toBe(85);
     expect(Buffer.from(blob.subarray(0, 5)).toString()).toBe('EMKW2');
     expect(parseWrappedKey(blob).ciphertext.length).toBe(48);
-    expect(unwrapKey({ blob, recipientSecretKey: buyer.secretKey, wrapperHash })).toEqual(kBundle);
+    expect(await unwrapKey({ blob, recipientSecretKey: buyer.secretKey, wrapperHash })).toEqual(kBundle);
     expect(wrappedKeyHash(blob)).toBe(sha256Hex(blob));
   });
 
-  it('fails with the wrong recipient key, wrong wrapperHash (aad), wrong info, or tampering', () => {
-    const blob = wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash });
+  it('fails with the wrong recipient key, wrong wrapperHash (aad), wrong info, or tampering', async () => {
+    const blob = await wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash });
     const other = generateX25519KeyPair();
-    expect(() => unwrapKey({ blob, recipientSecretKey: other.secretKey, wrapperHash })).toThrow(/authentication/);
-    expect(() => unwrapKey({ blob, recipientSecretKey: buyer.secretKey, wrapperHash: sha256Hex('other wrapper') })).toThrow(/authentication/);
-    expect(() => unwrapKey({ blob, recipientSecretKey: buyer.secretKey, wrapperHash, info: UPLOAD_KEYWRAP_INFO })).toThrow(/authentication/);
+    await expect(unwrapKey({ blob, recipientSecretKey: other.secretKey, wrapperHash })).rejects.toThrow(/authentication/);
+    await expect(unwrapKey({ blob, recipientSecretKey: buyer.secretKey, wrapperHash: sha256Hex('other wrapper') })).rejects.toThrow(/authentication/);
+    await expect(unwrapKey({ blob, recipientSecretKey: buyer.secretKey, wrapperHash, info: UPLOAD_KEYWRAP_INFO })).rejects.toThrow(/authentication/);
     for (const pos of [0, 5, 5 + 31, 5 + 32, blob.length - 1]) {
       const t = new Uint8Array(blob);
       t[pos]! ^= 0x80;
-      expect(() => unwrapKey({ blob: t, recipientSecretKey: buyer.secretKey, wrapperHash })).toThrow();
+      await expect(unwrapKey({ blob: t, recipientSecretKey: buyer.secretKey, wrapperHash })).rejects.toThrow();
     }
   });
 
-  it('rejects low-order recipient keys', () => {
-    expect(() => wrapKey({ key: kBundle, recipientPublicKey: ('0x' + '00'.repeat(32)) as Hex, wrapperHash })).toThrow(/X25519/);
+  it('rejects low-order recipient keys', async () => {
+    await expect(wrapKey({ key: kBundle, recipientPublicKey: ('0x' + '00'.repeat(32)) as Hex, wrapperHash })).rejects.toThrow(/X25519/);
+    await expect(wrapKey({ key: kBundle, recipientPublicKey: ('0x01' + '00'.repeat(31)) as Hex, wrapperHash })).rejects.toThrow(/X25519/);
   });
 
-  it('deterministic given the ephemeral key (relay re-derivation); legacy `nonce` is ignored', () => {
+  it('deterministic given the ephemeral key (relay re-derivation); legacy `nonce` is ignored', async () => {
     const eph = generateX25519KeyPair().secretKey;
-    const a = wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash, ephemeralSecretKey: eph, nonce: new Uint8Array(12) });
-    const b = wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash, ephemeralSecretKey: eph, nonce: new Uint8Array(12).fill(7) });
+    const a = await wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash, ephemeralSecretKey: eph, nonce: new Uint8Array(12) });
+    const b = await wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash, ephemeralSecretKey: eph, nonce: new Uint8Array(12).fill(7) });
     expect(bytesToHex(a)).toBe(bytesToHex(b));
     expect(bytesToHex(parseWrappedKey(a).enc)).toBe(x25519PublicKey(eph));
   });
 
-  it('sync path is byte-identical to @hpke/core; each opens the other', async () => {
-    const eph = generateX25519KeyPair().secretKey;
-    const args = { key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash, ephemeralSecretKey: eph };
-    expect(bytesToHex(wrapKey(args))).toBe(bytesToHex(await wrapKeyAsync(args)));
-
-    const fromCore = await wrapKeyAsync({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash, info: UPLOAD_KEYWRAP_INFO });
-    expect(unwrapKey({ blob: fromCore, recipientSecretKey: buyer.secretKey, wrapperHash, info: UPLOAD_KEYWRAP_INFO })).toEqual(kBundle);
-    const fromSync = wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash });
-    expect(await unwrapKeyAsync({ blob: fromSync, recipientSecretKey: buyer.secretKey, wrapperHash })).toEqual(kBundle);
-    await expect(unwrapKeyAsync({ blob: fromSync, recipientSecretKey: buyer.secretKey, wrapperHash: sha256Hex('x') })).rejects.toThrow(/authentication/);
-  });
-
-  it.skipIf(!hasPyhpke)('interoperates with pyhpke (independent Python implementation), both directions', () => {
-    const blob = wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash });
+  it.skipIf(!hasPyhpke)('interoperates with pyhpke (independent Python implementation), both directions', async () => {
+    const blob = await wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash });
     const { enc: e, ciphertext } = parseWrappedKey(blob);
     const opened = py({ op: 'open', sk: buyer.secretKey.slice(2), enc: Buffer.from(e).toString('hex'), ct: Buffer.from(ciphertext).toString('hex'), aad: wrapperHash.slice(2), info: 'envmarket.keywrap.v1' });
     expect(`0x${opened}`).toBe(bytesToHex(kBundle));
 
     const sealed = JSON.parse(py({ op: 'seal', pk: buyer.publicKey.slice(2), pt: bytesToHex(kBundle).slice(2), aad: wrapperHash.slice(2), info: 'envmarket.keywrap.v1' })) as { enc: string; ct: string };
     const pyBlob = new Uint8Array(Buffer.concat([Buffer.from('EMKW2'), Buffer.from(sealed.enc, 'hex'), Buffer.from(sealed.ct, 'hex')]));
-    expect(unwrapKey({ blob: pyBlob, recipientSecretKey: buyer.secretKey, wrapperHash })).toEqual(kBundle);
+    expect(await unwrapKey({ blob: pyBlob, recipientSecretKey: buyer.secretKey, wrapperHash })).toEqual(kBundle);
   });
 
-  it('X25519 agrees with node:crypto (OpenSSL): public key and DH', () => {
-    const blob = wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash });
+  it('X25519 agrees with node:crypto (OpenSSL): public key and DH', async () => {
+    const blob = await wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash });
     const { enc: e } = parseWrappedKey(blob);
     const shared = nodeCrypto.diffieHellman({ privateKey: nodePriv(hexToBytes(buyer.secretKey)), publicKey: nodePub(e) });
     expect(new Uint8Array(shared)).toEqual(x25519SharedSecret(buyer.secretKey, e));
@@ -217,7 +193,7 @@ describe('EMKW2 (HPKE RFC 9180 key wrap)', () => {
 });
 
 describe('end-to-end delivery', () => {
-  it('seller encrypts, relay wraps to buyer with wrapperHash, buyer decrypts', () => {
+  it('seller encrypts, relay wraps to buyer with wrapperHash, buyer decrypts', async () => {
     const bundle = enc.encode('tar bytes');
     const kBundle = randomKey();
     const ct = encryptFile(kBundle, bundle);
@@ -234,10 +210,10 @@ describe('end-to-end delivery', () => {
       issuedAt: 1_789_000_000,
       relay: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
     });
-    const wk = wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash });
+    const wk = await wrapKey({ key: kBundle, recipientPublicKey: buyer.publicKey, wrapperHash });
     // buyer side: verify the wrapper, derive the key, decrypt, check bundleHash
     expect(sha256Hex(json)).toBe(wrapperHash);
-    const k = unwrapKey({ blob: wk, recipientSecretKey: buyer.secretKey, wrapperHash });
+    const k = await unwrapKey({ blob: wk, recipientSecretKey: buyer.secretKey, wrapperHash });
     const plain = decryptFile(k, ct);
     expect(sha256Hex(plain)).toBe(sha256Hex(bundle));
   });

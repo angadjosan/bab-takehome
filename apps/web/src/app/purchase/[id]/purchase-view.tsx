@@ -12,7 +12,7 @@ import { RequireWallet, TxStatus, useTx } from "@/components/tx";
 import { AddressLink, Card, Countdown, Empty, HashValue, Notice, Skeleton, Spinner, Stars, Verified, cx, useNow, IconCheck, IconX, TxLink } from "@/components/ui";
 import { marketAbi, tokenAbi } from "@/lib/abi";
 import { deployment, CHAIN_ID } from "@/lib/config";
-import { decryptBundle, encKeyFromSecret, eqHash, listTar, sha256Hex, unwrapBundleKey, utf8, type TarEntry } from "@/lib/crypto";
+import { decryptBundle, encKeyFromSecret, eqHash, listTar, sha256Hex, unwrapBundleKeyAsync, utf8, type TarEntry } from "@/lib/crypto";
 import { describe, useDoc } from "@/lib/docs";
 import { fmtTime, fmtUsdc, fmtWindow, maskToIndexes, pct, popcount } from "@/lib/format";
 import { downloadBytes, useEncKeys } from "@/lib/keys";
@@ -416,8 +416,8 @@ function Decrypt({ p, v, onTar }: { p: Purchase; v: Version; onTar: (t: TarEntry
       push({ label: `Ciphertext (${(ct.length / 1024).toFixed(1)} KiB) hash matches ciphertextHash`, ok: eqHash(ch, v.ciphertextHash), detail: <HashValue value={ch} /> });
       let bundleKey: Uint8Array;
       try {
-        bundleKey = unwrapBundleKey(dl.wrappedKey, key.secretKey, p.wrapperHash);
-        push({ label: "Unwrapped bundle key with your X25519 secret key (ECIES, HKDF salt = wrapperHash)", ok: true });
+        bundleKey = await unwrapBundleKeyAsync(dl.wrappedKey, key.secretKey, p.wrapperHash);
+        push({ label: "Unwrapped bundle key with your X25519 secret key (HPKE, aad = wrapperHash)", ok: true });
       } catch (e) {
         push({ label: "Unwrap bundle key", ok: false, detail: (e as Error).message });
         return;
