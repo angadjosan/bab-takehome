@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # Sell an RL environment on the live market (Base Sepolia), end to end, from your machine.
 #
-#   ./sell.sh <path-to-environment-dir> [--price 100] [--collateral 100] [--dry-run]
+#   ./sell.sh <path-to-environment-dir> [--price 100] [--collateral 100] [--new-wallet] [--no-faucet] [--dry-run]
+#   ./sell.sh --new-wallet                only make a seller wallet
+#
+# Any Base Sepolia wallet can sell. Use a key just for selling: it is your seller identity on-chain
+# and the account that receives sale proceeds. Pick one:
+#   --new-wallet                          make a fresh key and save it to .env in this repo (back that file up)
+#   SELLER_PK=0x... ./sell.sh <dir>       use an existing key for this run only (nothing written to disk)
+#   SELLER_PK=0x... in .env               use an existing key on every run
+# If the wallet is short on gas or tUSDC, the app's test faucet tops it up (--no-faucet to skip).
 #
 #   1. check the folder layout (what `seller package` needs, and what the TEE will reject)
 #   2. package locally: canonical tar, salted task/audit Merkle roots, manifest, AES-256-GCM
@@ -22,9 +30,9 @@ say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 warn() { printf '    warning: %s\n' "$*" >&2; }
 die() { printf '\n\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
-WS="" PRICE=100 COLLATERAL=100 DRY=0
+WS="" PRICE=100 COLLATERAL=100 DRY=0 NEW_WALLET=0 FAUCET=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --price) PRICE="${2:-}"; shift 2 || usage 1 ;;
@@ -32,18 +40,23 @@ while [ $# -gt 0 ]; do
     --collateral) COLLATERAL="${2:-}"; shift 2 || usage 1 ;;
     --collateral=*) COLLATERAL="${1#*=}"; shift ;;
     --dry-run) DRY=1; shift ;;
+    --new-wallet) NEW_WALLET=1; shift ;;
+    --no-faucet) FAUCET=0; shift ;;
     -h | --help) usage 0 ;;
     -*) echo "unknown option: $1" >&2; usage 1 ;;
     *) [ -z "$WS" ] || die "give one environment folder (got '$WS' and '$1')"; WS="$1"; shift ;;
   esac
 done
-[ -n "$WS" ] || usage 1
+[ -n "$WS" ] || [ "$NEW_WALLET" = 1 ] || usage 1
 for pair in "price:$PRICE" "collateral:$COLLATERAL"; do
   [[ "${pair#*:}" =~ ^[0-9]+(\.[0-9]{1,6})?$ ]] || die "--${pair%%:*} must be an amount of tUSDC, like 100 or 12.5 (got '${pair#*:}')"
 done
-[ -d "$WS" ] || die "'$WS' is not a folder"
-WS="$(cd "$WS" && pwd)"
-RERUN="./sell.sh $WS --price $PRICE --collateral $COLLATERAL"
+if [ -n "$WS" ]; then
+  [ -d "$WS" ] || die "'$WS' is not a folder"
+  WS="$(cd "$WS" && pwd)"
+fi
+RERUN="./sell.sh ${WS:-<path-to-environment-dir>} --price $PRICE --collateral $COLLATERAL"
+[ "$FAUCET" = 1 ] || RERUN="$RERUN --no-faucet"
 
 # ------------------------------------------------------------------------------ prerequisites
 say "Checking prerequisites"
@@ -66,9 +79,30 @@ has_seller_key() {
   [[ "${SELLER_PK:-}" =~ ^(0x)?[0-9a-fA-F]{64}$ ]] && return 0
   [ -f "$ROOT/.env" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?SELLER_PK=["'"'"']?(0x)?[0-9a-fA-F]{64}' "$ROOT/.env"
 }
-KEY_HELP="Add your seller wallet's private key to $ROOT/.env as SELLER_PK=0x... (a Base Sepolia wallet with a little ETH for gas and tUSDC for collateral and the preview fee; the app has a tUSDC faucet: $APP_URL)"
+KEY_HELP="Run with --new-wallet to make one, or use an existing Base Sepolia key: SELLER_PK=0x... $RERUN (this run only), or a line SELLER_PK=0x... in $ROOT/.env (every run)."
+
+if [ "$NEW_WALLET" = 1 ]; then
+  has_seller_key && die "a seller key is already set (SELLER_PK in your environment or $ROOT/.env), so a new wallet would not be used. Drop --new-wallet to sell from that one, or remove it first."
+  NEW_ADDR="$(cd "$ROOT/agents" && node --input-type=module -e '
+import fs from "node:fs";
+import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
+const file = process.argv[1];
+const pk = generatePrivateKey();
+const prev = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+fs.writeFileSync(file, prev + (prev && !prev.endsWith("\n") ? "\n" : "") + `SELLER_PK=${pk}\n`, { mode: 0o600 });
+fs.chmodSync(file, 0o600);
+console.log(privateKeyToAddress(pk));
+' "$ROOT/.env")" || die "could not create a wallet"
+  info "new seller wallet $NEW_ADDR ($EXPLORER/address/$NEW_ADDR)"
+  info "its key is saved as SELLER_PK in $ROOT/.env; back that file up, it is the only copy"
+  if [ -z "$WS" ]; then
+    info "next: $RERUN   (tops the wallet up from the test faucet)"
+    exit 0
+  fi
+fi
+
 if has_seller_key; then info "seller key found (SELLER_PK)"
-elif [ "$DRY" = 1 ]; then warn "no SELLER_PK yet (fine for a dry run). $KEY_HELP"
+elif [ "$DRY" = 1 ]; then warn "no seller key yet (fine for a dry run). $KEY_HELP"
 else die "no seller key. $KEY_HELP"; fi
 
 export CHAIN_ID=84532
@@ -245,6 +279,12 @@ STATUS="$(step "reading the seller account" seller status)"
 printf '%s\n' "$STATUS" | sed 's/^/    /'
 SELLER_ADDR="$(printf '%s\n' "$STATUS" | awk '/^seller 0x/ {print $2; exit}')"
 [ -n "$SELLER_ADDR" ] && info "$EXPLORER/address/$SELLER_ADDR"
+
+say "Funds: gas, one sale of collateral, and the preview fee"
+FUND=(fund --collateral "$COLLATERAL")
+[ -z "$(get "$STATE" reportHash)" ] || FUND+=(--no-preview-fee)
+[ "$FAUCET" = 0 ] || FUND+=(--faucet "$APP_URL")
+step "funding the seller wallet" seller "${FUND[@]}"
 
 say "Step 2-3: package and upload to the TEE"
 if [ -n "$(get "$STATE" versionId)" ]; then

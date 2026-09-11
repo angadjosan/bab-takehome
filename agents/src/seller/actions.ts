@@ -1,7 +1,7 @@
 /** Seller agent actions: upload to the TEE, list on-chain, collateral, preview/attach, keeper. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { parseEventLogs, recoverMessageAddress, type Address, type Hex, type TransactionReceipt } from 'viem';
+import { formatEther, parseEventLogs, recoverMessageAddress, type Address, type Hex, type TransactionReceipt } from 'viem';
 import {
   PurchaseState,
   UPLOAD_KEYWRAP_INFO,
@@ -16,6 +16,7 @@ import {
   approveExact,
   balanceOf,
   chainNow,
+  explorerTx,
   fmt,
   getPurchase,
   getVersion,
@@ -193,10 +194,14 @@ export async function listVersion(
 ): Promise<{ versionId: bigint; listingId: bigint }> {
   const li = readListingInput(dir);
   const st = readState(dir);
+  const me = signer(ctx, 'seller').account.address as Address;
   if (st.versionId) {
     const onchain = await getVersion(ctx, BigInt(st.versionId));
     if (!eq(onchain.bundleHash, li.versionInput.bundleHash)) {
       throw new Error(`${stateFile(dir)} says version ${st.versionId}, but that version on market ${ctx.market} has a different bundleHash (state from another deployment?); move ${dir} aside and package again`);
+    }
+    if (!eq(onchain.seller, me)) {
+      throw new Error(`${stateFile(dir)} says version ${st.versionId}, which was listed by ${onchain.seller}, but you are ${me}; move ${dir} aside (or set AGENTS_DATA_DIR) and package again`);
     }
     log(`already listed as version ${st.versionId}`);
     return { versionId: BigInt(st.versionId), listingId: BigInt(st.listingId ?? 0) };
@@ -204,7 +209,6 @@ export async function listVersion(
   const uri = opts.uri ?? st.uri;
   if (!uri) throw new Error('no blob base URL: run `upload` first (or pass --uri)');
   // A listing tx that landed after the local state write failed: same bundleHash already on-chain.
-  const me = signer(ctx, 'seller').account.address as Address;
   const mine = await marketRead<bigint[]>(ctx, 'listVersionIdsBySeller', [me]);
   for (const id of [...mine].reverse()) {
     const ov = (await getVersion(ctx, id)) as unknown as Record<string, any>;
@@ -392,6 +396,62 @@ export async function ensureCollateral(ctx: Ctx, needed: bigint): Promise<bigint
   log(`available stake ${await fmt(ctx, s.available)} < ${await fmt(ctx, needed)} per sale: depositing ${await fmt(ctx, top)}`);
   await depositCollateral(ctx, top);
   return top;
+}
+
+/** Gas for a full sell run (createListing ~500k, 2 approves, depositCollateral, requestPreview, attachReport) with headroom. */
+const SELL_GAS = 1_000_000n;
+
+/**
+ * Make sure the seller wallet can finish a sell run: gas for its transactions and tUSDC for the
+ * collateral shortfall plus the market's minimum preview fee. When short and `appUrl` is given, ask
+ * the app's test faucet (one drip per address per day) and wait for the funds to land.
+ */
+export async function ensureFunds(ctx: Ctx, opts: { collateral: bigint; previewFee: boolean; appUrl?: string; waitMs?: number }): Promise<void> {
+  const pc = ctx.read.publicClient;
+  const me = signer(ctx, 'seller').account.address as Address;
+  const stake = await sellerStake(ctx, me);
+  const shortfall = opts.collateral > stake.available ? opts.collateral - stake.available : 0n;
+  const fee = opts.previewFee ? await marketRead<bigint>(ctx, 'minPreviewFee') : 0n;
+  const needTok = shortfall + fee;
+  const fees = await pc.estimateFeesPerGas().catch(() => null);
+  const needEth = SELL_GAS * (fees?.maxFeePerGas ?? (await pc.getGasPrice()));
+  const read = async () => ({ eth: await pc.getBalance({ address: me }), tok: await balanceOf(ctx, me) });
+  const ok = (b: { eth: bigint; tok: bigint }) => b.eth >= needEth && b.tok >= needTok;
+  const describe = async (b: { eth: bigint; tok: bigint }) =>
+    `${formatEther(b.eth)} ETH (need ~${formatEther(needEth)} for gas), ${await fmt(ctx, b.tok)} (need ${await fmt(ctx, needTok)}: ${await fmt(ctx, shortfall)} collateral + ${await fmt(ctx, fee)} preview fee)`;
+  const shortBy = async (b: { eth: bigint; tok: bigint }) =>
+    [b.eth < needEth ? `${formatEther(needEth - b.eth)} Base Sepolia ETH` : '', b.tok < needTok ? await fmt(ctx, needTok - b.tok) : ''].filter(Boolean).join(' and ');
+
+  let bal = await read();
+  log(`wallet ${me}: ${await describe(bal)}`);
+  if (ok(bal)) return;
+  const where = opts.appUrl ? ` (test faucet: ${opts.appUrl})` : '';
+  if (!opts.appUrl) throw new Error(`wallet ${me} is short ${await shortBy(bal)}; send that to it and re-run${where}`);
+
+  log(`short ${await shortBy(bal)}: asking the test faucet at ${opts.appUrl}`);
+  let body: { ok?: boolean; message?: string; error?: string; ethTx?: Hex; tokenTx?: Hex } = {};
+  try {
+    const res = await fetch(`${opts.appUrl.replace(/\/$/, '')}/api/faucet`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: me }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+  } catch (e) {
+    body = { error: (e as Error).message };
+  }
+  if (!body.ok) throw new Error(`the faucet did not fund ${me}: ${body.error ?? 'no reason given'}. Send it ${await shortBy(bal)} and re-run${where}`);
+  log(`faucet: ${body.message}`);
+  for (const h of [body.ethTx, body.tokenTx]) if (h) log(`  ${explorerTx(ctx.chainId, h) ?? h}`);
+
+  const deadline = Date.now() + (opts.waitMs ?? 60_000);
+  while (!ok(bal) && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 3000));
+    bal = await read();
+  }
+  log(`wallet ${me}: ${await describe(bal)}`);
+  if (!ok(bal)) throw new Error(`wallet ${me} is still short ${await shortBy(bal)} after the faucet; send that to it and re-run${where}`);
 }
 
 /** Ops: the preview-fee recipient (default: deployer/operator) pulls its released preview fees. */

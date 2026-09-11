@@ -5,6 +5,7 @@
  *   tsx src/seller/cli.ts package [--workspace DIR] [--price 100] [--collateral 100] [--challenge-window S] [--delivery-window S] [--force]
  *   tsx src/seller/cli.ts upload   [--version <environmentVersion>]
  *   tsx src/seller/cli.ts list     [--version <environmentVersion>]
+ *   tsx src/seller/cli.ts fund     --collateral 100 [--no-preview-fee] [--faucet <appUrl>]
  *   tsx src/seller/cli.ts deposit-collateral --amount 100
  *   tsx src/seller/cli.ts preview  [--version <environmentVersion> | --version-id N]
  *   tsx src/seller/cli.ts keeper   [--once] [--interval 15]
@@ -17,7 +18,7 @@ import { parseUnits } from 'viem';
 import { loadCtx, marketRead, sellerStake, signer, sleep, tokenInfo, fmt } from '../common/ctx.ts';
 import { sellerVersionDir, sellerWorkspace } from '../common/paths.ts';
 import { TeeClient } from '../common/tee.ts';
-import { keeperTick, listVersion, payPreview, previewAndAttach, readState, uploadVersion, depositCollateral, ensureCollateral, withdrawPreviewFees } from './actions.ts';
+import { keeperTick, listVersion, payPreview, previewAndAttach, readState, uploadVersion, depositCollateral, ensureCollateral, ensureFunds, withdrawPreviewFees } from './actions.ts';
 import { packageEnvironment, parseDescriptionLoose, readListingInput } from './package.ts';
 
 function workspaceVersion(ws: string): string {
@@ -94,6 +95,18 @@ program
     const need = BigInt(readListingInput(versionDir(o)).versionInput.collateral);
     const topped = await ensureCollateral(ctx, need);
     console.log(topped === 0n ? `[seller] free stake already covers the ${await fmt(ctx, need)} reserved per sale` : `[seller] deposited ${await fmt(ctx, topped)} of collateral`);
+  });
+
+program
+  .command('fund')
+  .description('check the seller wallet has gas and enough tUSDC for one sale of collateral plus the preview fee; top up from the app faucet if not')
+  .requiredOption('--collateral <amount>', 'collateral per sale in token units')
+  .option('--no-preview-fee', 'the preview is already paid; only cover collateral')
+  .option('--faucet <appUrl>', 'app base URL whose /api/faucet tops up a short wallet (omit to only check)')
+  .action(async (o) => {
+    const ctx = loadCtx();
+    const t = await tokenInfo(ctx);
+    await ensureFunds(ctx, { collateral: parseUnits(o.collateral, t.decimals), previewFee: o.previewFee, appUrl: o.faucet });
   });
 
 program
