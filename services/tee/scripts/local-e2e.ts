@@ -283,18 +283,18 @@ async function preview(versionId: bigint, pkg: PackageResult, reuseOf?: { versio
   log(`preview v${versionId}: ${reuseOf ? 'expecting reuse of the cached run' : `running the reference panel (${useFireworks ? 'Fireworks' : 'local Ollama harness check'})`} …`);
   const start = await httpJson('POST', `${TEE}/preview/${versionId}?async=1`);
   check(start.status === 202 || start.status === 200, `preview accepted (HTTP ${start.status}${start.status >= 400 ? ' ' + JSON.stringify(start.json).slice(0, 400) : ''})`);
+  let failure: string | null = null;
   const done = await waitFor(
     'preview report',
     async () => {
       const r = await httpJson('GET', `${TEE}/reports/${versionId}`);
-      if (r.status === 500) throw new Error(`preview failed: ${JSON.stringify(r.json).slice(0, 1500)}`);
-      return r.status === 200 ? r.json : null;
+      if (r.status === 500) failure = JSON.stringify(r.json).slice(0, 2000);
+      return failure ? { failed: true } : r.status === 200 ? r.json : null;
     },
     90 * 60_000,
     10_000,
-  ).catch((e) => {
-    throw e;
-  });
+  );
+  if (failure) throw new Error(`preview v${versionId} failed: ${failure}`);
   const report = parseReport(done.reportJson);
   check(sha256Hex(done.reportJson) === done.reportHash, 'reportHash = sha256(canonical report.json)');
   check(report.bundleHash === pkg.bundleHash && report.versionId === versionId.toString(), 'report binds versionId and bundleHash');
@@ -406,6 +406,33 @@ async function falseDescriptionEvidence(versionId: bigint, pkg: PackageResult): 
   check(outsider.status === 403, 'non-seated address rejected');
 }
 
+/** PreviewNotReproducible on T1: harness --regrade (tolerance 0) + harness re-run of the panel. */
+async function reproDispute(versionId: bigint, pkg: PackageResult): Promise<void> {
+  const pid = await buyAndReceive('buyer', versionId, pkg);
+  const mask = 1n << BigInt(pkg.listing.taskIds.indexOf('T1'));
+  const [, bond] = await readM<[bigint, bigint]>('quoteDispute', [pid, mask]);
+  const ev = await httpJson('POST', `${TEE}/evidence-upload`, { content: 'The preview result for the first task does not reproduce under the committed protocol.' });
+  await send('buyer', TOKEN, tokenAbi, 'approve', [MARKET, bond]);
+  const { receipt } = await send('buyer', MARKET, marketAbi, 'openDispute', [pid, 3, mask, ev.json.evidenceHash]);
+  const did = (parseEventLogs({ abi: marketAbi, logs: receipt.logs, eventName: 'DisputeOpened' })[0] as unknown as { args: { disputeId: bigint } }).args.disputeId;
+  log(`PreviewNotReproducible dispute ${did} opened on T1; the verifier re-grades stored workspaces and re-runs the panel in the harness …`);
+  const [d] = await waitFor(
+    'repro dispute resolved',
+    async () => {
+      const x = await readM<[{ status: number; verdict: number; findingsHash: Hex }, unknown]>('getDispute', [did]);
+      return Number(x[0].status) === 3 ? x : null;
+    },
+    25 * 60_000,
+    5000,
+  );
+  const f = await httpJson('GET', `${TEE}/findings/${did}`);
+  check(f.status === 200 && sha256Hex(canonicalJson(f.json.findings)) === d.findingsHash.toLowerCase(), 'repro findings JSON hashes to the on-chain findingsHash');
+  const r = f.json.findings.result;
+  check(r.deterministicRegrade.episodes > 0 && r.deterministicRegrade.mismatches === 0, `harness --regrade reproduced every stored workspace exactly (${r.deterministicRegrade.episodes} episodes, 0 mismatches)`);
+  check(Array.isArray(r.llmRerun) && r.llmRerun.length === 3 && r.llmRerun.every((m: { rerunInfraFailures: number }) => m.rerunInfraFailures === 0), 'every panel model re-ran the masked task in the harness');
+  log(`   repro verdict: ${Number(d.verdict) === 1 ? 'UPHELD (a model outcome changed beyond 5 pp)' : 'rejected (reproduced within tolerance)'}; ${JSON.stringify(r.llmRerun)}`);
+}
+
 function brokenWorkspace(): string {
   const src = path.join(ROOT, 'seller-workspace', 'py-repair-kit');
   const dst = path.join(E2E, 'broken-ws');
@@ -477,6 +504,7 @@ async function main(): Promise<void> {
 
   await mechanicalDispute(pid, 1, false);
   await falseDescriptionEvidence(versionId, pkg);
+  await reproDispute(versionId, pkg);
 
   if (process.env.E2E_BROKEN_VARIANT === '1') {
     log('broken variant: T3 has a hidden test that fails on the reference solution');
