@@ -143,7 +143,11 @@ export function llmConfigFromEnv(role?: string, env: Record<string, string | und
   return {
     baseURL,
     apiKey,
-    model: pick('LLM_MODEL'),
+    // LLM_MODEL_<ROLE> > pinned default for the role (Fireworks only) > LLM_MODEL
+    model:
+      (R ? env[`LLM_MODEL_${R}`] || undefined : undefined) ??
+      (role && isFireworks(baseURL) ? defaultModelForRole(role) : undefined) ??
+      (env.LLM_MODEL || undefined),
     temperature: numEnv(pick('LLM_TEMPERATURE'), 'LLM_TEMPERATURE'),
     seed: numEnv(pick('LLM_SEED'), 'LLM_SEED'),
     maxTokens: numEnv(pick('LLM_MAX_TOKENS'), 'LLM_MAX_TOKENS'),
@@ -334,7 +338,7 @@ export interface ResolvedModel {
 }
 
 export interface PickModelsOptions {
-  /** Exclude ids matching this (default: none). */
+  /** Exclude ids matching this (default: DEFAULT_MODEL_EXCLUDE = Fireworks router endpoints; null = none). */
   exclude?: RegExp | null;
   /** Require tool-calling support (supports_tools === true or "tools" in supported_parameters). */
   requireTools?: boolean;
@@ -388,6 +392,7 @@ function cmpVersion(a: number[], b: number[]): number {
  */
 export function pickNewestModels(models: ProviderModel[], families: string[], opts: PickModelsOptions = {}): Record<string, ResolvedModel | null> {
   const out: Record<string, ResolvedModel | null> = {};
+  const exclude = opts.exclude === undefined ? DEFAULT_MODEL_EXCLUDE : opts.exclude;
   for (const family of families) {
     const candidates = models
       .filter(
@@ -395,7 +400,7 @@ export function pickNewestModels(models: ProviderModel[], families: string[], op
           typeof m.id === 'string' &&
           modelMatchesFamily(m.id, family) &&
           m.supports_chat !== false &&
-          !(opts.exclude && opts.exclude.test(m.id)) &&
+          !(exclude && exclude.test(m.id)) &&
           (!opts.requireTools || m.supports_tools === true || (m.supported_parameters ?? []).includes('tools')),
       )
       .map((m) => ({ m, created: typeof m.created === 'number' && m.created > 0 ? m.created : null, version: parseModelVersion(m.id, family) }));
@@ -600,4 +605,76 @@ export async function runToolLoop(
   }
   const final = steps[steps.length - 1]!;
   return { final, messages, steps, toolCallCount };
+}
+
+/** Fireworks router endpoints (e.g. accounts/fireworks/routers/glm-5p3-fast) are not exact model ids. */
+export const DEFAULT_MODEL_EXCLUDE = /\/routers\//;
+
+const FW_MODELS = 'accounts/fireworks/models/';
+
+/**
+ * Pinned model ids (BUILD_SPEC "Deployment target"; all verified listed by Fireworks GET /models
+ * on 2026-09-10). The resolver (`resolvePanel` / `resolveModels`) is only a fallback.
+ */
+export const MODELS = {
+  panel: [
+    { family: 'glm', requested: 'GLM 5.3', id: `${FW_MODELS}glm-5p3` },
+    { family: 'kimi', requested: 'Kimi K3', id: `${FW_MODELS}kimi-k3` },
+    { family: 'qwen', requested: 'Qwen 3.8', id: `${FW_MODELS}qwen3p8-max` },
+  ],
+  validator: `${FW_MODELS}deepseek-v4-pro`,
+  jurors: {
+    juror1: `${FW_MODELS}deepseek-v4p1-flash`,
+    juror2: `${FW_MODELS}gpt-oss-120b`,
+    juror3: `${FW_MODELS}glm-5p2`,
+  },
+} as const;
+
+export type PanelSpec = { family: string; requested: string; id: string };
+
+/**
+ * Pinned model for a role: "validator", "juror1".."juror3", or a panel family
+ * ("glm" | "kimi" | "qwen", optionally prefixed "panel-" / "reference-").
+ */
+export function defaultModelForRole(role: string): string | undefined {
+  const r = role.toLowerCase();
+  if (r === 'validator') return MODELS.validator;
+  if (r in MODELS.jurors) return MODELS.jurors[r as keyof typeof MODELS.jurors];
+  const fam = r.replace(/^(panel|reference)[-_:]?/, '');
+  return MODELS.panel.find((p) => p.family === fam)?.id;
+}
+
+export interface PanelModel {
+  family: string;
+  requested: string;
+  /** Model id to use (pinned id, or the resolver's fallback). */
+  id: string;
+  /** True if `id` is the pinned id. */
+  pinned: boolean;
+  /** True if the provider's GET /models lists `id` right now. */
+  listed: boolean;
+  created: number | null;
+  supportsTools: boolean | null;
+}
+
+/**
+ * Check the pinned reference panel against the provider's live model list. A pinned id that is
+ * listed is used as-is; otherwise the newest listed model in the same family is used (pinned = false);
+ * if the family has none, the pinned id is returned with listed = false (report it as "unavailable").
+ */
+export async function resolvePanel(opts: { client?: LlmClient; panel?: readonly PanelSpec[]; requireTools?: boolean } = {}): Promise<PanelModel[]> {
+  const client = opts.client ?? LlmClient.fromEnv();
+  const models = await client.listModels();
+  const byId = new Map(models.map((m) => [m.id, m]));
+  return (opts.panel ?? MODELS.panel).map((p) => {
+    const hit = byId.get(p.id);
+    if (hit) {
+      return { ...p, pinned: true, listed: true, created: typeof hit.created === 'number' ? hit.created : null, supportsTools: hit.supports_tools ?? null };
+    }
+    const fallback = pickNewestModels(models, [p.family], { requireTools: opts.requireTools })[p.family];
+    if (fallback) {
+      return { family: p.family, requested: p.requested, id: fallback.id, pinned: false, listed: true, created: fallback.created, supportsTools: fallback.raw.supports_tools ?? null };
+    }
+    return { ...p, pinned: true, listed: false, created: null, supportsTools: null };
+  });
 }

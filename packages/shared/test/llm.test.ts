@@ -8,15 +8,19 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
+  defaultModelForRole,
   extractJson,
   FIREWORKS_BASE_URL,
   jsonSchemaResponse,
   LlmClient,
   LlmJsonError,
   llmConfigFromEnv,
+  loadEnv,
+  MODELS,
   parseModelVersion,
   pickNewestModels,
   resolveModels,
+  resolvePanel,
   runToolLoop,
 } from '../src/index.ts';
 
@@ -236,14 +240,114 @@ describe('model resolution', () => {
   });
 });
 
-describe.skipIf(!process.env.FIREWORKS_API_KEY)('live Fireworks', () => {
-  it('resolves the panel and gets a real completion', async () => {
-    const client = new LlmClient({ baseURL: FIREWORKS_BASE_URL, apiKey: process.env.FIREWORKS_API_KEY, retries: 1 });
-    const panel = await resolveModels(['glm', 'kimi', 'qwen'], { client });
-    const id = panel.qwen?.id ?? panel.glm?.id;
-    expect(id).toBeTruthy();
-    const r = await client.chat({ model: id!, messages: [{ role: 'user', content: 'Reply with the single word: pong' }], maxTokens: 16, temperature: 0 });
-    expect(r.model).toBeTruthy();
-    expect(r.content?.toLowerCase()).toContain('pong');
-  }, 120_000);
+describe('pinned models', () => {
+  it('role defaults: LLM_MODEL_<ROLE> > pinned (Fireworks) > LLM_MODEL', () => {
+    expect(defaultModelForRole('validator')).toBe(MODELS.validator);
+    expect(defaultModelForRole('juror2')).toBe('accounts/fireworks/models/gpt-oss-120b');
+    expect(defaultModelForRole('panel-qwen')).toBe('accounts/fireworks/models/qwen3p8-max');
+    expect(defaultModelForRole('seller')).toBe(undefined);
+    expect(llmConfigFromEnv('validator', { LLM_MODEL: 'generic' }).model).toBe(MODELS.validator);
+    expect(llmConfigFromEnv('juror3', { LLM_MODEL_JUROR3: 'override' }).model).toBe('override');
+    expect(llmConfigFromEnv('seller', { LLM_MODEL: 'generic' }).model).toBe('generic');
+    expect(llmConfigFromEnv('validator', { LLM_BASE_URL: 'http://localhost:11434/v1', LLM_MODEL: 'qwen3:8b' }).model).toBe('qwen3:8b');
+  });
+
+  it('resolver skips router endpoints by default', () => {
+    const list = [
+      { id: 'accounts/fireworks/models/glm-5p3', created: 100 },
+      { id: 'accounts/fireworks/routers/glm-5p3-fast', created: 200 },
+    ];
+    expect(pickNewestModels(list, ['glm']).glm!.id).toBe('accounts/fireworks/models/glm-5p3');
+    expect(pickNewestModels(list, ['glm'], { exclude: null }).glm!.id).toBe('accounts/fireworks/routers/glm-5p3-fast');
+  });
+
+  it('resolvePanel uses pinned ids when listed and falls back per family otherwise', async () => {
+    queue.push((_b, _q, res) =>
+      reply(res, 200, {
+        data: [
+          { id: 'accounts/fireworks/models/glm-5p3', created: 1 },
+          { id: 'accounts/fireworks/models/kimi-k2p6', created: 2 },
+        ],
+      }),
+    );
+    const p = await resolvePanel({ client: new LlmClient({ baseURL }) });
+    expect(p.map((x) => [x.family, x.id.split('/').pop(), x.pinned, x.listed])).toEqual([
+      ['glm', 'glm-5p3', true, true],
+      ['kimi', 'kimi-k2p6', false, true],
+      ['qwen', 'qwen3p8-max', true, false],
+    ]);
+  });
+});
+
+// Live smoke test against real Fireworks inference, using FIREWORKS_API_KEY from the repo .env
+// (read without mutating process.env).
+const FW_KEY = (() => {
+  try {
+    return loadEnv({ populateProcessEnv: false }).env.FIREWORKS_API_KEY;
+  } catch {
+    return process.env.FIREWORKS_API_KEY;
+  }
+})();
+
+describe.skipIf(!FW_KEY)('live Fireworks', () => {
+  const client = new LlmClient({ baseURL: FIREWORKS_BASE_URL, apiKey: FW_KEY, retries: 2, timeoutMs: 120_000 });
+
+  it('all pinned panel/validator/juror ids are listed by GET /models', async () => {
+    const panel = await resolvePanel({ client });
+    expect(panel.every((p) => p.pinned && p.listed)).toBe(true);
+    const ids = new Set((await client.listModels()).map((m) => m.id));
+    for (const id of [MODELS.validator, ...Object.values(MODELS.jurors)]) expect(ids.has(id)).toBe(true);
+    const newest = await resolveModels(['glm', 'kimi', 'qwen'], { client });
+    console.log('[live] resolver newest per family:', Object.values(newest).map((m) => m?.id).join(', '));
+  }, 60_000);
+
+  it('real tool call round trip (one function call, then the answer)', async () => {
+    let calls = 0;
+    const out = await runToolLoop(client, {
+      model: MODELS.jurors.juror1,
+      temperature: 0,
+      maxTokens: 512,
+      messages: [
+        { role: 'system', content: 'You answer questions about a software bundle. Use the provided tool; do not guess.' },
+        { role: 'user', content: 'How many purchased tasks does the bundle contain? Call the tool, then reply with just the number.' },
+      ],
+      tools: [
+        {
+          tool: {
+            type: 'function',
+            function: {
+              name: 'get_task_count',
+              description: 'Returns the number of purchased tasks in the bundle.',
+              parameters: { type: 'object', properties: {}, additionalProperties: false },
+            },
+          },
+          handler: () => {
+            calls++;
+            return JSON.stringify({ taskCount: 7 });
+          },
+        },
+      ],
+      maxSteps: 4,
+    });
+    console.log('[live] tool loop:', { model: out.final.model, steps: out.steps.length, toolCalls: out.toolCallCount, answer: out.final.content, usage: out.steps.map((s) => s.usage.totalTokens) });
+    expect(calls).toBeGreaterThanOrEqual(1);
+    expect(out.final.content ?? '').toContain('7');
+    expect(out.final.model).toContain('deepseek');
+  }, 180_000);
+
+  it('real JSON response validated with zod', async () => {
+    const schema = z.object({ verdict: z.enum(['Uphold', 'Reject']), reason: z.string().max(200) });
+    const r = await jsonSchemaResponse(client, {
+      model: MODELS.jurors.juror1,
+      temperature: 0,
+      maxTokens: 512,
+      schema,
+      messages: [
+        { role: 'system', content: 'You are a juror. The claim is "the bundle has 5 tasks"; evidence shows it has 3 tasks.' },
+        { role: 'user', content: 'Is the buyer\'s false-description claim upheld? Give verdict and a one-sentence reason.' },
+      ],
+    });
+    console.log('[live] json:', { model: r.result.model, repaired: r.repaired, value: r.value, usage: r.result.usage.totalTokens });
+    expect(r.value.verdict).toBe('Uphold');
+  }, 180_000);
 });
