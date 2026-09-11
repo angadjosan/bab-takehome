@@ -8,6 +8,7 @@
 #
 # Env overrides: IMAGE_REPO (default docker.io/angadsinghjosan/envmarket-tee), REF (git ref to build, default HEAD),
 #   APP_NAME (default envmarket-tee), INSTANCE_TYPE (default tdx.large = 4 vCPU / 8 GB), PHALA_CLI (default phala@1.1.22),
+#   OS_IMAGE (default dstack-0.5.9, the non-dev dstack OS),
 #   SKIP_BUILD=1 (reuse the digest already pinned in the compose), OUT_DIR (where CLI JSON output is saved).
 #
 # <env-file> is the SEALED env (dotenv), encrypted client-side by the CLI and decrypted only inside the CVM.
@@ -29,6 +30,9 @@ REF=${REF:-HEAD}
 APP_NAME=${APP_NAME:-envmarket-tee}
 INSTANCE_TYPE=${INSTANCE_TYPE:-tdx.large}
 PHALA_CLI=${PHALA_CLI:-phala@1.1.22}
+# Production (non-dev) dstack OS. Left unset, the CLI auto-selected dstack-dev-0.5.9 (DEV=yes) on 2026-09-11.
+# `phala os-images` lists them; never deploy a DEV image for the demo.
+OS_IMAGE=${OS_IMAGE:-dstack-0.5.9}
 REPO_ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 COMPOSE="$REPO_ROOT/services/tee/phala/docker-compose.yml"
 SHA=$(git -C "$REPO_ROOT" rev-parse --short=7 "$REF")
@@ -84,11 +88,11 @@ grep -qE 'image:.*@sha256:0{64}' "$COMPOSE" && { echo "compose image is still th
 case "$CMD" in
   build) exit 0 ;;
   deploy)
-    phala deploy -n "$APP_NAME" -c "$COMPOSE" -e "$ENV_FILE" -t "$INSTANCE_TYPE" --kms phala \
+    phala deploy -n "$APP_NAME" -c "$COMPOSE" -e "$ENV_FILE" -t "$INSTANCE_TYPE" --kms phala --image "$OS_IMAGE" \
       --no-public-logs --public-tcbinfo --wait --json | tee "$OUT_DIR/phala-deploy.json"
     ;;
   update)
-    phala deploy --cvm-id "${3:-$APP_NAME}" -c "$COMPOSE" -e "$ENV_FILE" \
+    phala deploy --cvm-id "${3:-$APP_NAME}" -c "$COMPOSE" -e "$ENV_FILE" --image "$OS_IMAGE" \
       --no-public-logs --public-tcbinfo --wait --json | tee "$OUT_DIR/phala-update.json"
     ;;
   *) echo "unknown command $CMD" >&2; exit 1 ;;
