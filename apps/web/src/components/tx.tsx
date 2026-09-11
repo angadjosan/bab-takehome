@@ -7,6 +7,7 @@ import { useAccount, useBalance, useChainId, useConnect, useSwitchChain, useWrit
 import { BURNER_CONNECTOR_ID } from "@/lib/burner";
 import { publicClient } from "@/lib/client";
 import { chain, CHAIN_ID, CHAIN_NAME, GAS_FAUCET_URL } from "@/lib/config";
+import { ensureGas } from "@/lib/faucet-client";
 import { SponsorCtx } from "@/lib/sponsor";
 import { BurnerForm, BurnerSwitcher } from "./burner-ui";
 import { PrivyLoginPrompt } from "./privy-login";
@@ -46,6 +47,8 @@ export function useTx() {
       // simulation surfaces revert reasons before the user is asked to sign anything
       const sim = await publicClient.simulateContract({ ...p, account: address } as never);
       const sponsored = !!sponsor && !!address && sponsor.canSponsor(address);
+      // a wallet with no ETH for fees gets a drip from the server faucet (/api/faucet) before it signs
+      if (!sponsored && address) await ensureGas(address);
       setState({ status: "signing", label, sponsored });
       let hash: Hex;
       if (sponsored) {

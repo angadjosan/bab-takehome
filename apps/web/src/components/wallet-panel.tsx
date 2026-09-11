@@ -9,6 +9,7 @@ import { fmtDec, fmtUsdc } from "@/lib/format";
 import { useClaimable } from "@/lib/market";
 import { PRIVY_SPONSOR_GAS } from "@/lib/wallet-mode";
 import { useTokenInfo, useWalletMode } from "./providers";
+import { FaucetStatus, useFaucet } from "./faucet";
 import { TxStatus, useTx } from "./tx";
 import { cx } from "./ui";
 
@@ -27,7 +28,7 @@ export function AccountPanel({ onClose }: { onClose: () => void }) {
   const eth = useBalance({ address, query: { enabled: !!address, refetchInterval: 15_000 } });
   const claimable = useClaimable(address);
   const withdraw = useTx();
-  const faucet = useTx();
+  const faucet = useFaucet();
   const hasClaim = (claimable.data ?? 0n) > 0n;
   const ethLow = eth.data !== undefined && eth.data.value === 0n;
   return (
@@ -65,7 +66,7 @@ export function AccountPanel({ onClose }: { onClose: () => void }) {
             <button className="btn btn-sm mt-2 w-full" disabled={faucet.busy} onClick={() => faucet.run("Faucet", { address: deployment!.token, abi: tokenAbi, functionName: "faucet" })}>
               Get test {token.symbol}
             </button>
-            <TxStatus state={faucet.state} />
+            <FaucetStatus state={faucet.state} />
           </>
         )}
         {(TEST_TOKEN || token.hasFaucet) && (

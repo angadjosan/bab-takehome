@@ -11,7 +11,8 @@ import { fmtUsdc } from "@/lib/format";
 import { useEncKeys } from "@/lib/keys";
 import { isZeroHash, useMarketParams, useSellerStake, type Version } from "@/lib/market";
 import { useTokenInfo, useWalletMode } from "./providers";
-import { friendlyError, RequireWallet, TxStatus, useTx } from "./tx";
+import { FaucetStatus, useFaucet } from "./faucet";
+import { friendlyError, RequireWallet, TxStatus } from "./tx";
 import { useApproveAndCall } from "./tx-sequence";
 import { Mono, Notice, Spinner } from "./ui";
 
@@ -69,7 +70,7 @@ function BuyAction({ v }: { v: Version }) {
   const [termsAck, setTermsAck] = useState(false);
   const [phase, setPhase] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const faucet = useTx();
+  const faucet = useFaucet();
   const seq = useApproveAndCall();
   const market = deployment!.market;
 
@@ -129,7 +130,7 @@ function BuyAction({ v }: { v: Version }) {
             <span className="text-warn">Add {token.symbol} to your wallet to continue.</span>
           )}
           <div className="w-full">
-            <TxStatus state={faucet.state} />
+            <FaucetStatus state={faucet.state} />
           </div>
         </div>
       )}

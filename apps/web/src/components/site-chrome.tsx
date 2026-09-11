@@ -13,7 +13,7 @@ import { PRIVY_SPONSOR_GAS } from "@/lib/wallet-mode";
 import { BurnerForm, BurnerSwitcher } from "./burner-ui";
 import { PrivyWalletButton } from "./privy-wallet";
 import { useTokenInfo, useWalletMode } from "./providers";
-import { useTx, TxStatus } from "./tx";
+import { FaucetStatus, useFaucet } from "./faucet";
 import { AddressLink, cx, IconExternal } from "./ui";
 import { AccountPanel } from "./wallet-panel";
 
@@ -92,7 +92,7 @@ function TestnetBanner() {
   const { address, isConnected } = useAccount();
   const { mode } = useWalletMode();
   const token = useTokenInfo();
-  const faucet = useTx();
+  const faucet = useFaucet();
   const { data: availableAt } = useReadContract({
     address: deployment?.token,
     abi: tokenAbi,
@@ -121,7 +121,7 @@ function TestnetBanner() {
                 Get test {token.symbol}
               </button>
               {coolingDown && <span className="text-muted">Next top-up after {fmtTime(waitUntil)}</span>}
-              <TxStatus state={faucet.state} />
+              <FaucetStatus state={faucet.state} />
             </span>
           ) : (
             <span className="text-muted">{mode === "privy" ? "Sign in" : "Connect a wallet"} to get free test {token.symbol}.</span>
