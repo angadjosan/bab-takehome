@@ -431,22 +431,34 @@ async function main() {
       return undefined;
     }
   };
+  // Kill as soon as the vote secret is on disk: the dying process cannot have revealed yet (reveal
+  // needs its own confirmed commit first), so any reveal must come from the restarted process.
   let killed = false;
+  let killedAtLine = 0;
+  const jurorLogPath = path.join(WORK, 'jurors.log');
+  const killTimer = KILL_JUROR
+    ? setInterval(() => {
+        if (killed || !roundRec(KILL_JUROR)?.salt) return;
+        const lock = path.join(WORK, 'data', `juror${KILL_JUROR}.lock`);
+        const pid = Number(readFileSync(lock, 'utf8'));
+        const rr = roundRec(KILL_JUROR)!;
+        process.kill(pid, 'SIGKILL');
+        killed = true;
+        killedAtLine = existsSync(jurorLogPath) ? readFileSync(jurorLogPath, 'utf8').split('\n').length : 0;
+        log(
+          `RESTART TEST: SIGKILLed juror${KILL_JUROR} (pid ${pid}) once its salt was persisted (commit tx ${rr.commitTx ? 'sent' : 'not yet sent'}, reveal not sent: ${!rr.revealTx}); run-all restarts it and it must reveal from the persisted salt`,
+        );
+      }, 50)
+    : null;
   const t0 = Date.now();
   let d: { status: number; verdict: number; refund: bigint; fallbackNoQuorum: boolean; round: number } | undefined;
   let seats: Array<{ juror: Address; vote: number; revealed: boolean; commitment: Hex; reward: bigint; slashed: bigint }> = [];
   while (Date.now() - t0 < TIMEOUT_MS) {
-    if (KILL_JUROR && !killed && roundRec(KILL_JUROR)?.commitConfirmed) {
-      const lock = path.join(WORK, 'data', `juror${KILL_JUROR}.lock`);
-      const pid = Number(readFileSync(lock, 'utf8'));
-      process.kill(pid, 'SIGKILL');
-      killed = true;
-      log(`RESTART TEST: SIGKILLed juror${KILL_JUROR} (pid ${pid}) right after its commit; run-all must restart it and it must reveal from the persisted salt`);
-    }
     [d, seats] = await read<[typeof d & object, typeof seats]>('getDispute', [disputeId]);
     if (Number(d!.status) === 3) break;
     await sleep(2000);
   }
+  if (killTimer) clearInterval(killTimer);
   if (!d || Number(d.status) !== 3) throw new Error('dispute did not resolve before timeout');
   const verdict = d.fallbackNoQuorum ? 'FallbackNoQuorum' : Number(d.verdict) === 1 ? 'Uphold' : 'Reject';
   log(`dispute #${disputeId} RESOLVED on-chain: ${verdict}, refund ${formatUnits(d.refund, 6)}, rounds used ${d.round}`);
@@ -496,7 +508,17 @@ async function main() {
       log(`  juror${n} [${doc.model.served}] ${doc.verdict} (conf ${doc.confidence}): ${doc.rationale}`);
     }
   }
-  if (KILL_JUROR) check(`restart test: juror${KILL_JUROR} was killed after commit and still revealed`, killed && !!panel.find((s) => s.juror.toLowerCase() === jurors[KILL_JUROR - 1]!.toLowerCase())?.revealed);
+  if (KILL_JUROR) {
+    const after = existsSync(jurorLogPath) ? readFileSync(jurorLogPath, 'utf8').split('\n').slice(killedAtLine) : [];
+    const restartedRevealed = after.some((l) => l.startsWith(`[juror${KILL_JUROR} `) && l.includes(' revealed #'));
+    const recommitted = after.some((l) => l.startsWith(`[juror${KILL_JUROR} `) && l.includes(' committed #'));
+    const seatRevealed = !!panel.find((s) => s.juror.toLowerCase() === jurors[KILL_JUROR - 1]!.toLowerCase())?.revealed;
+    check(
+      `restart test: juror${KILL_JUROR} killed after persisting its salt; the restarted process revealed from disk`,
+      killed && seatRevealed && restartedRevealed,
+      `restarted process ${recommitted ? 're-sent the same persisted commitment and ' : ''}revealed=${restartedRevealed}`,
+    );
+  }
 
   const jurorBalAfter = await Promise.all(jurors.map(bal));
   for (let i = 0; i < 3; i++) {

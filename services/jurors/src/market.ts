@@ -1,6 +1,6 @@
 /** Thin, typed EnvMarket I/O for the juror: reads, and sends that tolerate expected reverts. */
 import { loadAbi, type Clients } from '@envmarket/shared';
-import { BaseError, ContractFunctionRevertedError, type Abi, type Address, type Hash, type Hex } from 'viem';
+import { BaseError, ContractFunctionRevertedError, decodeErrorResult, type Abi, type Address, type Hash, type Hex } from 'viem';
 
 export interface DisputeView {
   purchaseId: bigint;
@@ -39,15 +39,28 @@ export const ZERO32 = `0x${'0'.repeat(64)}` as Hex;
 
 export type SendResult = { ok: true; hash: Hash; blockNumber: bigint } | { ok: false; reason: string; sent: boolean; hash?: Hash };
 
-/** Best-effort revert reason: custom error name (+args) or short message. */
-export function revertReason(e: unknown): string {
+/**
+ * Best-effort one-line revert reason: custom error name (+args) or short message. If viem could not
+ * decode the error itself, the raw selector/data is decoded against `abi` here.
+ */
+export function revertReason(e: unknown, abi?: Abi): string {
+  const fmt = (name: string, args?: readonly unknown[]) => `${name}${args?.length ? `(${args.map(String).join(',')})` : ''}`;
   if (e instanceof BaseError) {
     const r = e.walk((x) => x instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null;
-    if (r?.data?.errorName) return `${r.data.errorName}${r.data.args?.length ? `(${r.data.args.map(String).join(',')})` : ''}`;
+    if (r?.data?.errorName) return fmt(r.data.errorName, r.data.args);
     if (r?.reason) return r.reason;
-    return e.shortMessage;
+    const raw = (r?.raw ?? r?.signature ?? /0x[0-9a-fA-F]{8,}/.exec(e.message)?.[0]) as Hex | undefined;
+    if (raw && abi) {
+      try {
+        const d = decodeErrorResult({ abi, data: raw });
+        return fmt(d.errorName, d.args as readonly unknown[] | undefined);
+      } catch {
+        return `revert ${raw.slice(0, 10)}`;
+      }
+    }
+    return e.shortMessage.split('\n')[0]!;
   }
-  return (e as Error)?.message ?? String(e);
+  return ((e as Error)?.message ?? String(e)).split('\n')[0]!;
 }
 
 export class MarketIO {
@@ -93,13 +106,13 @@ export class MarketIO {
     try {
       ({ request } = await publicClient.simulateContract({ address: this.address, abi: this.abi, functionName, args, account } as never));
     } catch (e) {
-      return { ok: false, reason: revertReason(e), sent: false };
+      return { ok: false, reason: revertReason(e, this.abi), sent: false };
     }
     let hash: Hash;
     try {
       hash = await walletClient.writeContract(request as never);
     } catch (e) {
-      return { ok: false, reason: revertReason(e), sent: false };
+      return { ok: false, reason: revertReason(e, this.abi), sent: false };
     }
     onSent?.(hash);
     const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 180_000 });
