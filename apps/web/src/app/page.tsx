@@ -100,7 +100,35 @@ function Listings() {
         </div>
       ) : (
         <Empty title="No environments listed yet">
-          The contract is live but no seller has created a listing. Listings appear here as soon as a <code className="font-mono">VersionCreated</code> event is emitted.
+          <p>
+            The market contracts are live on {CHAIN_NAME}. The first environment appears here once the TEE service is running on EigenCompute and a seller’s bundle has a signed
+            preview report attached on-chain.
+          </p>
+          <p className="mt-2">While you wait, you can:</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-left">
+            <li>get test tUSDC from the faucet in the bar above (it has no value);</li>
+            <li>
+              stake as a juror on the{" "}
+              <Link href="/jurors" className="link">
+                Jurors page
+              </Link>{" "}
+              if your address is approved;
+            </li>
+            <li>
+              read{" "}
+              <Link href="/how-it-works" className="link">
+                how previews, escrow and disputes work
+              </Link>
+              ;
+            </li>
+            <li>
+              watch the{" "}
+              <Link href="/activity" className="link">
+                live activity feed
+              </Link>
+              .
+            </li>
+          </ul>
         </Empty>
       )}
       {events.error && <p className="text-xs text-bad">Event history unavailable: {(events.error as Error).message.split("\n")[0]}</p>}
