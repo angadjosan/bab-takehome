@@ -1,14 +1,22 @@
-# services/tee — EnvMarket trusted service (EigenCompute TEE)
+# services/tee — EnvMarket trusted service (Phala Cloud TEE, Intel TDX)
 
-One Node 22 service, deployed as an EigenCompute app (Intel TDX, GCP Confidential Space). It
+One Node 22 service, deployed on **Phala Cloud** as a dstack confidential VM (Intel TDX). It
 holds the only copies of sellers' bundle/audit keys, runs previews and mechanical disputes
 against the plaintext environment offline, relays bundle keys to buyers, and serves
-evidence to seated jurors. Its signer (from the KMS mnemonic) is registered in `EnvMarket` as
-runner, relay and verifier. Contracts only check its EIP-712 signatures.
+evidence to seated jurors. Its signer is registered in `EnvMarket` as runner, relay and
+verifier. Contracts only check its EIP-712 signatures. The live deployment is recorded in
+[`deployments/phala-tee.json`](../../deployments/phala-tee.json).
 
-**Trust, stated plainly.** Inside EigenCompute, the operator can't read the plaintext.
-The attestation JWT binds the signer and X25519 key to the attested image. The developer can
-still upgrade the image, and one EigenLabs KMS operator is trusted. The reference panel and the
+`TEE_VENDOR` selects the platform: `phala` (the deployment), `eigencompute` (kept working and
+documented below, but not deployed: EigenCompute's app quota needs manual EigenLabs approval) or
+`local`. Unset, it is detected: `MNEMONIC` present → `eigencompute`; `/var/run/dstack.sock`
+mounted → `phala`; otherwise `local`. An explicit vendor whose key source is missing fails at
+startup; there is no silent fallback.
+
+**Trust, stated plainly.** Inside the CVM, the host operator can't read the plaintext.
+The TDX quote's `report_data` is `sha512(binding)`, which ties the signer and X25519 key to the
+attested compose (which pins the image by digest). The developer can still push a new compose or
+image to the same app, and Phala's KMS operator is trusted. The reference panel and the
 validator run on **Fireworks**, so Fireworks sees task statements and workspace files during
 episodes, and sees environment files when the validator runs. The TEE protects keys, hidden
 tests, grading and signing. It does not protect model inference. Local dev mode
@@ -18,7 +26,7 @@ tests, grading and signing. It does not protect model inference. Local dev mode
 
 | Module | What it does |
 |---|---|
-| `keys.ts` | `MNEMONIC` (KMS) → secp256k1 signer at `m/44'/60'/0'/0/0`. X25519 sk = HKDF-SHA256(BIP39 seed, info `envmarket.tee.x25519.v1`). Storage key = HKDF(seed, `envmarket.tee.storage.v1`). Local dev uses `RUNNER_PK` as the ikm. |
+| `keys.ts` | One root secret per vendor. **Phala:** dstack `GetKey("envmarket/tee/v1", "envmarket.tee.root")` over `/var/run/dstack.sock` → a 32-byte secp256k1 key, deterministic per app id; it is the signer and the ikm, and its KMS signature chain is kept for verifiers. **EigenCompute:** `MNEMONIC` (KMS) → signer at `m/44'/60'/0'/0/0`, ikm = BIP39 seed. **Local:** `RUNNER_PK`. In every mode X25519 sk = HKDF-SHA256(ikm, info `envmarket.tee.x25519.v1`) and storage key = HKDF(ikm, `envmarket.tee.storage.v1`). SDK: `@phala/dstack-sdk` **0.5.8, pinned exactly** (the frozen v0 `GetKey`; the unreleased 0.6 v1 `getKey` derives different bytes, so a bump must use `DstackClientV0` or the signer changes). It sits in the `dstack/` dependency island because its imports need `@noble` 1.x while this service uses 2.x. |
 | `store.ts` | Public blob store (`DATA_DIR/blobs/<sha256>`) and private records (AES-256-GCM with the storage key, `ns/id` bound as AAD, root-only dir). |
 | `bundle.ts` | `POST /seller/upload`: unwrap keys, decrypt, check the canonical tar, bundleHash, manifest (bundleDigest, grader digest, image ref, counts), task and audit Merkle roots with the salts, and the public docs. Then a preflight in the sandbox: install `requirements.lock`, import the grader, collect hidden tests, apply reference solutions. |
 | `harnessRunner.ts` | Client for the open-source reference harness `harness/envmarket_coding` (Prime Intellect `verifiers` 0.3.1), run as a subprocess (`--digest`, run, `--regrade`) per harness/README.md. It runs one pass@1 episode per (model, task). This replaced the former TypeScript tool loop, which has been deleted. |
@@ -28,15 +36,15 @@ tests, grading and signing. It does not protect model inference. Local dev mode
 | `verifier.ts` | On `DisputeOpened` (ground 1 or 3): recheck, rebuild and rerun, publish findings JSON, sign `MechanicalFinding`, submit `resolveMechanical`. |
 | `evidence.ts` | Evidence upload for buyers and case packets for seated jurors (EIP-191 challenge). |
 | `watcher.ts` | Polls `getLogs` from `START_BLOCK` with a persisted cursor. Handlers are idempotent and read on-chain state first. |
-| `attestation.ts` | Port of `@layr-labs/ecloud-sdk@1.0.0` `AttestClient`: launcher socket, then KMS `/auth/attest`, then a KMS-signed JWT with `extra_data = sha512(binding)`. |
+| `attestation.ts` | `TeeAttestor` with one implementation per vendor. `PhalaAttestor`: dstack `Info` (app id, compose hash, app-compose), then `GetQuote(sha512(binding))`, a raw Intel DCAP TDX quote whose 64-byte `report_data` (quote offset 568) is `sha512(binding)`; per-report quotes cover `sha512({type, versionId, reportHash})`. The binding adds `vendor: "phala"`, so its bytes never collide with the EigenCompute binding. `EigenAttestor` (unchanged): a port of `@layr-labs/ecloud-sdk@1.0.0` `AttestClient`, i.e. launcher socket → KMS `/auth/attest` → KMS-signed JWT with `extra_data = sha512(binding)`. Only real TEE evidence sets `kind`; the dstack simulator stays `none-local-dev`. |
 | `sandbox.ts` + `runtime/` | Isolation for seller code (see below). `runtime/netdeny.py` is the seccomp launcher; `runtime/check_tasks.py` is the in-sandbox task checker. |
 
 ## HTTP API
 
 | Method & path | Description |
 |---|---|
-| `GET /health` | `{signer, encPubKey, keySource, chainId, market, attestation{kind, appId, imageDigest, verifyUrl, quoteDigest}, sandbox, inference, watcher, uploadKeyWrap}` |
-| `GET /attestation[?refresh=1]` | The full attestation state: `kind`, `binding` (canonical JSON the JWT commits to), `token` (KMS JWT, in the TEE only), `tokenClaims`, `quoteDigest = sha256(token)`, `kmsPublicKey`, `verifyUrl`, and the signer's on-chain roles. |
+| `GET /health` | `{signer, encPubKey, keySource, chainId, market, attestation{vendor, kind, appId, composeHash, imageDigest, verifyUrl, quoteDigest}, sandbox, inference, watcher, uploadKeyWrap}` |
+| `GET /attestation[?refresh=1]` | The full attestation state: `vendor`, `kind`, `binding` (the canonical JSON the evidence commits to) and the signer's on-chain roles. **Phala:** `quote` (hex; also `token`), `reportData = 0x‖sha512(binding)`, `quoteDigest = sha256(quote bytes)`, `eventLog`, `composeHash`, `appCompose`, `instanceId`, `osImageHash`, `keyDerivation{path, purpose, signatureChain}`, `verifyUrl = https://trust.phala.com/app/<appId>`, `verifyApi`. **EigenCompute:** `token` (KMS JWT), `tokenClaims`, `quoteDigest = sha256(token)`, `kmsPublicKey`, `verifyUrl`. |
 | `GET /protocol` | The precommitted preview protocol: harness spec, agent prompt, tools, `promptDigest`, validator prompt, schema, `promptHash`, screening rules, and reproducibility tolerances. |
 | `PUT /blobs` (raw bytes) | Returns `{sha256, bytes, url}`. |
 | `GET /blobs/<64hex>` | A content-addressed public doc or ciphertext. |
@@ -171,7 +179,7 @@ Actual usage (prompt, cached prompt and completion tokens) and USD cost are stor
 **Inference runs once per environment.** A completed run (with no infra failures) is stored as a signed, encrypted cache entry. Its key is `(bundleHash, auditRoot, protocol id, harnessDigest, promptDigest, validator promptHash, panel model ids, validator model)`; versionId, market and chain are not part of it. Any later version with the same key, on any listing, contract or chain, is served from it:
 - `report.json` is rebuilt for the new `versionId` with the original jobs, run dates and scores, and freshly signed;
 - it records `cachedFrom {originalRunAt, originalVersionId, originalChainId}` and `inferenceCostUsd: 0`;
-- reuse never upgrades trust: a run made in local dev yields reports labeled `none-local-dev`, even when an EigenCompute deployment re-signs them.
+- reuse never upgrades trust: a run made in local dev yields reports labeled `none-local-dev`, even when a TEE deployment re-signs them.
 
 To seed another deployment, run:
 
@@ -185,7 +193,7 @@ That seals each entry to the target's X25519 key, and the target must list the p
 
 | Where | How seller code runs |
 |---|---|
-| EigenCompute (Linux, root) | Each phase gets its own unprivileged uid (`setpriv`) and 0700 dirs, so it can't read other episodes or the service's data or env. It runs under `prlimit` (as/nproc/nofile/fsize/cpu), with a wall-clock kill. Network is denied with `unshare --net --pid` when the kernel allows it, **and/or** `runtime/netdeny.py`, a seccomp-BPF filter that fails every non-AF_UNIX `socket()` and `io_uring_setup` and is inherited by all children. Confidential Space containers usually lack CAP_SYS_ADMIN, so seccomp is the expected path. `detectSandbox` probes both, refuses to run seller code with network, and records what it used in `runtime.sandbox`. |
+| Phala CVM / EigenCompute (Linux, root) | On Phala the compose grants `cap_add: [SYS_ADMIN]` and `seccomp:unconfined`, so both layers run (`/health.sandbox` on the live app: `unshare(net,pid)` + seccomp). The trust boundary is the CVM, and the compose, capabilities included, is public and hashed. Each phase gets its own unprivileged uid (`setpriv`) and 0700 dirs, so it can't read other episodes or the service's data or env. It runs under `prlimit` (as/nproc/nofile/fsize/cpu), with a wall-clock kill. Network is denied with `unshare --net --pid` when the kernel allows it, **and/or** `runtime/netdeny.py`, a seccomp-BPF filter that fails every non-AF_UNIX `socket()` and `io_uring_setup` and is inherited by all children. Confidential Space containers usually lack CAP_SYS_ADMIN, so seccomp is the expected path. `detectSandbox` probes both, refuses to run seller code with network, and records what it used in `runtime.sandbox`. |
 | macOS / local | `docker run --rm --network none --read-only --tmpfs /tmp --tmpfs /work --cpus 1 --memory 512m --pids-limit 128 --security-opt no-new-privileges --cap-drop ALL --user 65534`, image `python:3.12-slim@sha256:78387bc3…`. |
 
 Dependencies come from the bundle's `requirements.lock`, installed into a cached venv
@@ -196,12 +204,14 @@ network but runs no seller code; everything after it is offline.
 
 | Variable | Where | Meaning |
 |---|---|---|
+| `TEE_VENDOR` | compose (`phala`) | `eigencompute` \| `phala` \| `local`; auto-detected when unset (see top). |
+| `DSTACK_SOCKET` / `DSTACK_SIMULATOR_ENDPOINT` | Phala / tests | dstack guest-agent socket (default `/var/run/dstack.sock`, mounted by the compose). The simulator endpoint is for tests only; keys are labeled `dstack-simulator` and attestation stays `none-local-dev`. |
 | `MNEMONIC` | injected by EigenCompute KMS | The app wallet; the service derives all keys from it. Never set it yourself in the TEE. |
 | `FIREWORKS_API_KEY` | sealed `.env` | Inference for the panel and the validator. |
 | `CHAIN_ID` | sealed `.env` | `84532` (Base Sepolia, the demo target); `8453` (Base mainnet) is still supported; `31337` for anvil. |
 | `BASE_SEPOLIA_RPC` / `BASE_RPC` / `RPC_URL` | sealed `.env` | RPC endpoint (84532 / 8453 / explicit override). |
 | `MARKET_ADDRESS`, `START_BLOCK` | sealed `.env` | EnvMarket address and the watcher's start block. They can also come from `deployments/<chainId>.json` via `DEPLOYMENTS_DIR`. |
-| `PUBLIC_URL` | sealed `.env` | Base URL advertised for blobs (listing `uri`), e.g. `https://<domain>` or `http://<app ip>:8080`. |
+| `PUBLIC_URL` | sealed `.env` | Base URL advertised for blobs (listing `uri`). Phala: `https://<app_id>-8080.<gateway domain>` (known after the first deploy, then set with `update`). |
 | `EIGEN_APP_ID` (or `EIGEN_APP_ID_PUBLIC`), `EIGEN_IMAGE_DIGEST`, `EIGEN_ENVIRONMENT` (`sepolia` default \| `mainnet-alpha`; selects dashboard + AppController), `EIGEN_VERIFY_URL` | public `.env` | Shown in reports and `/attestation`. |
 | `KMS_SERVER_URL`, `KMS_PUBLIC_KEY` | injected by EigenCompute | Used for the runtime attestation JWT. |
 | `PORT` (8080 in the image, 8787 locally), `HOST`, `DATA_DIR` (`/data` in the image, `./.data` locally) | image | HTTP port, bind host and storage directory. |
@@ -226,6 +236,13 @@ npm run dev              # local-dev mode on :8787 (RUNNER_PK from repo .env, do
 npm run e2e              # full anvil e2e (scripts/local-e2e.ts); E2E_BROKEN_VARIANT=1 adds the upheld-dispute path
 ```
 
+The dstack tests (`GetKey` signer determinism, and `GetQuote` report_data = sha512(binding) at quote
+offset 568) run against the open-source dstack simulator and are skipped without it. Download
+`dstack-simulator-0.5.3-<arch>.tgz` from the Dstack-TEE/dstack releases (`phala simulator start`
+needs `wget`). In `dstack.toml`, set `[internal] address = "127.0.0.1"`, `port = 8090` (macOS
+unix-socket paths max out at 104 chars). Then run
+`DSTACK_SIMULATOR_ENDPOINT=http://127.0.0.1:8090 npm test`.
+
 `npm run e2e` starts anvil on :8555 and deploys with the repo's forge `Deploy` script (the same
 steps as `contracts/scripts/deploy.sh`, but it writes to `.data-e2e/deployments/` and leaves the
 repo's `deployments/` alone). It packages `seller-workspace/py-repair-kit` with the seller agent's
@@ -238,7 +255,55 @@ packager, runs this service in local-dev mode, and walks the flow in this order:
 6. BrokenOrHashMismatch dispute, resolved;
 7. FalseDescription dispute, jurors selected, case packet.
 
-## Deploy to EigenCompute (`sepolia`, the demo target)
+## Deploy to Phala Cloud (the deployment)
+
+Contracts are on Base Sepolia (84532). The TEE is a Phala Cloud dstack CVM (`tdx.large`: 4 vCPU,
+8 GB) with the default Phala KMS (`--kms phala`, no wallet or chain coupling). CLI: `npx -y phala@1.1.22`
+(`deploy --help` checked). The script is `scripts/phala-deploy.sh`; the compose is `phala/docker-compose.yml`.
+
+1. Accounts: a Phala Cloud account (GitHub login; a refunded $1 card hold unlocks $20 credits), an API key
+   as `PHALA_CLOUD_API_KEY` (env or repo `.env`), and `docker login` to a **public** Docker Hub repo.
+2. Sealed env file, outside git: `FIREWORKS_API_KEY`, `CHAIN_ID=84532`, `BASE_SEPOLIA_RPC`,
+   `MARKET_ADDRESS`, `START_BLOCK` (from `deployments/84532.json`), `TEE_VENDOR=phala`. The CLI
+   encrypts it client-side; only the CVM can decrypt it. The script prints key names only.
+3. `services/tee/scripts/phala-deploy.sh deploy <env-file>` does the following:
+   - builds `docker.io/angadsinghjosan/envmarket-tee:<sha>` for linux/amd64 from a clean `git archive HEAD`;
+   - pushes it and pins its digest into the compose (commit that change: it is the published compose);
+   - runs `phala deploy -n envmarket-tee -c … -e … -t tdx.large --kms phala --image dstack-0.5.9 --no-public-logs --public-tcbinfo --wait --json`.
+4. Add `PUBLIC_URL=https://<app_id>-8080.<gateway domain>` to the env file, then run `phala-deploy.sh update <env-file> <cvm name>`.
+5. Check the deployment:
+   - `/health`: `keySource: "dstack-kms"`, `attestation.kind: "phala-dstack-tdx"`;
+   - `/attestation?refresh=1`: the quote;
+   - the web app's `/api/attestation/verify`, or by hand: POST `{hex: quote}` to
+     `https://cloud-api.phala.com/api/v1/attestations/verify` and expect `quote.verified: true`.
+6. As the EnvMarket owner, run `setRunner`/`setRelay`/`setVerifier(signer, true)` and fund the signer with Base Sepolia ETH.
+7. Record the deployment in `deployments/phala-tee.json`, then run `scripts/sync-web.sh`. The web
+   verifier compares the running compose hash and image digest against that record.
+
+**Verified on the live deployment (2026-09-11):**
+- *Signer stability:* an `update` that changed the compose (compose hash changed) kept the same signer
+  and X25519 key, because the dstack app key is per app id. A new app id means a new signer, so the
+  roles have to be re-granted.
+- *OS image:* left unset, the CLI auto-selected the **dev** OS (`dstack-dev-0.5.9`), and
+  `deploy --cvm-id … --image` does not change the OS of an existing CVM. The script therefore always
+  passes `--image dstack-0.5.9`, and the first (dev-OS) app was replaced by a fresh one.
+- *Verifying the quote by hand:*
+  - check that the TD debug bit is off (tdattributes bit 0);
+  - check `report_data` (quote bytes 568..632) = `sha512(binding)`;
+  - replay RTMR3 (quote bytes 520..568) from the event log. dstack 0.5.9 serves RTMR3 events with an
+    **empty** `digest`, so recompute each digest as
+    `sha384(u32le(event_type) ‖ ":" ‖ event ‖ ":" ‖ payload bytes)` and fold
+    `mr = sha384(mr ‖ digest)` from 48 zero bytes;
+  - check that the `app-id`, `compose-hash` and `os-image-hash` events equal the app id,
+    `sha256(appCompose)` and the non-dev OS hash;
+  - check that the compose pins the image by digest.
+- *Storage:* `/data` is a named volume on the CVM's encrypted disk, and it survives `update`.
+  Deleting the CVM loses it, and buyers of undelivered versions then fall back to `refundUndelivered`.
+
+## Deploy to EigenCompute (alternative; blocked on app quota)
+
+Kept working (`TEE_VENDOR=eigencompute`, `scripts/eigen-deploy.sh`) but not deployed: the account's
+`AppController.getMaxActiveAppsPerUser` is 0 until EigenLabs approves it manually.
 
 All testnet (BUILD_SPEC "Deployment target — FINAL"). Contracts are on Base Sepolia (84532, TestUSDC with
 a faucet). The TEE runs in EigenCompute's `sepolia` environment: the AppController is on Ethereum Sepolia,

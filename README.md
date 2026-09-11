@@ -13,7 +13,7 @@ The first vertical is **coding-repair environments with hidden unit tests**. The
 | EnvMarket (Base Sepolia, 84532) | `0x2fd644342296df7de57929fa87bd65c05fb415f8` · [basescan](https://sepolia.basescan.org/address/0x2fd644342296df7de57929fa87bd65c05fb415f8) · [blockscout](https://base-sepolia.blockscout.com/address/0x2fd644342296df7de57929fa87bd65c05fb415f8) |
 | EnvMarketViews (read module, delegatecalled from EnvMarket) | `0xf020ec9a3381dfa34a03ad2f8bdb5cae7e890794` · [basescan](https://sepolia.basescan.org/address/0xf020ec9a3381dfa34a03ad2f8bdb5cae7e890794) · [blockscout](https://base-sepolia.blockscout.com/address/0xf020ec9a3381dfa34a03ad2f8bdb5cae7e890794) |
 | TestUSDC (`tUSDC`, 6 decimals, public faucet, no value) | `0x6f3600d4a42d0c6c52a8b9f04abf817ce7d56ceb` · [basescan](https://sepolia.basescan.org/address/0x6f3600d4a42d0c6c52a8b9f04abf817ce7d56ceb) · [blockscout](https://base-sepolia.blockscout.com/address/0x6f3600d4a42d0c6c52a8b9f04abf817ce7d56ceb) |
-| Phala Cloud TEE app (dstack CVM, Intel TDX) | **TBD**: endpoint, app id, signer and `trust.phala.com` link go here once `deployments/phala-tee.json` exists |
+| Phala Cloud TEE app (dstack CVM, Intel TDX, production OS `dstack-0.5.9`) | [endpoint](https://4099f96ab07de8666f8a63a0f48e40aa9883eda3-8080.dstack-pha-prod5.phala.network/health) · app `4099f96ab07de8666f8a63a0f48e40aa9883eda3` · signer `0x51EDE7C81B66c4395AEfbdb2d626928018D393c7` · [Trust Center](https://trust.phala.com/app/4099f96ab07de8666f8a63a0f48e40aa9883eda3) · record in [deployments/phala-tee.json](deployments/phala-tee.json) |
 
 Deployed 2026-09-11 from block 46670333; the full record is in [deployments/84532.json](deployments/84532.json). All calls, views included, go to the EnvMarket address with the merged ABI.
 
