@@ -133,7 +133,7 @@ export function BurnerSwitcher({ onSwitch }: { onSwitch?: () => void }) {
               <button
                 type="button"
                 aria-pressed={current}
-                className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded px-1.5 py-1.5 text-left"
+                className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded px-1.5 py-1.5 text-left transition-colors duration-150 hover:bg-panel-2"
                 onClick={async () => {
                   setErr(null);
                   try {

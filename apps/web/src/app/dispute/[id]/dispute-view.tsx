@@ -671,7 +671,9 @@ function CasePacketView({ disputeId, juror }: { disputeId: bigint; juror: Addres
               <ul className="mt-2 space-y-1.5">
                 {claims.map((c) => (
                   <li key={c.id} className="flex gap-2.5">
-                    <span className="shrink-0 font-mono text-xs font-medium text-accent">{c.id}</span>
+                    <span className="shrink-0 font-mono text-xs font-medium text-accent" translate="no">
+                      {c.id}
+                    </span>
                     <span className="text-ink">{c.text}</span>
                   </li>
                 ))}

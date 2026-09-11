@@ -99,7 +99,7 @@ function TokenMeta({ children }: { children: ReactNode }) {
 
 const transports = { [chain.id]: http(RPC_URL) };
 
-/** Privy: login with email / Google / external wallet; an embedded wallet is created on login. */
+/** Privy: login with email or an external wallet (the methods enabled in the Privy dashboard); an embedded wallet is created on email login. */
 function PrivyTree({ qc, children }: { qc: QueryClient; children: ReactNode }) {
   const [config] = useState(() => createPrivyWagmiConfig({ chains: [chain], transports, ssr: true }));
   return (
@@ -107,11 +107,11 @@ function PrivyTree({ qc, children }: { qc: QueryClient; children: ReactNode }) {
       appId={PRIVY_APP_ID}
       clientId={PRIVY_CLIENT_ID || undefined}
       config={{
-        loginMethods: ["email", "google", "wallet"],
+        loginMethods: ["email", "wallet"],
         embeddedWallets: { ethereum: { createOnLogin: "users-without-wallets" } },
         defaultChain: chain,
         supportedChains: [chain],
-        appearance: { theme: "light", accentColor: "#4f46e5" },
+        appearance: { theme: "dark", accentColor: "#f59e0b" },
       }}
     >
       <QueryClientProvider client={qc}>

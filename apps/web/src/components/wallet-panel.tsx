@@ -5,7 +5,7 @@ import { formatEther } from "viem";
 import { useAccount, useBalance, useReadContract } from "wagmi";
 import { marketAbi, tokenAbi } from "@/lib/abi";
 import { deployment, GAS_FAUCET_URL } from "@/lib/config";
-import { fmtUsdc } from "@/lib/format";
+import { fmtDec, fmtUsdc } from "@/lib/format";
 import { useClaimable } from "@/lib/market";
 import { tokenValueNote } from "@/lib/token";
 import { PRIVY_SPONSOR_GAS } from "@/lib/wallet-mode";
@@ -49,7 +49,7 @@ export function AccountPanel({ onClose }: { onClose: () => void }) {
         {!(mode === "privy" && PRIVY_SPONSOR_GAS) && (
           <div className="mt-1.5 flex items-baseline justify-between gap-3">
             <span className="text-muted">Network fees (ETH)</span>
-            <span className={cx("font-mono tabular-nums", ethLow ? "text-warn" : "text-muted")}>{eth.data === undefined ? "…" : Number(formatEther(eth.data.value)).toFixed(4)}</span>
+            <span className={cx("font-mono tabular-nums", ethLow ? "text-warn" : "text-muted")}>{eth.data === undefined ? "…" : fmtDec(Number(formatEther(eth.data.value)), 4)}</span>
           </div>
         )}
         {ethLow && !(mode === "privy" && PRIVY_SPONSOR_GAS) && GAS_FAUCET_URL && (

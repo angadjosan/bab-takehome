@@ -163,7 +163,7 @@ function Claims({ v }: { v: Version }) {
           {d.claims.map((c) => (
             <li key={c.id} className="flex gap-4 py-3 text-sm">
               <span className="w-8 shrink-0 font-mono text-xs leading-6 text-muted">{c.id}</span>
-              <span className="min-w-0 leading-relaxed text-ink">{c.text}</span>
+              <span className="min-w-0 leading-relaxed text-ink [overflow-wrap:anywhere]">{c.text}</span>
             </li>
           ))}
         </ol>

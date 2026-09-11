@@ -192,10 +192,10 @@ export function ReportDetails({ v }: { v: Version }) {
           <table className="data-table min-w-[520px]">
             <thead>
               <tr>
-                <th>Model</th>
-                <th>Purchased</th>
-                <th>Audit holdout</th>
-                <th>Infra failures</th>
+                <th scope="col">Model</th>
+                <th scope="col">Purchased</th>
+                <th scope="col">Audit holdout</th>
+                <th scope="col">Infra failures</th>
               </tr>
             </thead>
             <tbody>

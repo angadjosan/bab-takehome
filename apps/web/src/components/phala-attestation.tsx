@@ -59,7 +59,7 @@ export function PhalaVerification({ versionId, reportHash }: { versionId?: strin
           </li>
         )}
       </ul>
-      <p className="text-faint">Checked on this app&apos;s server at {new Date(d.checkedAt).toLocaleTimeString()} (Phala&apos;s verifier API has no CORS). Re-run it yourself with the quote from /attestation.</p>
+      <p className="text-faint">Checked on this app’s server at {new Date(d.checkedAt).toLocaleTimeString()} (Phala’s verifier API has no CORS). Re-run it yourself with the quote from /attestation.</p>
     </div>
   );
 }

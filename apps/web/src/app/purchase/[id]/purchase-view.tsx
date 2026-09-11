@@ -34,7 +34,7 @@ import { marketAbi, tokenAbi } from "@/lib/abi";
 import { deployment, CHAIN_ID } from "@/lib/config";
 import { decryptBundle, encKeyFromSecret, eqHash, listTar, sha256Hex, unwrapBundleKeyAsync, utf8, type TarEntry } from "@/lib/crypto";
 import { describe, useDoc } from "@/lib/docs";
-import { fmtTime, fmtUsdc, fmtWindow, maskToIndexes, pct, popcount } from "@/lib/format";
+import { fmtKiB, fmtTime, fmtUsdc, fmtWindow, maskToIndexes, pct, popcount } from "@/lib/format";
 import { downloadBytes, useEncKeys } from "@/lib/keys";
 import { useWalletEncKey } from "@/lib/enc-derive";
 import {
@@ -322,7 +322,7 @@ function useDownload(p: Purchase, v: Version, enabled: boolean) {
       push({ label: "Wrapped key hash matches the on-chain wrappedKeyHash", ok: eqHash(kh, p.wrappedKeyHash), detail: <HashValue value={kh} /> });
       const ct = await fetchUrlBytes(dl.ciphertextUrl);
       const ch = sha256Hex(ct);
-      push({ label: `Encrypted file (${(ct.length / 1024).toFixed(1)} KiB) matches the ciphertextHash`, ok: eqHash(ch, v.ciphertextHash), detail: <HashValue value={ch} /> });
+      push({ label: `Encrypted file (${fmtKiB(ct.length)}) matches the ciphertextHash`, ok: eqHash(ch, v.ciphertextHash), detail: <HashValue value={ch} /> });
       let bundleKey: Uint8Array;
       try {
         bundleKey = await unwrapBundleKeyAsync(dl.wrappedKey, key.secretKey, p.wrapperHash);
@@ -438,7 +438,7 @@ function DownloadControl({ p, dl, quiet }: { p: Purchase; dl: Download; quiet?: 
           <p className="flex items-center gap-1.5 text-xs text-muted">
             <IconCheck className="h-3.5 w-3.5 shrink-0 text-ok" />
             <span>
-              <span className="tabular-nums">{files}</span> files · <span className="tabular-nums">{((dl.plain?.length ?? 0) / 1024).toFixed(1)}</span> KiB · matches the listing
+              <span className="tabular-nums">{files}</span> files · <span className="tabular-nums">{fmtKiB(dl.plain?.length ?? 0)}</span> · matches the listing
               {hasAudit ? <span className="text-warn"> · contains audit paths</span> : null}
             </span>
           </p>
@@ -726,7 +726,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
                   remedied && "cursor-not-allowed opacity-60",
                 )}
               >
-                <input type="checkbox" className="accent-[var(--accent-fill)]" checked={on} disabled={remedied} onChange={() => setMask((x) => x ^ bit)} />
+                <input type="checkbox" name="tasks" value={i + 1} className="accent-[var(--accent-fill)]" checked={on} disabled={remedied} onChange={() => setMask((x) => x ^ bit)} />
                 <span className="min-w-0">
                   <span className="font-medium text-ink">Task {i + 1}</span>
                   {taskIds.length === p.taskCount && <span className="block truncate font-mono text-[11px] text-muted">{taskIds[i]}</span>}
@@ -803,7 +803,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
           {file && (
             <>
               <span className="min-w-0 truncate font-mono text-muted">
-                {file.name} ({(file.bytes.length / 1024).toFixed(1)} KiB)
+                {file.name} ({fmtKiB(file.bytes.length)})
               </span>
               <button type="button" className="btn btn-sm btn-ghost" onClick={() => setFile(null)}>
                 Remove
@@ -1033,7 +1033,7 @@ function PurchaseDetails({ p, v, dl, events, eventsLoading }: { p: Purchase; v: 
       {dl.entries && dl.plain && (
         <DetailSection title="Bundle contents">
           <p className="text-[13px] text-muted">
-            <span className="tabular-nums">{dl.entries.filter((e) => e.type === "file").length}</span> files · <span className="tabular-nums">{(dl.plain.length / 1024).toFixed(1)}</span> KiB ·{" "}
+            <span className="tabular-nums">{dl.entries.filter((e) => e.type === "file").length}</span> files · <span className="tabular-nums">{fmtKiB(dl.plain.length)}</span> ·{" "}
             <span className="tabular-nums">{tasks.length}</span> task folders
           </p>
           <ul className="mt-2 max-h-64 overflow-auto rounded-md bg-panel-2 px-3 py-2 font-mono text-[11px] text-muted">

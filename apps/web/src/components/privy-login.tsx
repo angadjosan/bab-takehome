@@ -24,8 +24,7 @@ export function PrivyLoginPrompt({ why }: { why?: string }) {
         </button>
       )}
       <p className="text-xs leading-relaxed text-muted">
-        Use email, Google, or a wallet you already have. Signing in with email or Google creates a wallet for you{PRIVY_SPONSOR_GAS ? " and covers its network fees" : ""}; you can export its key
-        later.
+        Use your email or a wallet you already have. Signing in with email creates a wallet for you{PRIVY_SPONSOR_GAS ? " and covers its network fees" : ""}; you can export its key later.
       </p>
     </div>
   );

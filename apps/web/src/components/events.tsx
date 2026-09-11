@@ -165,7 +165,7 @@ export function EventList({ events, empty = "No events yet.", compact, showTx = 
           </div>
         );
         return (
-          <li key={`${e.transactionHash}-${e.logIndex}`} className="flex items-start gap-3 py-3">
+          <li key={`${e.transactionHash}-${e.logIndex}`} className="flex items-start gap-3 py-3 [contain-intrinsic-size:auto_3.5rem] [content-visibility:auto]">
             <span aria-hidden className={cx("mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full", DOT[d.tone])} />
             {d.href ? (
               <Link href={d.href} className="group min-w-0 flex-1">

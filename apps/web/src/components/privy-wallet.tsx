@@ -61,7 +61,7 @@ export function PrivyWalletButton() {
 
   return (
     <div className="relative" ref={ref}>
-      <button className="btn btn-sm" aria-haspopup="menu" aria-expanded={open} aria-label={`Account menu${hasClaim ? ", you have funds to withdraw" : ""}`} onClick={() => setOpen((o) => !o)}>
+      <button className="btn btn-sm" aria-haspopup="dialog" aria-expanded={open} aria-label={`Account menu${hasClaim ? ", you have funds to withdraw" : ""}`} onClick={() => setOpen((o) => !o)}>
         <span aria-hidden className={cx("h-1.5 w-1.5 rounded-full", hasClaim ? "bg-warn" : "bg-ok")} />
         <span className="font-mono tabular-nums">{bal !== undefined ? fmtUsdc(bal as bigint) : active ? shortAddr(active) : "Account"}</span>
       </button>

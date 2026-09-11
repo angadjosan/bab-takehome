@@ -11,7 +11,7 @@ import { SponsorCtx } from "@/lib/sponsor";
 import { BurnerForm, BurnerSwitcher } from "./burner-ui";
 import { PrivyLoginPrompt } from "./privy-login";
 import { useWalletMode } from "./providers";
-import { ErrorText, Spinner, TxLink } from "./ui";
+import { ErrorText, IconCheck, Spinner, TxLink } from "./ui";
 
 export type TxState = { status: "idle" | "simulating" | "signing" | "pending" | "success" | "error"; hash?: `0x${string}`; error?: unknown; receipt?: TransactionReceipt; label?: string; sponsored?: boolean };
 
@@ -87,11 +87,11 @@ export function TxStatus({ state }: { state: TxState }) {
         </>
       ) : (
         <div className="flex flex-wrap items-center gap-2 text-muted">
-          {state.status !== "success" ? <Spinner className="h-3.5 w-3.5" /> : <span className="text-ok">✓</span>}
+          {state.status !== "success" ? <Spinner className="h-3.5 w-3.5" /> : <IconCheck className="h-3.5 w-3.5 text-ok" />}
           <span>
             {state.label ? `${state.label}: ` : ""}
             {text}
-            {state.sponsored ? " (gas sponsored)" : ""}
+            {state.sponsored ? " (network fee covered)" : ""}
           </span>
           {state.hash && <TxLink hash={state.hash} />}
         </div>
@@ -113,10 +113,12 @@ export function RequireWallet({ children, why }: { children: ReactNode; why?: st
   if (!isConnected) return mode === "privy" ? <PrivyLoginPrompt why={why} /> : <ConnectPrompt why={why} />;
   if (chainId !== CHAIN_ID) {
     return (
-      <div className="rounded-lg border border-dashed border-warn p-4 text-sm">
-        <p className="text-warn">Your wallet is on chain {chainId}. This market lives on {CHAIN_NAME}.</p>
-        <button className="btn btn-sm mt-3" disabled={switching} onClick={() => switchChain({ chainId: CHAIN_ID })}>
-          Switch to {CHAIN_NAME}
+      <div className="space-y-3 rounded-md border border-warn/30 bg-warn-soft p-3.5 text-sm">
+        <p className="text-ink/85">
+          Your wallet is on another network (chain {chainId}). This market runs on {CHAIN_NAME}.
+        </p>
+        <button className="btn btn-sm" disabled={switching} onClick={() => switchChain({ chainId: CHAIN_ID })}>
+          {switching ? "Switching…" : `Switch to ${CHAIN_NAME}`}
         </button>
       </div>
     );

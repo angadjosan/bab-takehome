@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { describe, useDoc } from "@/lib/docs";
 import { QUALIFY_THRESHOLD, isZeroHash, useSellerScore, useSellerStake, useVersionStats, type Version, type VersionStats } from "@/lib/market";
-import { fmtUsdc, fmtWindow, shortAddr } from "@/lib/format";
+import { fmtDec, fmtUsdc, fmtWindow, shortAddr } from "@/lib/format";
 import { useTokenInfo } from "./providers";
 import { Chip, IconShield, Skeleton, Stars, cx } from "./ui";
 
@@ -37,7 +37,7 @@ export function VersionRow({ v }: { v: Version }) {
             {rating !== null && (
               <span className="inline-flex items-center gap-1">
                 <Stars value={rating} size="text-xs" />
-                <span className="font-mono tabular-nums">{rating.toFixed(1)}</span>
+                <span className="font-mono tabular-nums">{fmtDec(rating, 1)}</span>
               </span>
             )}
             {d.skills.slice(0, 3).map((s) => (
@@ -95,7 +95,7 @@ export function EnvRating({ stats, className }: { stats?: VersionStats; classNam
   return (
     <div className={cx("flex flex-wrap items-center gap-1.5", className)}>
       <Stars value={avg} size="text-sm" />
-      <span className="font-mono font-medium tabular-nums">{avg.toFixed(1)}</span>
+      <span className="font-mono font-medium tabular-nums">{fmtDec(avg, 1)}</span>
       <span className="text-muted">
         from {stats.ratingCount} buyer{stats.ratingCount === 1 ? "" : "s"}
       </span>

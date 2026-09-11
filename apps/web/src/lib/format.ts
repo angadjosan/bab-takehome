@@ -64,6 +64,16 @@ export function pct(bps: number | bigint) {
   return `${Number(bps) / 100}%`;
 }
 
+/** Locale-aware fixed-decimal number (Intl), e.g. ratings, shares, ETH balances. */
+export function fmtDec(n: number, digits: number) {
+  return new Intl.NumberFormat(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
+}
+
+/** Byte count as KiB with a non-breaking space: "12.4 KiB". */
+export function fmtKiB(bytes: number) {
+  return `${fmtDec(bytes / 1024, 1)} KiB`;
+}
+
 export function popcount(mask: bigint) {
   let n = 0;
   let m = mask;

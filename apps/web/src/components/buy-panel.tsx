@@ -18,6 +18,7 @@ import { Mono, Notice, Spinner } from "./ui";
 /** Lives inside the listing page's price box, which already shows the price and refund terms. */
 export function BuyPanel({ v }: { v: Version }) {
   const { address } = useAccount();
+  const { mode } = useWalletMode();
   const stake = useSellerStake(v.seller);
   const blockers: string[] = [];
   if (!v.active) blockers.push("The seller has paused sales of this version.");
@@ -42,7 +43,7 @@ export function BuyPanel({ v }: { v: Version }) {
     );
 
   return (
-    <RequireWallet why="Sign in to buy. Email, Google or a wallet all work.">
+    <RequireWallet why={mode === "privy" ? "Sign in to buy, with your email or a wallet you already have." : "Connect a wallet to buy."}>
       <BuyAction v={v} />
     </RequireWallet>
   );

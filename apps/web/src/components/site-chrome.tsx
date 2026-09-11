@@ -63,7 +63,7 @@ export function SiteHeader() {
       {!privyConfigured && !devTools && (
         <div className="border-t border-line">
           <div className="mx-auto max-w-6xl px-4 py-1.5 text-xs text-muted sm:px-6">
-            Email and Google sign-in are off for this deployment (set <code className="font-mono text-ink">NEXT_PUBLIC_PRIVY_APP_ID</code>). Browser wallets still work.
+            Email sign-in is off for this deployment (set <code className="font-mono text-ink">NEXT_PUBLIC_PRIVY_APP_ID</code>). Browser wallets still work.
           </div>
         </div>
       )}
@@ -196,7 +196,7 @@ function WagmiWalletButton() {
   return (
     <div className="relative" ref={ref}>
       {!isConnected ? (
-        <button className="btn btn-sm" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)} disabled={isPending}>
+        <button className="btn btn-sm" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)} disabled={isPending}>
           {isPending ? "Connecting…" : "Connect wallet"}
         </button>
       ) : wrongChain ? (
@@ -204,7 +204,7 @@ function WagmiWalletButton() {
           {switching ? "Switching…" : "Switch network"}
         </button>
       ) : (
-        <button className="btn btn-sm" aria-haspopup="menu" aria-expanded={open} aria-label={`Account menu${hasClaim ? ", you have funds to withdraw" : ""}`} onClick={() => setOpen((o) => !o)}>
+        <button className="btn btn-sm" aria-haspopup="dialog" aria-expanded={open} aria-label={`Account menu${hasClaim ? ", you have funds to withdraw" : ""}`} onClick={() => setOpen((o) => !o)}>
           <span aria-hidden className={cx("h-1.5 w-1.5 rounded-full", hasClaim ? "bg-warn" : "bg-ok")} />
           <span className="font-mono tabular-nums">{bal !== undefined ? fmtUsdc(bal as bigint) : shortAddr(address)}</span>
         </button>

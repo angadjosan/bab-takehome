@@ -14,7 +14,7 @@ import { AddressLink, Card, Chip, Countdown, DetailSection, Details, Empty, Noti
 import { marketAbi } from "@/lib/abi";
 import { deployment } from "@/lib/config";
 import { eqHash } from "@/lib/crypto";
-import { fmtTime, fmtUsdc, shortAddr } from "@/lib/format";
+import { fmtDec, fmtTime, fmtUsdc, shortAddr } from "@/lib/format";
 import {
   QUALIFY_THRESHOLD,
   concentration,
@@ -131,7 +131,7 @@ function Body({ a }: { a: Address }) {
                   rating !== null ? (
                     <div className="flex flex-wrap items-center gap-3">
                       <Stars value={rating} size="text-xl" />
-                      <span className="font-mono text-xl font-medium text-ink tabular-nums">{rating.toFixed(2)}</span>
+                      <span className="font-mono text-xl font-medium text-ink tabular-nums">{fmtDec(rating, 2)}</span>
                       <span className="text-[13px] text-muted">weighted by what each buyer paid</span>
                     </div>
                   ) : (
@@ -259,7 +259,7 @@ function Body({ a }: { a: Address }) {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3">
                 <Stat label="Distinct buyers" value={conc.distinct} hint="who left the seller paid" />
-                <Stat label="Largest buyer share" value={conc.distinct ? `${conc.largestShare.toFixed(1)}%` : "—"} hint="of what the seller was paid" />
+                <Stat label="Largest buyer share" value={conc.distinct ? `${fmtDec(conc.largestShare, 1)}%` : "—"} hint="of what the seller was paid" />
                 <Stat label="Paid to seller" value={fmtUsdc(conc.totalRetained, { symbol: false })} hint="from events" />
               </div>
               {conc.counterparties.length > 0 && (
@@ -345,7 +345,7 @@ function KeeperRow({ id }: { id: bigint }) {
       </span>
       <span className="ml-auto">
         {canFinalize && (
-          <button className="btn btn-primary btn-sm" disabled={tx.busy} onClick={() => tx.run("Release payment", { address: deployment!.market, abi: marketAbi, functionName: "finalize", args: [p.id] })}>
+          <button className="btn btn-sm" disabled={tx.busy} onClick={() => tx.run("Release payment", { address: deployment!.market, abi: marketAbi, functionName: "finalize", args: [p.id] })}>
             {tx.busy ? "Releasing…" : "Release payment"}
           </button>
         )}
