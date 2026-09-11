@@ -28,7 +28,7 @@ The structure follows the separation of components and operations in the [Aave v
 
 Arrows show transfers of data or funds, including event-triggered work; the contract does not execute off-chain services. Audit tasks use separate storage objects and keys and are excluded from buyer delivery. Dispute evidence is shared privately with assigned reviewers.
 
-In the current deployment the off-chain services run as one EigenCompute TEE app whose signer holds the runner, relay and verifier roles; reference and validator models are called through Fireworks; the contract and USDC are on Base. Proceeds, refunds and juror rewards are credited on-chain and collected with `withdraw()`. The HTML sources for all diagrams in this document are in [docs/diagrams/](diagrams/).
+In the current deployment the off-chain services run as one EigenCompute TEE app (Intel TDX, EigenCompute `sepolia` environment) whose signer holds the runner, relay and verifier roles; reference and validator models are called through Fireworks; the contract and Test USDC (no value) are on the Base Sepolia testnet. Proceeds, refunds and juror rewards are credited on-chain and collected with `withdraw()`. The HTML sources for all diagrams in this document are in [docs/diagrams/](diagrams/).
 
 | Component | Responsibility |
 |---|---|
@@ -167,7 +167,7 @@ If protected hardware is unavailable, the proposed policy is to queue or decline
 | Attested inference nodes with on-chain coordination | An option to investigate. Tasks leave the original box, so every receiving node, encrypted link, and output policy needs protection. On-chain payment does not prove that nodes discard tasks. |
 | Verifiable inference | May prove that a committed computation produced an output. Hiding inputs from the prover needs an additional privacy mechanism. Feasibility for the named panel is unresolved. |
 
-No external inference service is selected. Using one would require a revised confidentiality design. API promises or computation proofs alone do not prove non-retention.
+The implementation uses Fireworks for the reference panel, validator, and jurors. The TEE calls it for previews and the juror processes call it for votes. These model calls leave the TEE, so the inference provider sees task text during previews. This is a disclosed trust assumption; production would move inference inside the attested boundary. API promises or computation proofs alone do not prove non-retention.
 
 Buyer-model previews remain a stretch goal until isolation covers seller code, operator access, model files and memory, persistent storage, logs, and exports. Separate execution identities and storage are needed. Only the bounded report may leave, with no updated weights, unrestricted transcripts, or filesystem exports.
 
