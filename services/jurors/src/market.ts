@@ -48,8 +48,7 @@ export function revertReason(e: unknown, abi?: Abi): string {
   if (e instanceof BaseError) {
     const r = e.walk((x) => x instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null;
     if (r?.data?.errorName) return fmt(r.data.errorName, r.data.args);
-    if (r?.reason) return r.reason;
-    const raw = (r?.raw ?? r?.signature ?? /0x[0-9a-fA-F]{8,}/.exec(e.message)?.[0]) as Hex | undefined;
+    const raw = (r?.raw ?? r?.signature ?? /signature:\s*(0x[0-9a-fA-F]{8,})/.exec(e.message)?.[1]) as Hex | undefined;
     if (raw && abi) {
       try {
         const d = decodeErrorResult({ abi, data: raw });
@@ -58,6 +57,7 @@ export function revertReason(e: unknown, abi?: Abi): string {
         return `revert ${raw.slice(0, 10)}`;
       }
     }
+    if (r?.reason) return r.reason.split('\n')[0]!;
     return e.shortMessage.split('\n')[0]!;
   }
   return ((e as Error)?.message ?? String(e)).split('\n')[0]!;
