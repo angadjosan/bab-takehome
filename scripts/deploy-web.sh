@@ -37,10 +37,6 @@ mkdir -p "$SNAP"
 git -C "$ROOT" archive HEAD | tar -x -C "$SNAP"
 
 say "check apps/web/src/generated is in sync with deployments/"
-# deployments/web.json records the previous web deploy, so its synced copy always lags by one
-# deploy; ignore that drift (the app never reads it) and only flag contract / TEE records.
-[[ -f "$SNAP/apps/web/src/generated/deployments/web.json" ]] &&
-  cp "$SNAP/apps/web/src/generated/deployments/web.json" "$SNAP/deployments/web.json"
 cp -R "$SNAP/apps/web/src/generated" "$SNAP/.generated-committed"
 bash "$SNAP/scripts/sync-web.sh" >/dev/null
 if ! diff -r -q "$SNAP/.generated-committed" "$SNAP/apps/web/src/generated"; then
