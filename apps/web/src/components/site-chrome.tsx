@@ -9,6 +9,8 @@ import { marketAbi, tokenAbi } from "@/lib/abi";
 import { fmtUsdc, shortAddr } from "@/lib/format";
 import { useClaimable } from "@/lib/market";
 import { tokenValueNote } from "@/lib/token";
+import { BURNER_CONNECTOR_ID } from "@/lib/burner";
+import { BurnerForm, BurnerSwitcher } from "./burner-ui";
 import { useTokenInfo } from "./providers";
 import { useTx, TxStatus } from "./tx";
 import { cx, IconExternal } from "./ui";
@@ -16,6 +18,7 @@ import { cx, IconExternal } from "./ui";
 const NAV = [
   { href: "/", label: "Marketplace" },
   { href: "/activity", label: "Activity" },
+  { href: "/jurors", label: "Jurors" },
   { href: "/keys", label: "My keys" },
   { href: "/how-it-works", label: "How it works" },
 ];
@@ -103,7 +106,7 @@ export function WalletButton() {
   if (!mounted) return <button className="btn btn-sm opacity-0" aria-hidden>Connect wallet</button>;
 
   const wrongChain = isConnected && chainId !== CHAIN_ID;
-  const uniq = connectors.filter((c, i, arr) => arr.findIndex((x) => x.name === c.name) === i);
+  const uniq = connectors.filter((c, i, arr) => c.id !== BURNER_CONNECTOR_ID && arr.findIndex((x) => x.name === c.name) === i);
   const hasClaim = (claimable.data ?? 0n) > 0n;
 
   return (
@@ -149,6 +152,11 @@ export function WalletButton() {
                 </button>
               ))}
               {error && <p className="px-2 pt-1 text-xs text-bad">{error.message.split("\n")[0]}</p>}
+              <div className="mt-2 space-y-2 border-t border-line px-2 pb-1 pt-2">
+                <div className="text-xs font-medium">Use a burner key</div>
+                <BurnerSwitcher onSwitch={() => setOpen(false)} />
+                <BurnerForm onDone={() => setOpen(false)} />
+              </div>
             </>
           ) : (
             <div className="space-y-2 p-1 text-sm">
@@ -156,6 +164,13 @@ export function WalletButton() {
                 <div className="text-xs text-muted">Connected with {connector?.name}</div>
                 <div className="break-all font-mono text-xs">{address}</div>
               </div>
+              <BurnerSwitcher />
+              <details className="rounded-lg border border-line px-2 py-1.5 text-xs">
+                <summary className="cursor-pointer text-muted">Add a burner key (switch perspective)</summary>
+                <div className="mt-2">
+                  <BurnerForm />
+                </div>
+              </details>
               <div className="rounded-lg bg-panel-2 p-2.5 text-xs">
                 <div className="flex justify-between">
                   <span className="text-muted">Wallet balance</span>
@@ -195,7 +210,10 @@ export function WalletButton() {
               </div>
               <div className="flex flex-col">
                 <Link href={`/seller/${address}`} className="rounded-md px-1 py-1.5 hover:bg-panel-2" onClick={() => setOpen(false)}>
-                  My purchases & seller profile
+                  My purchases & seller dashboard
+                </Link>
+                <Link href="/jurors" className="rounded-md px-1 py-1.5 hover:bg-panel-2" onClick={() => setOpen(false)}>
+                  Juror stake
                 </Link>
                 <Link href="/keys" className="rounded-md px-1 py-1.5 hover:bg-panel-2" onClick={() => setOpen(false)}>
                   My encryption keys

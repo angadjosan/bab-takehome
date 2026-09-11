@@ -7,11 +7,12 @@ import { createConfig, http, WagmiProvider } from "wagmi";
 import { coinbaseWallet, injected } from "wagmi/connectors";
 import { chain, deployment, RPC_URL } from "@/lib/config";
 import { publicClient } from "@/lib/client";
+import { burner } from "@/lib/burner";
 import { setTokenMeta, tokenMeta } from "@/lib/token";
 
 export const wagmiConfig = createConfig({
   chains: [chain],
-  connectors: [injected({ shimDisconnect: true }), coinbaseWallet({ appName: "RL Environment Market" })],
+  connectors: [injected({ shimDisconnect: true }), coinbaseWallet({ appName: "RL Environment Market" }), burner()],
   transports: { [chain.id]: http(RPC_URL) },
   ssr: true,
 });

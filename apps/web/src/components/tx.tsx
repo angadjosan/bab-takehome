@@ -4,8 +4,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { BaseError, ContractFunctionRevertedError, type Abi, type Address, type TransactionReceipt } from "viem";
 import { useAccount, useChainId, useConnect, useSwitchChain, useWriteContract } from "wagmi";
+import { BURNER_CONNECTOR_ID } from "@/lib/burner";
 import { publicClient } from "@/lib/client";
 import { CHAIN_ID, CHAIN_NAME } from "@/lib/config";
+import { BurnerForm, BurnerSwitcher } from "./burner-ui";
 import { ErrorText, Spinner, TxLink } from "./ui";
 
 export type TxState = { status: "idle" | "simulating" | "signing" | "pending" | "success" | "error"; hash?: `0x${string}`; error?: unknown; receipt?: TransactionReceipt; label?: string };
@@ -84,8 +86,9 @@ export function RequireWallet({ children, why }: { children: ReactNode; why?: st
   const chainId = useChainId();
   const { connectors, connect, isPending } = useConnect();
   const { switchChain, isPending: switching } = useSwitchChain();
+  const [burnerOpen, setBurnerOpen] = useState(false);
   if (!isConnected) {
-    const uniq = connectors.filter((c, i, arr) => arr.findIndex((x) => x.name === c.name) === i);
+    const uniq = connectors.filter((c, i, arr) => c.id !== BURNER_CONNECTOR_ID && arr.findIndex((x) => x.name === c.name) === i);
     return (
       <div className="rounded-lg border border-dashed border-line-strong p-4 text-sm">
         <p className="text-muted">{why ?? "Connect a wallet to continue."}</p>
@@ -95,7 +98,16 @@ export function RequireWallet({ children, why }: { children: ReactNode; why?: st
               {c.name === "Injected" ? "Browser wallet" : c.name}
             </button>
           ))}
+          <button className="btn btn-sm" onClick={() => setBurnerOpen((x) => !x)}>
+            Use a burner key
+          </button>
         </div>
+        {burnerOpen && (
+          <div className="mt-3 space-y-3">
+            <BurnerSwitcher />
+            <BurnerForm />
+          </div>
+        )}
       </div>
     );
   }

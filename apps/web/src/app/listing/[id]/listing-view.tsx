@@ -9,8 +9,8 @@ import { ReportPanel } from "@/components/report-panel";
 import { EnvRating, SellerLine } from "@/components/version-card";
 import { AddressLink, Card, Empty, HashValue, Notice, Skeleton, Verified } from "@/components/ui";
 import { describe, useDoc } from "@/lib/docs";
-import { fmtUsdc, fmtWindow, pct } from "@/lib/format";
-import { readOptional, useMarketParams, useVersion, useVersionStats, type Version } from "@/lib/market";
+import { fmtTime, fmtUsdc, fmtWindow, pct } from "@/lib/format";
+import { isZeroHash, readOptional, useMarketParams, usePreviewInfo, useVersion, useVersionStats, type Version } from "@/lib/market";
 
 export function parseId(id: string): bigint | null {
   return /^\d+$/.test(id) && id.length < 30 ? BigInt(id) : null;
@@ -85,6 +85,7 @@ function Listing({ v }: { v: Version }) {
         </div>
         <aside className="space-y-6 lg:sticky lg:top-20 lg:self-start">
           <TermsCard v={v} />
+          <PreviewFeeCard v={v} />
           <FeedbackCard v={v} />
           <OtherVersions v={v} />
         </aside>
@@ -355,6 +356,40 @@ function TermsCard({ v }: { v: Version }) {
       <div className="mt-5 border-t border-line pt-5">
         <BuyPanel v={v} />
       </div>
+    </Card>
+  );
+}
+
+function PreviewFeeCard({ v }: { v: Version }) {
+  const q = usePreviewInfo(v.id);
+  const pi = q.data;
+  if (q.isLoading || pi === undefined) return null;
+  if (pi === null) return null; // deployment without seller-paid previews
+  const status = pi.paidAt === 0 ? "not requested" : pi.released ? "released to the TEE operator" : pi.reclaimed ? "reclaimed by the seller" : "escrowed";
+  return (
+    <Card title="Preview fee" subtitle="The seller pays the preview’s inference on-chain; the fee is released to the TEE operator only when a signed report is attached.">
+      <dl className="kv text-[13px]">
+        <dt>Fee</dt>
+        <dd>{pi.paidAt ? fmtUsdc(pi.fee) : "—"}</dd>
+        <dt>Status</dt>
+        <dd>
+          <span className={pi.released ? "badge badge-ok" : pi.reclaimed ? "badge badge-neutral" : pi.paidAt ? "badge badge-info" : "badge badge-neutral"}>{status}</span>
+        </dd>
+        {pi.paidAt > 0 && (
+          <>
+            <dt>Paid</dt>
+            <dd>{fmtTime(pi.paidAt)}</dd>
+            <dt>Quote</dt>
+            <dd>{isZeroHash(pi.quoteHash) ? <span className="text-muted">none (minimum fee)</span> : <HashValue value={pi.quoteHash} />}</dd>
+            {!pi.released && !pi.reclaimed && (
+              <>
+                <dt>Reclaimable after</dt>
+                <dd>{fmtTime(pi.deadline)}</dd>
+              </>
+            )}
+          </>
+        )}
+      </dl>
     </Card>
   );
 }

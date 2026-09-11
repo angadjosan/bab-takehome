@@ -353,6 +353,40 @@ export async function fetchClaimable(a: Address): Promise<bigint | undefined> {
   return v === undefined ? undefined : big(v);
 }
 
+/* ------------------------------ preview fee escrow ------------------------------ */
+
+/** requestPreview escrow: fee paid by the seller, released to the TEE operator on attachReport. */
+export type PreviewInfo = { fee: bigint; paidAt: number; quoteHash: Hex; released: boolean; reclaimed: boolean; deadline: number };
+export async function fetchPreviewInfo(versionId: bigint): Promise<PreviewInfo | null> {
+  const r = await readOptional("previewInfo", [versionId]);
+  if (r === undefined) return null; // deployment predates seller-paid previews
+  const dl = await readOptional("previewDeadline", [versionId]);
+  return {
+    fee: big(f(r, "fee", 0)),
+    paidAt: num(f(r, "paidAt", 1)),
+    quoteHash: h32(f(r, "quoteHash", 2)),
+    released: Boolean(f(r, "released", 3)),
+    reclaimed: Boolean(f(r, "reclaimed", 4)),
+    deadline: num(dl),
+  };
+}
+export function usePreviewInfo(versionId: bigint | null | undefined) {
+  return useQuery({ queryKey: ["preview-info", versionId?.toString()], queryFn: () => fetchPreviewInfo(versionId!), enabled: on && versionId != null, refetchInterval: 10_000 });
+}
+
+/* ---------------------------------- jurors ---------------------------------- */
+
+export type JurorInfo = { address: Address; approved: boolean; total: bigint; locked: bigint; free: bigint };
+export async function fetchJurorInfo(a: Address): Promise<JurorInfo> {
+  const r = await read("jurorInfo", [a]);
+  return { address: a, approved: Boolean(f(r, "approved", 0)), total: big(f(r, "total", 1)), locked: big(f(r, "locked", 2)), free: big(f(r, "free", 3)) };
+}
+/** Every address ever approved as a juror (registry capped at 200), with current stake. */
+export async function fetchJurors(): Promise<JurorInfo[]> {
+  const list = ((await read("jurorList")) as Address[]).map((a) => getAddress(a));
+  return Promise.all(list.map(fetchJurorInfo));
+}
+
 /* ---------------------------------- params ---------------------------------- */
 
 export type Params = {

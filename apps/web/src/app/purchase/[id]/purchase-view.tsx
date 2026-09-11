@@ -531,7 +531,10 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
   const [ground, setGround] = useState<number>(0);
   const [mask, setMask] = useState<bigint>(0n);
   const [evidence, setEvidence] = useState("");
-  const [stored, setStored] = useState<string | null>(null);
+  const [file, setFile] = useState<{ name: string; bytes: Uint8Array } | null>(null);
+  const [claimSel, setClaimSel] = useState<string[]>([]);
+  const [stage, setStage] = useState<string | null>(null);
+  const [uploadErr, setUploadErr] = useState<string | null>(null);
   const approve = useTx();
   const open = useTx();
   const desc = useDoc(v.uri, v.descriptionHash);
@@ -540,23 +543,39 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
 
   const selected = popcount(mask);
   const q = disputeQuote(p.price, p.taskCount, selected, p);
-  const evidenceHash = evidence.trim() ? sha256Hex(evidence) : (`0x${"0".repeat(64)}` as Hex);
+  // For "Description is false" the TEE's case packet picks disputed claims out of the evidence by id
+  // (C1, C2, …), so selected claims are written into the text that gets hashed.
+  const evidenceText = ground === 2 && claimSel.length ? `Disputed claims: ${claimSel.join(", ")}\n\n${evidence.trim()}` : evidence.trim();
+  const evidenceBytes = file ? file.bytes : evidenceText ? utf8(evidenceText) : null;
+  const evidenceHash = evidenceBytes ? sha256Hex(evidenceBytes) : (`0x${"0".repeat(64)}` as Hex);
   const allowance = useReadContract({ address: deployment!.token, abi: tokenAbi, functionName: "allowance", args: [address!, m], query: { enabled: !!address, refetchInterval: 8_000 } });
   const bal = useReadContract({ address: deployment!.token, abi: tokenAbi, functionName: "balanceOf", args: [address!], query: { enabled: !!address, refetchInterval: 8_000 } });
   const approved = ((allowance.data as bigint | undefined) ?? 0n) >= q.bond;
   const enough = ((bal.data as bigint | undefined) ?? 0n) >= q.bond;
   const taskIds = tar ? [...new Set(tar.filter((e) => e.path.startsWith("tasks/")).map((e) => e.path.split("/")[1]).filter(Boolean))].sort() : [];
-  const ready = ground > 0 && selected > 0 && evidence.trim().length > 0;
+  const ready = ground > 0 && selected > 0 && !!evidenceBytes && (ground !== 2 || claimSel.length > 0 || !!file || /\bC[1-9][0-9]*\b/.test(evidenceText));
 
+  /** Evidence goes to the TEE first (it returns sha256 of the stored bytes); that hash goes on-chain. */
   async function submit() {
-    const r = await open.run("Open dispute", { address: m, abi: marketAbi, functionName: "openDispute", args: [p.id, ground, mask, evidenceHash] });
+    if (!evidenceBytes) return;
+    setUploadErr(null);
+    setStage("Uploading evidence privately to the TEE…");
+    let hash: Hex;
+    try {
+      hash = (await uploadEvidence(file ? { bytes: file.bytes } : { text: evidenceText })).evidenceHash;
+    } catch (e) {
+      setStage(null);
+      setUploadErr(`Evidence upload failed, dispute not opened: ${(e as Error).message}`);
+      return;
+    }
+    setStage(`The TEE stored your evidence (sha256 ${hash.slice(0, 14)}…). Opening the dispute on-chain…`);
+    const r = await open.run("Open dispute", { address: m, abi: marketAbi, functionName: "openDispute", args: [p.id, ground, mask, hash] });
+    setStage(null);
     if (!r) return;
     const logs = parseEventLogs({ abi: marketAbi, logs: r.logs, eventName: "DisputeOpened" as never });
     const did = (logs[0] as { args?: { disputeId?: bigint } } | undefined)?.args?.disputeId;
     if (did === undefined) return;
-    saveLocalEvidence(did, evidence);
-    const ok = await uploadEvidence({ disputeId: did, purchaseId: p.id, evidenceHash, text: evidence });
-    setStored(ok ? "sent privately to the TEE for the reviewers’ case packet" : "could not be sent to the TEE; a copy is kept in this browser and only its hash is on-chain");
+    if (!file) saveLocalEvidence(did, evidenceText);
     router.push(`/dispute/${did}`);
   }
 
@@ -606,18 +625,69 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
 
       <fieldset>
         <legend className="section-title">3 · Evidence</legend>
-        {ground === 2 && claims.length > 0 && <p className="mt-1 text-xs text-muted">Name the claim(s) you say are false: {claims.map((c) => c.id).join(", ")}.</p>}
-        <textarea
-          className="input mt-2 min-h-28 font-mono text-xs"
-          placeholder={ground === 2 ? "e.g. Claim C3 says every task runs offline, but task 2’s tests call pypi.org at import time (see tests/test_fetch.py)." : "Describe what you observed and how to reproduce it."}
-          value={evidence}
-          onChange={(e) => setEvidence(e.target.value)}
-        />
+        {ground === 2 && claims.length > 0 && (
+          <div className="mt-2">
+            <p className="text-xs text-muted">Which numbered claim(s) are false? Jurors receive exactly these claims from the frozen description.</p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {claims.map((c) => {
+                const on = claimSel.includes(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    title={c.text}
+                    className={cx("badge cursor-pointer", on ? "badge-accent" : "badge-neutral")}
+                    onClick={() => setClaimSel((s) => (on ? s.filter((x) => x !== c.id) : [...s, c.id]))}
+                  >
+                    {c.id}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {!file && (
+          <textarea
+            className="input mt-2 min-h-28 font-mono text-xs"
+            placeholder={ground === 2 ? "e.g. C3 says every task runs offline, but task 2’s tests call pypi.org at import time (see tests/test_fetch.py)." : "Describe what you observed and how to reproduce it."}
+            value={evidence}
+            onChange={(e) => setEvidence(e.target.value)}
+          />
+        )}
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+          <label className="btn btn-sm cursor-pointer">
+            {file ? "Replace file" : "…or attach a file instead"}
+            <input
+              type="file"
+              className="hidden"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                if (f.size > 256 * 1024) {
+                  setUploadErr("Evidence files are limited to 256 KiB by the TEE.");
+                  return;
+                }
+                setUploadErr(null);
+                setFile({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) });
+              }}
+            />
+          </label>
+          {file && (
+            <>
+              <span className="font-mono">
+                {file.name} ({(file.bytes.length / 1024).toFixed(1)} KiB)
+              </span>
+              <button type="button" className="text-muted hover:text-bad" onClick={() => setFile(null)}>
+                remove
+              </button>
+            </>
+          )}
+        </div>
         <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
           <span>
-            evidenceHash = sha256(text): <HashValue value={evidenceHash} />
+            evidenceHash = sha256({file ? "file bytes" : "text"}): <HashValue value={evidenceHash} />
           </span>
-          <span>Only the hash goes on-chain. After the dispute opens, the text is sent privately to the TEE for reviewers, and a copy stays in this browser.</span>
+          <span>Before the dispute opens, the evidence is stored privately by the TEE (for the reviewers’ case packet); only its hash goes on-chain. Text evidence is also kept in this browser.</span>
         </div>
       </fieldset>
 
@@ -648,7 +718,12 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
       </div>
       <TxStatus state={approve.state} />
       <TxStatus state={open.state} />
-      {stored && <p className="text-xs text-muted">Evidence text {stored}.</p>}
+      {stage && (
+        <p className="flex items-center gap-2 text-xs text-muted">
+          <Spinner className="h-3.5 w-3.5" /> {stage}
+        </p>
+      )}
+      {uploadErr && <p className="break-words text-xs text-bad">{uploadErr}</p>}
     </div>
   );
 }
@@ -705,7 +780,8 @@ function RateCard({ p, isBuyer }: { p: Purchase; isBuyer: boolean }) {
           className="btn btn-primary mt-3"
           disabled={!stars || tx.busy}
           onClick={async () => {
-            if (comment.trim()) await putBlob(utf8(comment));
+            // publish the comment text by hash (best effort; the rating stands without it)
+            if (comment.trim()) await putBlob(utf8(comment)).catch(() => undefined);
             await tx.run("Rate", { address: deployment!.market, abi: marketAbi, functionName: "rate", args: [p.id, stars, commentHash] });
           }}
         >

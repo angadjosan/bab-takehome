@@ -70,7 +70,28 @@ function pickAddress(obj: Record<string, unknown>, keys: string[]): Address | nu
   return null;
 }
 
+/**
+ * Explicit addresses from the environment win over the synced deployment file. Used by
+ * scripts/local-stack.sh so a throwaway anvil deployment never lands in the committed
+ * src/generated/contracts.ts.
+ */
+function envDeployment(): Deployment | null {
+  const m = process.env.NEXT_PUBLIC_MARKET_ADDRESS;
+  if (!m || !isAddress(m)) return null;
+  const t = process.env.NEXT_PUBLIC_TOKEN_ADDRESS;
+  const sb = process.env.NEXT_PUBLIC_START_BLOCK;
+  return {
+    chainId: CHAIN_ID,
+    market: getAddress(m),
+    token: t && isAddress(t) ? getAddress(t) : zeroAddress,
+    startBlock: sb && /^\d+$/.test(sb) ? BigInt(sb) : 0n,
+    raw: { source: "env" },
+  };
+}
+
 function loadDeployment(): Deployment | null {
+  const fromEnv = envDeployment();
+  if (fromEnv) return fromEnv;
   const raw = generatedDeployments[String(CHAIN_ID)];
   if (!raw) return null;
   const market = pickAddress(raw, ["EnvMarket", "envMarket", "market", "Market"]);

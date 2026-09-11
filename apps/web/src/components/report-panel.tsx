@@ -1,22 +1,43 @@
 "use client";
 
-import { fmtPass, useAttestation, useVerifiedReport } from "@/lib/docs";
+import { fmtPass, useAttestation, useReportState, useVerifiedReport, type ReportVerification } from "@/lib/docs";
 import { eqHash } from "@/lib/crypto";
 import { isZeroHash, type Version } from "@/lib/market";
 import { fmtTime } from "@/lib/format";
-import type { ModelResult } from "@/lib/tee";
-import { AddressLink, Card, HashValue, IconExternal, Notice, Skeleton, Verified } from "./ui";
+import type { ModelResult, Outcome } from "@/lib/tee";
+import { AddressLink, Card, HashValue, IconExternal, Notice, Skeleton, Spinner, TxLink, Verified } from "./ui";
+
+const iso = (s?: string | null) => (s ? fmtTime(Date.parse(s) / 1000) : "—");
 
 export function ReportPanel({ v }: { v: Version }) {
   const q = useVerifiedReport(v);
-  if (isZeroHash(v.reportHash))
+  const pending = useReportState(v.id, isZeroHash(v.reportHash));
+  if (isZeroHash(v.reportHash)) {
+    const st = pending.data;
     return (
       <Card title="Signed preview report">
-        <Notice tone="warn" title="No preview report attached yet">
-          The TEE runner has not attached a signed report to this version. The contract refuses purchases until one is attached.
-        </Notice>
+        {st?.state === "running" ? (
+          <Notice tone="info" title="Preview running in the TEE">
+            <span className="inline-flex items-center gap-2">
+              <Spinner className="h-3.5 w-3.5" /> The reference panel and validator are running{st.startedAt ? ` (started ${iso(st.startedAt)})` : ""}. The report is attached on-chain when it finishes; purchases open then.
+            </span>
+          </Notice>
+        ) : st?.state === "failed" ? (
+          <Notice tone="bad" title="The preview run failed">
+            {st.error}. The seller can request a new run; the contract refuses purchases until a signed report is attached.
+          </Notice>
+        ) : st?.state === "ready" ? (
+          <Notice tone="warn" title="Report signed but not attached yet">
+            The TEE holds a signed report (sha256 <span className="font-mono">{st.signed.computedHash.slice(0, 18)}…</span>) that is not on-chain yet. Anyone can submit it with the runner signature.
+          </Notice>
+        ) : (
+          <Notice tone="warn" title="No preview report attached yet">
+            The TEE runner has not attached a signed report to this version. The contract refuses purchases until one is attached.
+          </Notice>
+        )}
       </Card>
     );
+  }
   if (q.isLoading)
     return (
       <Card title="Signed preview report">
@@ -27,34 +48,45 @@ export function ReportPanel({ v }: { v: Version }) {
     return (
       <Card title="Signed preview report">
         <Notice tone="bad" title="Could not load the report">
-          On-chain reportHash is <span className="font-mono">{v.reportHash}</span> but the report document could not be fetched from the TEE service
-          ({(q.error as Error)?.message}). Do not buy on the strength of a report you cannot verify.
+          On-chain reportHash is <span className="font-mono">{v.reportHash}</span> but the report document could not be fetched from the TEE service or the blob store ({(q.error as Error)?.message}). Do not buy on the strength of a
+          report you cannot verify.
         </Notice>
       </Card>
     );
-  const r = q.data.report;
-  const models = r.models ?? [];
-  const run = models.filter((m) => m.status === "run");
-  const notRun = models.filter((m) => m.status !== "run");
-  const expl = r.validator?.explanation;
-  const screened = r.validator?.screening;
+  const d = q.data;
+  const r = d.report;
+  const run = r.models.filter((m) => m.status === "run");
+  const notRun = r.models.filter((m) => m.status !== "run");
 
   return (
     <Card
       title="Signed preview report"
-      subtitle={`Created ${r.createdAt ? fmtTime(typeof r.createdAt === "number" ? r.createdAt : Date.parse(String(r.createdAt)) / 1000) : "—"} · protocol ${r.protocol?.id ?? "—"}`}
+      subtitle={`Created ${iso(r.createdAt)} · protocol ${r.protocol.id} · ${r.environmentVersion}`}
       action={
         <div className="flex flex-wrap gap-1.5">
-          <Verified ok={q.data.hashMatchesChain} okText="sha256 = on-chain reportHash" badText="hash ≠ on-chain" title={`computed ${q.data.computedHash}`} />
-          {q.data.signature ? (
-            <Verified ok={q.data.signatureValid && q.data.signerIsRunner !== false} okText="EIP-712 signer is an authorized runner" badText="signer not authorized" />
+          <Verified ok={d.hashMatchesChain} okText="sha256 = on-chain reportHash" badText="hash ≠ on-chain" title={`computed ${d.computedHash}`} />
+          {d.signature ? (
+            <Verified ok={!!d.signatureValid && d.signerIsRunner !== false} okText="EIP-712 signer is an authorized runner" badText="signer not authorized" />
           ) : (
-            <span className="badge badge-neutral">signature checked on-chain at attach</span>
+            <span className="badge badge-neutral" title="The contract verified the runner signature when the report was attached.">signature checked on-chain at attach</span>
           )}
+          <Verified ok={d.schemaProblems.length === 0 && d.canonical} okText="strict report schema" badText="schema problems" title={d.schemaProblems.join("\n")} />
         </div>
       }
     >
       <div className="space-y-6">
+        {(d.schemaProblems.length > 0 || !d.canonical || !d.versionMatches || !d.bundleMatches) && (
+          <Notice tone="bad" title="This report does not match what it should commit to">
+            <ul className="list-disc pl-4">
+              {!d.versionMatches && <li>report.versionId {r.versionId} ≠ this version {v.id.toString()}</li>}
+              {!d.bundleMatches && <li>report.bundleHash ≠ the version’s on-chain bundleHash</li>}
+              {!d.canonical && <li>the parsed report does not re-serialize to the signed canonical bytes</li>}
+              {d.schemaProblems.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+          </Notice>
+        )}
         <div>
           <div className="flex items-baseline justify-between">
             <h3 className="text-sm font-semibold">Reference-model pass@1</h3>
@@ -71,63 +103,36 @@ export function ReportPanel({ v }: { v: Version }) {
                 </tr>
               </thead>
               <tbody>
-                {run.map((m) => (
+                {[...run, ...notRun].map((m) => (
                   <ModelRow key={m.requested + (m.resolved ?? "")} m={m} />
                 ))}
-                {notRun.map((m) => (
-                  <ModelRow key={m.requested} m={m} />
-                ))}
-                {!models.length && (
-                  <tr>
-                    <td colSpan={4} className="py-3 text-muted">
-                      Report lists no models.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
           <p className="mt-2 text-xs text-muted">
-            {r.uncertainty ?? "Small task populations make these numbers coarse."} Purchased-task and audit-holdout scores are reported separately; audit tasks are never
-            delivered to buyers. pass@1 = tasks solved in their first episode ÷ tasks attempted; it measures today’s reference models on this environment and is{" "}
-            <strong>not evidence that training on it will improve your model</strong>.
+            {r.uncertainty} Purchased-task and audit-holdout scores are reported separately; audit tasks are never delivered to buyers. pass@1 = tasks solved in their first episode ÷ tasks attempted
+            (infrastructure failures count as attempted, not solved). It measures today’s reference models on this environment and is <strong>not evidence that training on it will improve your model</strong>.
           </p>
         </div>
 
         <div>
           <h3 className="text-sm font-semibold">Validator explanation</h3>
           <div className="mt-2 rounded-lg border border-line bg-panel-2 p-4 text-sm leading-relaxed">
-            {typeof expl === "string" ? (
-              <p>{expl}</p>
-            ) : expl && typeof expl === "object" ? (
-              <dl className="kv">
-                {Object.entries(expl).map(([k, val]) => (
-                  <Frag key={k} k={k} v={val} />
-                ))}
-              </dl>
-            ) : (
-              <p className="text-muted">No explanation.</p>
-            )}
+            <p>{r.validator.explanation || <span className="text-muted">No explanation.</span>}</p>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
-            {screened && (
-              <span className={screened.passed ? "badge badge-ok" : "badge badge-warn"}>
-                output screening {screened.passed ? "passed" : "withheld text"}
-              </span>
-            )}
-            {screened?.reasons?.length ? <span>reasons: {screened.reasons.join("; ")}</span> : null}
+            <span className={r.validator.screening.passed ? "badge badge-ok" : "badge badge-warn"}>output screening {r.validator.screening.passed ? "passed" : "withheld text"}</span>
+            {r.validator.screening.reasons.length ? <span>reasons: {r.validator.screening.reasons.join("; ")}</span> : null}
             <span>
-              model <span className="font-mono">{r.validator?.model ?? "—"}</span> · prompt {r.validator?.promptVersion ?? "—"}
+              model <span className="font-mono">{r.validator.model}</span> · prompt {r.validator.promptVersion}
             </span>
-            {r.validator?.promptHash && (
-              <span>
-                prompt hash <HashValue value={r.validator.promptHash} />
-              </span>
-            )}
+            <span>
+              prompt hash <HashValue value={r.validator.promptHash} />
+            </span>
           </div>
           <p className="mt-1 text-xs text-muted">
-            Written by an AI validator with a fixed public prompt, capped at 120 words and screened for copied code, paths, task identifiers, and injected
-            instructions. It can still be wrong; treat it as an opinion, not a finding.
+            Written by an AI validator with a fixed public prompt, capped at 120 words and screened for copied code, paths, task identifiers, and injected instructions. It can still be wrong; treat it as an
+            opinion, not a finding.
           </p>
         </div>
 
@@ -136,64 +141,75 @@ export function ReportPanel({ v }: { v: Version }) {
             <h3 className="text-sm font-semibold">Protocol & runtime</h3>
             <dl className="kv mt-2">
               <dt>Harness digest</dt>
-              <dd><HashValue value={r.protocol?.harnessDigest} /></dd>
+              <dd>
+                <HashValue value={r.protocol.harnessDigest} />
+              </dd>
               <dt>Prompt digest</dt>
-              <dd><HashValue value={r.protocol?.promptDigest} /></dd>
+              <dd>
+                <HashValue value={r.protocol.promptDigest} />
+              </dd>
               <dt>Decoding</dt>
               <dd className="font-mono text-xs">
-                {r.protocol?.decoding ? `temp ${r.protocol.decoding.temperature ?? "—"} · seed ${r.protocol.decoding.seed ?? "—"} · max ${r.protocol.decoding.maxTokens ?? "—"} tok` : "—"}
+                temp {r.protocol.decoding.temperature} · seed {r.protocol.decoding.seed} · max {r.protocol.decoding.maxTokens} tok
               </dd>
               <dt>Budgets</dt>
               <dd>
-                {r.protocol?.actionBudget ?? "—"} actions · {r.protocol?.timeBudgetSec ?? "—"} s
+                {r.protocol.actionBudget} actions · {r.protocol.timeBudgetSec} s
               </dd>
               <dt>Success rule</dt>
-              <dd>{r.protocol?.successRule ?? "—"}</dd>
+              <dd>{r.protocol.successRule}</dd>
               <dt>Sandbox</dt>
               <dd>
-                {r.runtime?.sandbox ?? "—"} · network <span className="font-mono">{r.runtime?.network ?? "—"}</span>
+                {r.runtime.sandbox} · network <span className="font-mono">{r.runtime.network}</span>
               </dd>
               <dt>Image digest</dt>
-              <dd><HashValue value={r.runtime?.imageDigest} /></dd>
+              <dd className="flex flex-wrap items-center gap-1">
+                <HashValue value={r.runtime.imageDigest} />
+                <Verified ok={eqHash(r.runtime.imageDigest, v.imageDigest)} okText="= on-chain" badText="≠ on-chain" />
+              </dd>
               <dt>Bundle hash</dt>
               <dd className="flex flex-wrap items-center gap-1">
                 <HashValue value={r.bundleHash} />
-                <Verified ok={q.data.bundleMatches} okText="= on-chain" badText="≠ on-chain" />
+                <Verified ok={d.bundleMatches} okText="= on-chain" badText="≠ on-chain" />
+              </dd>
+              <dt>Task / audit roots</dt>
+              <dd className="flex flex-wrap items-center gap-1">
+                <Verified ok={eqHash(r.taskRoot, v.taskRoot) && eqHash(r.auditRoot, v.auditRoot)} okText="both = on-chain" badText="≠ on-chain" />
               </dd>
             </dl>
           </div>
           <div>
             <h3 className="text-sm font-semibold">Job history</h3>
-            <p className="mt-1 text-xs text-muted">Every scheduled job, including failed and superseded ones, so a seller cannot publish only favorable runs.</p>
-            <ul className="mt-2 divide-y divide-line rounded-lg border border-line text-xs">
-              {(r.jobs ?? []).map((j) => (
+            <p className="mt-1 text-xs text-muted">
+              Every scheduled job, including failed and superseded ones, so a seller cannot publish only favorable runs. A job status says whether it was graded, never whether the task was solved.
+            </p>
+            <ul className="mt-2 max-h-72 divide-y divide-line overflow-auto rounded-lg border border-line text-xs">
+              {r.jobs.map((j) => (
                 <li key={j.jobId} className="flex items-center justify-between gap-2 px-3 py-2">
                   <span className="truncate font-mono">{j.jobId}</span>
-                  <span className="flex items-center gap-2 text-muted">
-                    {j.startedAt ? fmtTime(typeof j.startedAt === "number" ? j.startedAt : Date.parse(String(j.startedAt)) / 1000) : ""}
-                    <span className={j.status === "completed" || j.status === "succeeded" || j.status === "ok" ? "badge badge-ok" : j.status === "failed" ? "badge badge-bad" : "badge badge-neutral"}>
-                      {j.status}
-                    </span>
+                  <span className="flex shrink-0 items-center gap-2 text-muted">
+                    {iso(j.startedAt)}
+                    <span className={j.status === "succeeded" ? "badge badge-ok" : j.status === "failed" || j.status === "infra_failure" ? "badge badge-bad" : "badge badge-neutral"}>{j.status.replace("_", " ")}</span>
                   </span>
                 </li>
               ))}
-              {!r.jobs?.length && <li className="px-3 py-2 text-muted">No jobs listed.</li>}
+              {!r.jobs.length && <li className="px-3 py-2 text-muted">No jobs listed.</li>}
             </ul>
           </div>
         </div>
 
-        <AttestationBlock report={q.data} />
+        <AttestationBlock rv={d} />
+        <p className="text-xs text-muted">
+          Source: {d.source === "tee" ? "the TEE service’s GET /reports" : "the public blob store, addressed by the on-chain reportHash"}.
+          {d.attachTx && (
+            <>
+              {" "}
+              Attached in <TxLink hash={d.attachTx} />.
+            </>
+          )}
+        </p>
       </div>
     </Card>
-  );
-}
-
-function Frag({ k, v }: { k: string; v: unknown }) {
-  return (
-    <>
-      <dt className="capitalize">{k.replace(/([A-Z])/g, " $1")}</dt>
-      <dd>{Array.isArray(v) ? v.join(", ") : typeof v === "object" && v ? JSON.stringify(v) : String(v)}</dd>
-    </>
   );
 }
 
@@ -203,7 +219,7 @@ function ModelRow({ m }: { m: ModelResult }) {
       <tr className="border-b border-line last:border-0">
         <td className="py-2.5 pr-3">
           <div className="font-medium">{m.requested}</div>
-          <div className="text-xs text-muted">{m.note ?? m.provider ?? "not available in the protected runner"}</div>
+          <div className="text-xs text-muted">{m.provider ?? "not available in the protected runner"}</div>
         </td>
         <td className="py-2.5 pr-3" colSpan={3}>
           <span className="badge badge-neutral">not run</span>
@@ -226,45 +242,46 @@ function ModelRow({ m }: { m: ModelResult }) {
       <td className="py-2.5 pr-3">
         <Score s={m.audit} />
       </td>
-      <td className="py-2.5 tabular-nums">{m.infraFailures ?? 0}</td>
+      <td className="py-2.5 tabular-nums">{m.infraFailures}</td>
     </tr>
   );
 }
 
-function Score({ s }: { s?: { attempted: number; solved?: number; pass1Rounded: number | null } }) {
-  if (!s) return <span className="text-faint">—</span>;
-  const p = s.pass1Rounded;
-  const pctv = p === null || p === undefined ? null : p <= 1 ? p * 100 : p;
+function Score({ s }: { s: Outcome }) {
   return (
     <div className="min-w-[8rem]">
       <div className="flex items-baseline gap-2">
-        <span className="text-base font-semibold tabular-nums">{fmtPass(p)}</span>
+        <span className="text-base font-semibold tabular-nums">{fmtPass(s.pass1Rounded)}</span>
         <span className="text-xs text-muted">n={s.attempted}</span>
       </div>
       <div className="mt-1 h-1.5 w-full rounded-full bg-panel-2">
-        <div className="h-1.5 rounded-full bg-accent" style={{ width: `${Math.min(100, pctv ?? 0)}%` }} />
+        <div className="h-1.5 rounded-full bg-accent" style={{ width: `${Math.min(100, s.pass1Rounded ?? 0)}%` }} />
       </div>
     </div>
   );
 }
 
-function AttestationBlock({ report: rv }: { report: NonNullable<ReturnType<typeof useVerifiedReport>["data"]> }) {
+function AttestationBlock({ rv }: { rv: ReportVerification }) {
   const live = useAttestation();
-  const att = rv.report.attestation ?? {};
-  const kind = att.kind ?? "unknown";
-  const real = kind === "eigencompute-tdx";
-  const signer = rv.recoveredSigner ?? rv.report.signer ?? att.signer;
+  const att = rv.report.attestation;
+  const real = att.kind === "eigencompute-tdx";
+  const signer = rv.recoveredSigner ?? rv.report.signer;
+  const roles = live.data?.signerRoles;
   return (
     <div className="rounded-xl border border-line p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Execution attestation</h3>
-        <span className={real ? "badge badge-ok" : "badge badge-warn"}>{real ? "EigenCompute · Intel TDX" : kind}</span>
+        <span className={real ? "badge badge-ok" : "badge badge-warn"}>{real ? "EigenCompute · Intel TDX" : "none-local-dev: not a TEE"}</span>
       </div>
+      {!real && (
+        <p className="mt-2 text-xs text-warn">This report was produced by the service running in local development mode. The host machine could see everything; no hardware attestation backs it.</p>
+      )}
       <dl className="kv mt-3">
         <dt>Report signer</dt>
         <dd className="flex flex-wrap items-center gap-2">
           <AddressLink address={signer} />
           {rv.signerIsRunner !== undefined && <Verified ok={rv.signerIsRunner} okText="isRunner = true" badText="not a runner" />}
+          {!eqHash(att.signer, rv.report.signer) && <span className="badge badge-bad">attestation.signer ≠ signer</span>}
         </dd>
         {rv.onchainRunner && (
           <>
@@ -279,11 +296,18 @@ function AttestationBlock({ report: rv }: { report: NonNullable<ReturnType<typeo
         <dd className="flex flex-wrap items-center gap-2">
           <AddressLink address={rv.healthSigner} />
           {rv.healthSigner && signer && <Verified ok={eqHash(rv.healthSigner, signer)} okText="same key as report" badText="different key" />}
+          {roles && !("error" in roles) && (
+            <span className="text-xs text-muted">
+              on-chain roles: {Object.entries(roles).map(([k, on]) => `${k} ${on ? "✓" : "✗"}`).join(" · ")}
+            </span>
+          )}
         </dd>
         <dt>App ID</dt>
         <dd className="font-mono text-xs">{att.appId ?? "—"}</dd>
         <dt>Quote digest</dt>
-        <dd><HashValue value={att.quoteDigest} /></dd>
+        <dd>
+          <HashValue value={att.quoteDigest} />
+        </dd>
         <dt>Verify</dt>
         <dd>
           {att.verifyUrl ? (
@@ -323,11 +347,11 @@ function AttestationBlock({ report: rv }: { report: NonNullable<ReturnType<typeo
 }
 
 function LiveAtt({ data }: { data: Record<string, unknown> }) {
-  const entries = Object.entries(data).filter(([, v]) => typeof v !== "object" || v === null).slice(0, 6);
+  const entries = Object.entries(data).filter(([, v]) => typeof v !== "object" || v === null).slice(0, 8);
   return (
     <details>
       <summary className="cursor-pointer text-accent">
-        {String(data.kind ?? data.type ?? "response")} {data.appId ? `· ${String(data.appId).slice(0, 12)}…` : ""} (expand)
+        {String(data.kind ?? "response")} {data.appId ? `· ${String(data.appId).slice(0, 12)}…` : ""} (expand)
       </summary>
       <div className="mt-1 space-y-0.5 font-mono text-[11px]">
         {entries.map(([k, v]) => (
