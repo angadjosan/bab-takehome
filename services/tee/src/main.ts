@@ -6,7 +6,7 @@ import { loadConfig } from './config.ts';
 import { ensureDirs, type Ctx } from './context.ts';
 import { loadServiceKeys } from './keys.ts';
 import { errMsg, logger } from './log.ts';
-import { detectSandbox } from './sandbox.ts';
+import { detectSandbox, unavailableSandbox } from './sandbox.ts';
 import { buildApp } from './server.ts';
 import { BlobStore, PrivateStore } from './store.ts';
 import { Watcher } from './watcher.ts';
@@ -19,7 +19,13 @@ export async function startService(overrides: Partial<Record<string, string>> = 
   const { workRoot, cacheRoot } = ensureDirs(cfg.dataDir);
   const blobs = new BlobStore(cfg.dataDir);
   const priv = new PrivateStore(cfg.dataDir, keys.storageKey);
-  const sandbox = detectSandbox(cfg.sandbox.mode, cfg.sandbox.image);
+  let sandbox;
+  try {
+    sandbox = detectSandbox(cfg.sandbox.mode, cfg.sandbox.image);
+  } catch (e) {
+    logger.error('sandbox unavailable: uploads, previews and mechanical reruns are disabled', { error: errMsg(e) });
+    sandbox = unavailableSandbox(errMsg(e));
+  }
   const chain = cfg.market ? new Chain_(cfg.chainId, cfg.rpcUrl, cfg.market, keys.account, marketAbi(cfg.repoRoot)) : null;
   const attestor = new Attestor(process.env, keys.account.address, keys.encPublicKey, keys.source, cfg.chainId, cfg.market);
   await attestor.refresh();

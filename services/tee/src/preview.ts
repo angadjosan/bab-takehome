@@ -122,6 +122,16 @@ export function disclosures(ctx: Ctx, provider: string): string[] {
 }
 
 const inflight = new Map<string, Promise<StoredReport>>();
+const lastFailure = new Map<string, { error: string; details: unknown; at: string }>();
+const startedAt = new Map<string, string>();
+
+/** Status of a preview run (for async callers polling GET /reports/:versionId). */
+export function previewState(versionId: bigint): { state: 'running' | 'failed' | 'none'; startedAt?: string; error?: string; details?: unknown } {
+  const key = reportKey(versionId);
+  if (inflight.has(key)) return { state: 'running', startedAt: startedAt.get(key) };
+  const f = lastFailure.get(key);
+  return f ? { state: 'failed', error: f.error, details: f.details, startedAt: startedAt.get(key) } : { state: 'none' };
+}
 
 export async function previewVersion(ctx: Ctx, versionId: bigint): Promise<{ stored: StoredReport; cached: boolean }> {
   const existing = getStoredReport(ctx, versionId);
@@ -129,13 +139,22 @@ export async function previewVersion(ctx: Ctx, versionId: bigint): Promise<{ sto
   const key = reportKey(versionId);
   const running = inflight.get(key);
   if (running) return { stored: await running, cached: true };
-  const p = runPreview(ctx, versionId).finally(() => inflight.delete(key));
+  startedAt.set(key, nowIso());
+  lastFailure.delete(key);
+  const p = runPreview(ctx, versionId)
+    .catch((e) => {
+      lastFailure.set(key, { error: errMsg(e), details: e instanceof HttpError ? e.details : null, at: nowIso() });
+      ctx.priv.appendLog('previews', { versionId: versionId.toString(), status: 'failed', error: errMsg(e).slice(0, 300) });
+      throw e;
+    })
+    .finally(() => inflight.delete(key));
   inflight.set(key, p);
   return { stored: await p, cached: false };
 }
 
 /** Validate that a preview can run (used before rate limiting so bad requests don't burn quota). */
 export async function previewPreconditions(ctx: Ctx, versionId: bigint): Promise<{ terms: VersionTerms; upload: UploadRecord }> {
+  if (ctx.sandbox.kind === 'unavailable') throw new HttpError(503, `sandbox ${ctx.sandbox.description}`);
   const chain = requireChain(ctx);
   const terms = await chain.getVersion(versionId);
   if (!terms) throw new HttpError(404, `version ${versionId} not found on-chain`);
@@ -143,7 +162,7 @@ export async function previewPreconditions(ctx: Ctx, versionId: bigint): Promise
   if (!upload) throw new HttpError(409, `no uploaded bundle with ciphertextHash ${terms.ciphertextHash}; POST /seller/upload first`);
   const mism = termsMismatches(terms, upload);
   if (mism.length) throw new HttpError(409, 'on-chain version terms do not match the uploaded bundle', mism);
-  if (!upload.preflight.ok) throw new HttpError(409, 'uploaded bundle failed the build/dependency preflight', upload.preflight);
+  if (!upload.preflight.buildOk) throw new HttpError(409, 'uploaded bundle failed the build/dependency preflight', upload.preflight);
   if (terms.reportHash !== ZERO32 && !getStoredReport(ctx, versionId)) throw new HttpError(409, `a different report (${terms.reportHash}) is already attached to version ${versionId}`);
   return { terms, upload };
 }

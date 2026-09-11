@@ -5,7 +5,7 @@ import { processUpload, UploadError } from './bundle.ts';
 import type { Ctx } from './context.ts';
 import { casePacket, storeEvidence } from './evidence.ts';
 import { errMsg, logger } from './log.ts';
-import { attachStoredReport, disclosures, getStoredReport, HttpError, previewPreconditions, previewVersion, protocolSpec } from './preview.ts';
+import { attachStoredReport, disclosures, getStoredReport, HttpError, previewPreconditions, previewState, previewVersion, protocolSpec } from './preview.ts';
 import { serveDelivery } from './relay.ts';
 import { normHash } from './store.ts';
 import { RateLimiter } from './util.ts';
@@ -122,6 +122,7 @@ export function buildApp(ctx: Ctx, watcher: Watcher | null): Hono {
 
   // ------------------------------------------------------------------ seller
   app.post('/seller/upload', async (c) => {
+    if (ctx.sandbox.kind === 'unavailable') throw new HttpError(503, `sandbox ${ctx.sandbox.description}`);
     const body = await jsonBody(c);
     const { response } = await processUpload(ctx, body);
     return c.json(response);
@@ -137,6 +138,10 @@ export function buildApp(ctx: Ctx, watcher: Watcher | null): Hono {
       if (!perListing.take(lk)) throw new HttpError(429, `preview rate limit for listing ${terms.listingId}; retry in ${perListing.retryAfterSec(lk)}s`);
       if (!global.take('global')) throw new HttpError(429, `global preview rate limit; retry in ${global.retryAfterSec('global')}s`);
     }
+    if (c.req.query('async') === '1' && !cached) {
+      previewVersion(ctx, versionId).catch(() => undefined); // status via GET /reports/:versionId
+      return c.json({ status: 'running', versionId: versionId.toString(), poll: `/reports/${versionId}` }, 202);
+    }
     const { stored, cached: wasCached } = await previewVersion(ctx, versionId);
     return c.json({ cached: wasCached, report: stored.report, reportJson: stored.reportJson, reportHash: stored.reportHash, signature: stored.signature, signer: stored.signer, attachTx: stored.attachTx, attachError: stored.attachError, attestationToken: stored.attestationToken, disclosures: disclosures(ctx, ctx.cfg.llm.provider), reportUrl: `${ctx.cfg.publicUrl}/blobs/${stored.reportHash.slice(2)}` });
   });
@@ -145,8 +150,14 @@ export function buildApp(ctx: Ctx, watcher: Watcher | null): Hono {
     return c.json({ reportHash: s.reportHash, attachTx: s.attachTx });
   });
   app.get('/reports/:versionId', (c) => {
-    const s = getStoredReport(ctx, parseId(c.req.param('versionId')));
-    if (!s) throw new HttpError(404, 'no report for this version yet');
+    const vid = parseId(c.req.param('versionId'));
+    const s = getStoredReport(ctx, vid);
+    if (!s) {
+      const st = previewState(vid);
+      if (st.state === 'running') return c.json({ status: 'running', startedAt: st.startedAt }, 202);
+      if (st.state === 'failed') return c.json({ status: 'failed', error: st.error, details: bigintSafe(st.details ?? null) }, 500);
+      throw new HttpError(404, 'no report for this version yet');
+    }
     return c.json({ report: s.report, reportJson: s.reportJson, reportHash: s.reportHash, signature: s.signer ? s.signature : null, signer: s.signer, attachTx: s.attachTx, attestationToken: s.attestationToken, disclosures: disclosures(ctx, ctx.cfg.llm.provider), reportUrl: `${ctx.cfg.publicUrl}/blobs/${s.reportHash.slice(2)}` });
   });
 

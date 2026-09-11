@@ -1,0 +1,13 @@
+# Build context = repo root; only these paths enter the image.
+*
+!packages/shared/package.json
+!packages/shared/package-lock.json
+!packages/shared/src
+!services/tee/package.json
+!services/tee/package-lock.json
+!services/tee/tsconfig.json
+!services/tee/src
+!services/tee/runtime
+**/node_modules
+**/__pycache__
+**/.DS_Store

@@ -70,7 +70,8 @@ export function loadConfig(overrides: Partial<Record<string, string>> = {}): Ser
   const env = loadEnv({});
   const e = env.env;
   const keyMode = e.MNEMONIC ? 'eigencompute' : 'local-dev';
-  const port = Number(e.PORT ?? 8080);
+  // local dev default 8787 (agents' TEE_URL default); the Docker image sets PORT=8080 for EigenCompute
+  const port = Number(e.PORT ?? 8787);
   const provider = (e.LLM_PROVIDER as LlmProviderName | undefined) ?? (e.FIREWORKS_API_KEY ? 'fireworks' : 'fireworks');
   if (keyMode === 'eigencompute' && provider === 'ollama') throw new Error('LLM_PROVIDER=ollama is a local-dev harness check only');
   const baseUrl =
@@ -103,7 +104,7 @@ export function loadConfig(overrides: Partial<Record<string, string>> = {}): Ser
       concurrency: Number(e.PREVIEW_CONCURRENCY ?? (provider === 'ollama' ? 1 : 6)),
       actionBudget: 12,
       episodeTimeSec: Number(e.EPISODE_TIME_SEC ?? (provider === 'ollama' ? 600 : 300)),
-      maxTokens: Number(e.MAX_TOKENS ?? 4096),
+      maxTokens: Number(e.MAX_TOKENS ?? 8192),
       seed: 1337,
       temperature: 0,
       ratePerListingPerHour: Number(e.PREVIEW_RATE_PER_LISTING_PER_HOUR ?? 3),

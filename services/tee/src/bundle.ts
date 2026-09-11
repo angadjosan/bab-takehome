@@ -66,7 +66,10 @@ export interface TaskCheckOutput {
 }
 
 export interface PreflightResult {
+  /** everything passed, including reference solutions */
   ok: boolean;
+  /** dependencies install, grader imports, every task's hidden tests collect (gate for previews) */
+  buildOk: boolean;
   dependencies: { ok: boolean; venv: string; log: string };
   imports: TaskCheckOutput['imports'] | null;
   purchased: Array<{ taskId: string; hiddenTestCount: number | null; startFails: boolean; referenceSolutionPasses: boolean | null; error?: string }>;
@@ -152,10 +155,25 @@ function listTaskDirs(root: string): string[] {
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
-export function parseImageRef(text: string): { ref: string; digest: Hex } | null {
-  const ref = text.trim().split(/\r?\n/)[0]!.trim();
-  const m = /(?:^|@)sha256:([0-9a-f]{64})$/.exec(ref);
-  return m ? { ref, digest: `0x${m[1]}` as Hex } : null;
+/**
+ * IMAGE_DIGEST: either a bare immutable reference (`<image>@sha256:<64 hex>`) on the first line, or
+ * `key=value` lines where `base=` (or `ref=`) names the immutable reference (`image=` may carry the
+ * locally built runner image id, `dockerfile_sha256=` the Dockerfile hash). `#` comments ignored.
+ * Same rule as the seller packager (agents/src/common/image.ts).
+ */
+export function parseImageRef(text: string): { ref: string; digest: Hex; fields: Record<string, string> } | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'));
+  const fields: Record<string, string> = {};
+  for (const l of lines) {
+    const kv = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(l);
+    if (kv) fields[kv[1]!] = kv[2]!.trim();
+  }
+  const candidate = fields.base ?? fields.ref ?? (Object.keys(fields).length === 0 ? lines[0] : undefined);
+  const m = candidate ? /^[^\s@]+@sha256:([0-9a-f]{64})$/.exec(candidate) : null;
+  return candidate && m ? { ref: candidate, digest: `0x${m[1]}` as Hex, fields } : null;
 }
 
 /** Decrypt + verify + extract the purchased bundle into a fresh dir (readable by sandbox uids). */
@@ -426,6 +444,7 @@ export async function processUpload(ctx: Ctx, body: Record<string, any>): Promis
     const dep = await prepareVenv(ctx.sandbox, ctx.cacheRoot, requirementsLock);
     let preflight: PreflightResult = {
       ok: false,
+      buildOk: false,
       dependencies: { ok: dep.ok, venv: path.basename(dep.venv), log: dep.log.slice(-2000) },
       imports: null,
       purchased: [],
@@ -444,10 +463,9 @@ export async function processUpload(ctx: Ctx, body: Record<string, any>): Promis
         audit: a.output ? summarizeRows(a.output.tasks) : [],
       };
       const rows = [...preflight.purchased, ...preflight.audit];
-      preflight.ok =
-        !!p.output?.imports.ok &&
-        rows.length === taskIds.length + auditTaskIds.length &&
-        rows.every((r) => !r.error && (r.hiddenTestCount ?? 0) > 0 && r.referenceSolutionPasses !== false);
+      preflight.buildOk =
+        !!p.output?.imports.ok && rows.length === taskIds.length + auditTaskIds.length && rows.every((r) => !r.error && (r.hiddenTestCount ?? 0) > 0);
+      preflight.ok = preflight.buildOk && rows.every((r) => r.referenceSolutionPasses !== false);
       if (p.error) preflight.imports = { ok: false, error: p.error };
     }
     need('preflight.dependencies', preflight.dependencies.ok);

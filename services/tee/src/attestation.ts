@@ -123,6 +123,7 @@ export interface AttestationEnv {
   KMS_SERVER_URL?: string;
   KMS_PUBLIC_KEY?: string;
   EIGEN_APP_ID?: string;
+  EIGEN_APP_ID_PUBLIC?: string;
   EIGEN_IMAGE_DIGEST?: string;
   EIGEN_VERIFY_URL?: string;
   EIGEN_ENVIRONMENT?: string; // mainnet-alpha | sepolia
@@ -140,7 +141,7 @@ export class Attestor {
     chainId: number,
     market: Address | null,
   ) {
-    const appId = env.EIGEN_APP_ID || null;
+    const appId = env.EIGEN_APP_ID || env.EIGEN_APP_ID_PUBLIC || null;
     const dash = env.EIGEN_ENVIRONMENT === 'sepolia' ? 'https://verify-sepolia.eigencloud.xyz' : 'https://verify.eigencloud.xyz';
     const binding = canonicalJson({
       type: 'envmarket.tee.binding.v1',

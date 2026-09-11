@@ -32,7 +32,8 @@ export const NETDENY = path.join(RUNTIME_DIR, 'netdeny.py');
 export const DEFAULT_PY_IMAGE = 'python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea';
 
 export interface SandboxInfo {
-  kind: 'docker' | 'linux-root';
+  /** 'unavailable': no network isolation could be established; seller code is never run */
+  kind: 'docker' | 'linux-root' | 'unavailable';
   image: string | null;
   unshareNet: boolean;
   seccompNetDeny: boolean;
@@ -110,6 +111,16 @@ export function detectSandbox(mode: 'auto' | 'docker' | 'unshare', image: string
   };
 }
 
+/** Placeholder when isolation is impossible: the service still relays keys and serves evidence
+ *  metadata, but refuses uploads, previews and mechanical reruns (503). */
+export function unavailableSandbox(reason: string): SandboxInfo {
+  return { kind: 'unavailable', image: null, unshareNet: false, seccompNetDeny: false, description: `unavailable: ${reason}` };
+}
+
+function assertAvailable(info: SandboxInfo): void {
+  if (info.kind === 'unavailable') throw new Error(`sandbox ${info.description}; refusing to run seller code`);
+}
+
 function pyVersion(bin: string): string {
   const r = spawnSync(bin, ['-c', 'import platform;print(platform.python_version())'], { encoding: 'utf8' });
   return r.stdout?.trim() || 'unknown';
@@ -128,6 +139,7 @@ export function grantDir(info: SandboxInfo, dir: string, uid: number, writable: 
 let runCounter = 0;
 
 function buildCommand(info: SandboxInfo, o: RunOptions): { cmd: string; argv: string[]; name: string | null } {
+  assertAvailable(info);
   const py = path.join(o.venv, 'bin', 'python');
   const env = {
     PYTHONDONTWRITEBYTECODE: '1',
@@ -219,6 +231,7 @@ export function runSandboxed(info: SandboxInfo, o: RunOptions & { stdin?: string
  * hashes). Cached by sha256(runtime ‖ requirements.lock).
  */
 export async function prepareVenv(info: SandboxInfo, cacheRoot: string, requirementsLock: string): Promise<{ venv: string; log: string; ok: boolean }> {
+  assertAvailable(info);
   const key = sha256Hex(`${info.kind}|${info.image ?? 'host'}|${requirementsLock}`).slice(2, 18);
   const venv = path.join(cacheRoot, `venv-${key}`);
   if (fs.existsSync(path.join(venv, '.ok'))) return { venv, log: 'cached', ok: true };
