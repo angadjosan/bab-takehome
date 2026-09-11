@@ -414,3 +414,30 @@ Chain watcher loop: on `Purchased` → build wrapper, wrap key, sign `DeliveryRe
     revealed or `revealDeadline` has passed. Expected reverts from races are ignored. Jurors reveal early
     as soon as all seats have committed. They auto-`withdraw()` after resolution
     (`JUROR_AUTO_WITHDRAW=0` disables).
+- **contracts — security review (2026-09-10)** (details: `contracts/SECURITY_REVIEW.md`):
+  - *Selection re-arm keeps the grace deadline.* When `blockhash(selectionBlock)` has expired,
+    `selectJurors` now resets only `selectionBlock` (event `SelectionArmed`). `selectionDeadline` stays
+    as first set for the round. Before this change, each re-arm pushed the deadline back, which could
+    lock an unfillable dispute forever.
+  - *Seat draw (supersedes the Fisher–Yates note above).* Each eligible juror draws
+    `r = keccak256(abi.encode(seed, juror))`, and the 3 lowest draws are seated, in ascending order.
+    The seed formula is unchanged. A juror's own eligibility no longer re-rolls the other seats.
+  - *Stake age.* `depositJurorStake` records the block number. A juror whose last deposit is in a
+    block after the round's `selectionBlock` is not eligible for that draw. So a juror who tops up
+    while a selection is pending sits out that draw.
+  - *Deposits.* `depositCollateral` and `depositJurorStake` revert with
+    `SafeCastOverflowedUintDowncast(uint8,uint256)` above `uint128`. **ABI change:** this error was
+    added to `packages/shared/src/abi/EnvMarket.json`. No function or event signature changed.
+  - *Mainnet params* (`script/MarketParams.sol`, 8453): bondFloor 50000, bondCap 500000, caseFee 100000,
+    participationFee 20000, jurorStake 250000, per the 5 USDC budget. Tested with a 0.5 USDC price and
+    0.5 collateral, locally (`test/Security.t.sol`) and on a Base fork.
+- **agents (2026-09-10)** — seller agent, buyer agent, e2e orchestrator (`agents/`):
+  - **Purchased payload** (per the environment builder): `manifest.json`, `src/`, full `tasks/<id>/` dirs (task.json, overlay/, visible_tests/, tests/), `grader/`, `solutions/`, `requirements.lock`, `IMAGE_DIGEST`, plus `Dockerfile.runner`, `.dockerignore`, `scripts/`, `LICENSE-ENV.md`, `provenance.json`, `README.md` and `listing/` (the public docs). Never packaged: `audit-tasks/`, `SEEDED_DISPUTE.md` (lives outside py-repair-kit), `salts.json`, `keys.json`, caches. The listing promises Dockerfile.runner/scripts in delivery (claim C12), so they are part of the canonical archive.
+  - **imageDigest** = the base image's registry digest from `IMAGE_DIGEST` (`base=python:3.12-slim@sha256:…`); the local runner image id is not reproducible across rebuilds. The runtime is that image plus the hash-pinned requirements.lock.
+  - **descriptionHash** commits to the seller's exact `listing/description.json` bytes (not re-serialized). Packaging validates it loosely (numbered claims + environmentVersion) and records whether it also passes the shared strict schema.
+  - **Manifest from template:** computed commitments are always overwritten; `taskIds` (bit i of taskMask = taskIds[i], ASCII order) is set; `<FILL…>` placeholders are either filled (bundleDigest, imageDigest, roots, license/provenance sha256, price/collateral, archive → null, harness → "EnvMarket TEE reference harness (digest in the signed report)", decoding.maxTokens → 4096) or packaging fails. Seller fields in other shapes are kept next to the derived schema fields.
+  - **Seller → TEE upload:** K_bundle and K_audit wrapped (EMKW1, info "envmarket.upload.v1", HKDF salt = ciphertextHash); salts are EMENC1 under a third fresh K_salts, sent as `wrappedSaltsKey`, so K_audit is not reused. The seller checks every digest in the TEE's `stored` response and re-fetches every public doc from the blob URL by hash before listing. On-chain `uri` = the TEE's `blobBaseUrl`.
+  - **Buyer evidence** is uploaded as `{base64}` to `/evidence-upload`, so the TEE stores the exact bytes and `evidenceHash = sha256(bytes)` matches on-chain.
+  - **Spending limit:** purchase prices and dispute bonds both count against the persisted budget (`agents/.data/buyer/policy-<who>.json`). Refunds do not restore it.
+  - **Safety rails:** agent code sends transactions only on anvil (31337) unless `ALLOW_LIVE_TX=1`. `demo/fund.ts` prints a funding plan and sends shortfalls from DEPLOYER only with `--yes`. `e2e.ts` never funds on real networks; it only checks balances. Price and collateral come from `LISTING_PRICE`/`LISTING_COLLATERAL`.
+  - **Local run** (`agents/demo/local.sh`): windows are not shortened. On anvil the orchestrator advances chain time with `evm_increaseTime` (FAST_FORWARD=1) past the challenge and delivery windows. deploy.sh's shared `deployments/31337.json` is copied into the run dir (`DEPLOYMENTS_DIR`) and the shared file is restored. In local dev the TEE signs with RUNNER_PK, so that address is also granted relay and verifier. Optional `--timeout-refund`: a purchase made with an unusable (low-order) X25519 key cannot be delivered and is refunded after the delivery window.

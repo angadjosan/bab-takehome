@@ -224,7 +224,8 @@ export async function previewAndAttach(ctx: Ctx, versionId: bigint, tee = new Te
   log(`requesting preview for version ${versionId} (TEE runs the reference panel + validator; this can take minutes)`);
   const res = await tee.preview(versionId);
   let version = await getVersion(ctx, versionId);
-  const vr = await verifyReport(ctx, versionId, version, { report: res.report, reportHash: res.reportHash, signature: res.signature }, { requireSignature: true });
+  if (res.attachError) log(`TEE could not attach the report itself (${String(res.attachError).slice(0, 160)}); the seller will submit it`);
+  const vr = await verifyReport(ctx, versionId, version, { report: res.reportJson ?? res.report, reportHash: res.reportHash, signature: res.signature }, { requireSignature: true });
   for (const c of vr.checks) log(`  ✓ ${c}`);
   for (const m of vr.report.models) {
     log(`  model ${m.requested} → ${m.resolved ?? '(unavailable)'} [${m.status}] purchased pass@1 ${m.purchased.pass1Rounded ?? 'n/a'}% (${m.purchased.solved}/${m.purchased.attempted}), audit ${m.audit.pass1Rounded ?? 'n/a'}%`);

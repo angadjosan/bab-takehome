@@ -119,7 +119,8 @@ export async function inspectListing(ctx: Ctx, versionId: bigint): Promise<Listi
     try {
       let payload: { report: unknown; reportHash?: string; signature?: string };
       try {
-        payload = await tee.report(versionId);
+        const r = await tee.report(versionId);
+        payload = { report: r.reportJson ?? r.report, reportHash: r.reportHash, signature: r.signature ?? undefined };
       } catch {
         payload = { report: Buffer.from(await fetchVerified(blob(version.reportHash), version.reportHash)).toString('utf8') };
       }
@@ -426,18 +427,11 @@ export async function openDispute(
   const version = await getVersion(ctx, p.versionId);
   const evidenceHash = sha256Hex(evidence);
   const tee = teeFor(version);
-  const message = [
-    'EnvMarket evidence upload',
-    `chainId: ${ctx.chainId}`,
-    `market: ${ctx.market.toLowerCase()}`,
-    `purchaseId: ${purchaseId}`,
-    `evidenceHash: ${evidenceHash}`,
-    `buyer: ${c.account.address.toLowerCase()}`,
-  ].join('\n');
-  const signature = await c.account.signMessage({ message });
-  const up = await tee.evidenceUpload({ purchaseId: purchaseId.toString(), buyer: c.account.address, evidenceHash, evidence: Buffer.from(evidence).toString('base64'), message, signature });
+  // Content-addressed private store: the TEE keys evidence by sha256(bytes); the on-chain
+  // evidenceHash later authorizes seated jurors to receive it in their case packet.
+  const up = await tee.evidenceUpload({ base64: Buffer.from(evidence).toString('base64') });
   const stored = String(up?.evidenceHash ?? up?.sha256 ?? '');
-  if (stored && `0x${stored.replace(/^0x/, '').toLowerCase()}` !== evidenceHash) throw new Error(`TEE stored evidence ${stored} != ${evidenceHash}`);
+  if (`0x${stored.replace(/^0x/, '').toLowerCase()}` !== evidenceHash) throw new Error(`TEE stored evidence ${stored || '(no hash)'} != ${evidenceHash}`);
   log(who, `evidence (${evidence.length} bytes, sha256 ${evidenceHash}) uploaded privately to the TEE evidence server`);
   const [requested, bond] = await marketRead<[bigint, bigint]>(ctx, 'quoteDispute', [purchaseId, taskMask]);
   const policy = new SpendingPolicy(policyFile(who));
