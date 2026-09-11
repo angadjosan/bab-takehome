@@ -58,7 +58,8 @@ fi
 
 dep_files=()
 for f in "$SRC_DEP"/*.json; do
-  [[ $(basename "$f") == web.json ]] || dep_files+=("$f") # web.json records the web deploy itself
+  # web.json and jurors.json record deploys of the apps themselves, not contracts the web app reads
+  [[ $(basename "$f") == web.json || $(basename "$f") == jurors.json ]] || dep_files+=("$f")
 done
 if ((${#dep_files[@]})); then
   cp "${dep_files[@]}" "$OUT/deployments/"
