@@ -1,0 +1,17 @@
+{
+  "taskId": "T3",
+  "set": "purchased",
+  "title": "allocate() loses or invents cents when splitting a total",
+  "statement": "ledgerlite.money.allocate() does not preserve the total it is asked to split.\n\n    >>> allocate(Decimal('100.00'), [1, 1, 1])\n    [Decimal('33.33'), Decimal('33.33'), Decimal('33.33')]    # sums to 99.99\n    >>> allocate(Decimal('0.01'), [1, 1])\n    [Decimal('0.01'), Decimal('0.01')]                         # sums to 0.02\n\nFinance needs every split to sum exactly to the total rounded to cents, using the largest remainder method described in the function's docstring (floor each exact cent share, then give leftover cents one at a time to the largest fractional remainders, ties to the lower index; a negative total is the mirror image of the positive one; zero weights receive nothing). Keep the existing validation errors.",
+  "targetSkill": "exact decimal arithmetic (cent allocation, rounding)",
+  "difficulty": "medium",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["ledgerlite/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}

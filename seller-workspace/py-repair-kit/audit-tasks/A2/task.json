@@ -1,0 +1,17 @@
+{
+  "taskId": "A2",
+  "set": "audit",
+  "title": "Half-cent amounts round the wrong way",
+  "statement": "Our accounting policy rounds half-cent amounts half away from zero, and the docstring of ledgerlite.money.to_cents says the same, but:\n\n    >>> to_cents(Decimal('2.665'))\n    Decimal('2.66')      # expected 2.67\n    >>> to_cents('0.005')\n    Decimal('0.00')      # expected 0.01\n\nNegative amounts should mirror positive ones (-2.665 -> -2.67). format_money() and allocate() round through to_cents and show the same discrepancy on invoices. Please fix the rounding.",
+  "targetSkill": "exact decimal arithmetic (rounding modes)",
+  "difficulty": "easy",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["ledgerlite/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}

@@ -1,0 +1,17 @@
+{
+  "taskId": "T5",
+  "set": "purchased",
+  "title": "Monthly statements and monthly totals don't reconcile",
+  "statement": "Our reconciliation job runs two checks for every account and every month of 2024:\n\n  (a) statement(txs, account, 2024, m).closing == statement(txs, account, 2024, m + 1).opening\n  (b) statement(txs, account, 2024, m).credits + .debits == monthly_totals(txs, 2024, account)[m]\n\nBoth checks fail on real data. The failures cluster around month ends and on accounts from our Chicago office, whose exports carry -05:00 / -06:00 offsets (e.g. 2024-03-31T21:30:00-05:00). Totals for the year also don't match the sum of the individual transactions we expect in 2024.\n\nThe reporting policy is written at the top of ledgerlite/dates.py: every reporting period is a UTC calendar month treated as a half-open interval [first instant of the month, first instant of the next month); timestamps with an offset are placed by their UTC instant; naive timestamps are UTC. Make statements and monthly totals follow that policy.",
+  "targetSkill": "timezone- and boundary-correct period logic across modules",
+  "difficulty": "hard",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["ledgerlite/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}

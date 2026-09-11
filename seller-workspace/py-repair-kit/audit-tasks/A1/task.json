@@ -1,0 +1,17 @@
+{
+  "taskId": "A1",
+  "set": "audit",
+  "title": "amounts_in() splits amounts that use thousands separators",
+  "statement": "ledgerlite.tokenizer.amounts_in() breaks amounts with thousands separators into pieces:\n\n    >>> amounts_in('Paid $1,234.50 to ACME #rent')\n    [Decimal('1'), Decimal('234.50')]\n\nExpected [Decimal('1234.50')]. The same happens with 1,000,000 and with negative amounts like -$2,500.00. Memo search and our category rules depend on these amounts, so tokenize() must return one amount token per amount, keeping its original text (e.g. '$1,200'). Plain amounts, hashtags, mentions and words must keep working, and malformed groupings such as '12,34' must not be merged.",
+  "targetSkill": "regular expressions and tokenization",
+  "difficulty": "easy",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["ledgerlite/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}

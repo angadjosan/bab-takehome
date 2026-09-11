@@ -1,0 +1,17 @@
+{
+  "taskId": "T2",
+  "set": "purchased",
+  "title": "CSV exports from Excel fail with 'missing required column(s): date'",
+  "statement": "Importing a CSV exported from Excel with the 'CSV UTF-8' option fails:\n\n    >>> Ledger().import_csv('march.csv')\n    ledgerlite.csvimport.CsvImportError: missing required column(s): date\n\nThe first header cell is clearly 'Date'. If I open the same file in a text editor and re-save it, it imports fine. The module docstring says spreadsheet exports that start with a UTF-8 byte-order mark are supported. Both parse_transactions(text) and read_transactions(path) / Ledger.import_csv(path) need to accept these exports, including ones that use header aliases or quoted header cells.",
+  "targetSkill": "text ingestion robustness (encodings, CSV headers)",
+  "difficulty": "easy",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["ledgerlite/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}

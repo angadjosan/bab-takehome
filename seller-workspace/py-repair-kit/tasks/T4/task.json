@@ -1,0 +1,17 @@
+{
+  "taskId": "T4",
+  "set": "purchased",
+  "title": "TokenBucket starves clients that poll frequently",
+  "statement": "Our API gateway uses ledgerlite.ratelimit.TokenBucket(rate=2, capacity=1). Once the initial token is used, a client that calls try_acquire() every 300 ms is never admitted again, even though the limiter is configured for 2 requests per second. A client that calls once per second works fine, which is why this slipped through review. available() and time_until() also report numbers that don't match the configured rate after short waits.\n\nThe class docstring describes the intended behaviour: tokens accrue continuously at `rate` per second of elapsed clock time, including fractions of a token, capped at `capacity`; a clock that goes backwards neither adds nor removes tokens. Please fix it without changing the public API (tests inject a fake clock).",
+  "targetSkill": "time-based algorithms (rate limiting with an injected clock)",
+  "difficulty": "medium",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["ledgerlite/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}

@@ -1,0 +1,17 @@
+{
+  "taskId": "T1",
+  "set": "purchased",
+  "title": "LRUCache evicts entries that were just read",
+  "statement": "We memoise balance lookups with ledgerlite.lru.LRUCache and the hottest keys keep getting evicted and recomputed under load.\n\nRepro:\n\n    from ledgerlite.lru import LRUCache\n    c = LRUCache(2)\n    c.put('a', 1)\n    c.put('b', 2)\n    c.get('a')        # 'a' was just used\n    c.put('c', 3)\n    'a' in c          # False -- expected True; 'b' was the least recently used\n\nThe class docstring says a successful get() counts as a use of the key, just like put(). keys(), hit/miss counters and eviction order should all follow that rule. Please fix the library; keep the public API unchanged.",
+  "targetSkill": "data-structure invariants (LRU recency ordering)",
+  "difficulty": "easy",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["ledgerlite/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}
