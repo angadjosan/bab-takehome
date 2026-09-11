@@ -441,3 +441,24 @@ Chain watcher loop: on `Purchased` → build wrapper, wrap key, sign `DeliveryRe
   - **Spending limit:** purchase prices and dispute bonds both count against the persisted budget (`agents/.data/buyer/policy-<who>.json`). Refunds do not restore it.
   - **Safety rails:** agent code sends transactions only on anvil (31337) unless `ALLOW_LIVE_TX=1`. `demo/fund.ts` prints a funding plan and sends shortfalls from DEPLOYER only with `--yes`. `e2e.ts` never funds on real networks; it only checks balances. Price and collateral come from `LISTING_PRICE`/`LISTING_COLLATERAL`.
   - **Local run** (`agents/demo/local.sh`): windows are not shortened. On anvil the orchestrator advances chain time with `evm_increaseTime` (FAST_FORWARD=1) past the challenge and delivery windows. deploy.sh's shared `deployments/31337.json` is copied into the run dir (`DEPLOYMENTS_DIR`) and the shared file is restored. In local dev the TEE signs with RUNNER_PK, so that address is also granted relay and verifier. Optional `--timeout-refund`: a purchase made with an unusable (low-order) X25519 key cannot be delivered and is refunded after the delivery window.
+- **services/tee** (TEE service builder):
+  - **Upload wire format** (`POST /seller/upload`, JSON, binary fields base64): `encryptedBundle`, `encryptedAudit`; `wrappedBundleKey`/`wrappedAuditKey` EMKW1 to the TEE X25519 key from `/health` `encPubKey`, HKDF salt = sha256(encryptedBundle) for both, info `envmarket.upload.v1` (`envmarket.keywrap.v1` accepted); `encryptedSalts` = EMENC1(K_audit, salts.json), or EMENC1(K_salts) plus `wrappedSaltsKey`; `publicDocs` {description.json, description.md, manifest.json, license}; optional `claims`, each checked. The TEE verifies the canonical tar, bundleHash, the manifest (bundleDigest, grader digest, image ref, counts, taskIds) and both Merkle roots, then runs a sandboxed preflight.
+  - **IMAGE_DIGEST parsing** follows the packager: `base=`/`ref=` names the immutable reference (bare first line also accepted).
+  - **Preview gate:** `preflight.buildOk` (deps install, grader imports, hidden tests collect) is required. A reference solution that fails is reported (`preflight.ok=false`, visible to the validator), not blocking, so broken bundles can be listed and disputed.
+  - **Report:**
+    - Panel pinned (glm-5p3 / kimi-k3 / qwen3p8-max), checked against live `/models`.
+    - `jobs[].status` is `succeeded` (graded) or `infra_failure`; it never encodes solved vs unsolved, which would leak per-task outcomes.
+    - Infra failures count as attempted and not solved, and are also reported in `infraFailures`.
+    - The strict schema has no disclosures field, so the provider disclosure (Fireworks sees task text) is appended to `uncertainty`. Full disclosures come with `/preview` and `/reports`.
+    - `protocol.harnessDigest` = sha256 of the canonical protocol spec (served at `GET /protocol`) plus the harness source hash. It commits the reproducibility tolerances: deterministic re-grade 0, LLM re-run 5 pp per model on the masked tasks, 1 repeat.
+  - **Extra endpoints:**
+    - `POST /preview/:id?async=1` → 202, with `GET /reports/:id` returning 202 while running and 500 on failure. Long synchronous requests hit undici's 300 s headers timeout.
+    - `POST /preview/:id/attach`.
+    - `GET /protocol`.
+    - `GET /findings/:disputeId`: public findings JSON, where findingsHash = sha256(canonical JSON) and it holds aggregates only.
+    - `/health` also returns `encPubKey`, `keySource`, `sandbox`, `inference` and `watcher`.
+  - **Evidence auth:** shared `evidenceAuthMessage`, expiry at most 1 h, single-use nonce, seated in the current round via `getDispute`. The case packet is signed EIP-191 over its sha256 and can be encrypted to a juror-supplied `encPubKey`. Evidence upload stores `{content}` as utf8, `{base64}` as raw bytes, else canonical JSON.
+  - **Sandbox in the TEE:** Confidential Space containers normally lack CAP_SYS_ADMIN. So network denial there is a seccomp-BPF launcher (`runtime/netdeny.py`: no non-AF_UNIX sockets, no io_uring), with `unshare --net` added when permitted. Each phase gets its own uid via setpriv, plus prlimit. The report's `runtime.sandbox` records which mechanisms were used. On macOS the sandbox is Docker `--network none …`.
+  - **Local e2e:** it runs the forge Deploy script (as deploy.sh does) but writes `services/tee/.data-e2e/deployments/31337.json`, so parallel anvil runs are not clobbered. Anvil listens on :8555.
+  - **Ports:** local dev defaults to :8787 (the agents' `TEE_URL` default); the image uses PORT=8080.
+  - **Storage:** EigenCompute storage is ephemeral. Private records are encrypted under a key derived from the app's stable mnemonic, but a VM replacement loses them (re-upload needed). Sealed backup is future work.
