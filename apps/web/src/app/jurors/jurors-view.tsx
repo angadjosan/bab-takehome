@@ -9,15 +9,15 @@ import { DepositAction, WithdrawAction } from "@/components/token-action";
 import { RequireWallet } from "@/components/tx";
 import { AddressLink, Card, Chip, IconArrowRight, Notice, PageHeader, Skeleton, Stat, cx } from "@/components/ui";
 import { fmtUsdc, fmtWindow, pct } from "@/lib/format";
-import { fetchJurorInfo, fetchJurors, useMarketEvents, useMarketParams, type JurorInfo } from "@/lib/market";
+import { fetchJurorInfo, fetchJurors, useMarketConstants, useMarketEvents, useMarketParams, type JurorInfo } from "@/lib/market";
 import { ClaimBanner } from "../purchase/[id]/purchase-view";
 
 export function JurorsView() {
+  const consts = useMarketConstants();
   return (
     <div className="space-y-8">
       <PageHeader title="Jurors">
-        When a buyer says a listing’s description is false, three jurors drawn at random from this pool decide. Each juror stakes tUSDC per case, is paid for revealing a vote, and loses part of
-        the stake for voting with the minority or not revealing. The market owner approves juror addresses.
+        {consts.data ? <>Jurors drawn at random from this pool, {consts.data.seats} per case, decide disputes over a false description.</> : null}
       </PageHeader>
       <DeploymentGate>
         <Body />
@@ -29,6 +29,7 @@ export function JurorsView() {
 function Body() {
   const { address } = useAccount();
   const params = useMarketParams();
+  const consts = useMarketConstants();
   const jurors = useQuery({ queryKey: ["jurors"], queryFn: fetchJurors, refetchInterval: 10_000 });
   const me = useQuery({ queryKey: ["juror", address], queryFn: () => fetchJurorInfo(address!), enabled: !!address, refetchInterval: 6_000 });
   const events = useMarketEvents();
@@ -65,8 +66,8 @@ function Body() {
           ) : (
             <>
               <div className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
-                <Stat label="Approved" value={jurors.data!.length} />
-                <Stat label="Can be drawn now" value={totals.eligible} hint="3 needed per case" />
+                <Stat label="Approved" value={jurors.data!.length} hint={consts.data ? `of ${consts.data.maxJurors} max` : undefined} />
+                <Stat label="Can be drawn now" value={totals.eligible} hint={consts.data ? `${consts.data.seats} needed per case` : undefined} />
                 <Stat label="Staked" value={fmtUsdc(totals.total, { symbol: false })} />
                 <Stat label="Locked in cases" value={fmtUsdc(totals.locked, { symbol: false })} />
               </div>
@@ -98,9 +99,7 @@ function Body() {
                   </table>
                 </div>
               )}
-              <p className="text-xs text-muted">
-                A juror can be drawn when their free stake covers one case{seatStake !== undefined ? ` (${fmtUsdc(seatStake)})` : ""}. A deposit made after a draw’s selection block sits out that draw.
-              </p>
+              {seatStake !== undefined && <p className="text-xs text-muted">A juror can be drawn when their free stake covers one case ({fmtUsdc(seatStake)}).</p>}
             </>
           )}
         </section>
@@ -112,7 +111,11 @@ function Body() {
                 <Skeleton className="h-24" />
               ) : !me.data.approved ? (
                 <Notice tone="neutral" title="This address isn’t an approved juror">
-                  The market owner approves juror addresses. Anyone can browse the pool; only approved addresses can stake and be drawn.
+                  {consts.data ? (
+                    <>
+                      Juror addresses are approved by the market owner, <AddressLink address={consts.data.owner} />.
+                    </>
+                  ) : null}
                 </Notice>
               ) : (
                 <div className="space-y-5">
@@ -165,7 +168,7 @@ function Body() {
                 <dd className="font-mono tabular-nums">{fmtUsdc(params.data.jurorStake)}</dd>
                 <dt>Revealed vote</dt>
                 <dd>
-                  <span className="font-mono tabular-nums">{fmtUsdc(params.data.participationFee)}</span> from the case fee
+                  <span className="font-mono tabular-nums">{fmtUsdc(params.data.participationFee)}</span> of the <span className="font-mono tabular-nums">{fmtUsdc(params.data.caseFee)}</span> case fee
                 </dd>
                 <dt>Minority vote</dt>
                 <dd>loses {pct(params.data.minoritySlashBps)} of the case stake to the majority</dd>

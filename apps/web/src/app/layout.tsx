@@ -3,14 +3,14 @@ import { IBM_Plex_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { SiteHeader, SiteFooter } from "@/components/site-chrome";
+import { CHAIN_NAME } from "@/lib/config";
 
 const plexSans = IBM_Plex_Sans({ variable: "--font-plex-sans", subsets: ["latin"], weight: ["400", "500", "600"], display: "swap" });
 const jetbrainsMono = JetBrains_Mono({ variable: "--font-jetbrains-mono", subsets: ["latin"], display: "swap" });
 
 export const metadata: Metadata = {
   title: { default: "RL Environment Market", template: "%s · RL Environment Market" },
-  description:
-    "Buy reinforcement-learning environments before you can inspect them: signed TEE preview, on-chain escrow, encrypted key delivery, a protection window, AI-juror disputes, and purchase-linked reputation. Base Sepolia testnet.",
+  description: `Buy reinforcement-learning environments before you can inspect them: signed TEE preview, on-chain escrow, encrypted key delivery, a protection window, juror disputes, and purchase-linked reputation. On ${CHAIN_NAME}.`,
 };
 
 export const viewport: Viewport = {

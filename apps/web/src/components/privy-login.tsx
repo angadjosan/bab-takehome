@@ -5,7 +5,7 @@ import { useMemo, type ReactNode } from "react";
 import type { Address } from "viem";
 import { CHAIN_ID } from "@/lib/config";
 import { SponsorCtx, type Sponsor } from "@/lib/sponsor";
-import { PRIVY_APP_ID, PRIVY_SPONSOR_GAS } from "@/lib/wallet-mode";
+import { PRIVY_APP_ID, PRIVY_CREATE_ON_LOGIN, PRIVY_LOGIN_METHODS, PRIVY_SPONSOR_GAS } from "@/lib/wallet-mode";
 import { Spinner } from "./ui";
 
 /** Header "Sign in" for a build with no Privy app id: shown, but it can't open anything. */
@@ -41,7 +41,10 @@ function LoginPromptBody({ why, ready, authenticated, onLogin }: { why?: string;
         </button>
       )}
       <p className="text-xs leading-relaxed text-muted">
-        Use your email or a wallet you already have. Signing in with email creates a wallet for you{PRIVY_SPONSOR_GAS ? " and covers its network fees" : ""}; you can export its key later.
+        Use {PRIVY_LOGIN_METHODS.map((m) => (m === "email" ? "your email" : "a wallet you already have")).join(" or ")}.
+        {PRIVY_LOGIN_METHODS.includes("email") && PRIVY_CREATE_ON_LOGIN === "users-without-wallets" && (
+          <> Signing in with email creates a wallet for you{PRIVY_SPONSOR_GAS ? " and covers its network fees" : ""}; you can export its key later.</>
+        )}
       </p>
     </div>
   );

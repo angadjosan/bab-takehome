@@ -5,6 +5,7 @@ import { Suspense, useMemo, useState } from "react";
 import { DeploymentGate } from "@/components/gate";
 import { EventList } from "@/components/events";
 import { Notice, PageHeader, Skeleton, cx } from "@/components/ui";
+import { deployment } from "@/lib/config";
 import { useMarketEvents } from "@/lib/market";
 
 const FILTERS: { key: string; label: string; names: string[] | null }[] = [
@@ -22,7 +23,7 @@ const FILTERS: { key: string; label: string; names: string[] | null }[] = [
 export default function ActivityPage() {
   return (
     <div className="space-y-8">
-      <PageHeader title="Activity">Every market event, read from the chain and decoded in your browser. The list updates every 12 seconds.</PageHeader>
+      <PageHeader title="Activity">{deployment ? <>Every event from the market contract since block {deployment.startBlock.toString()}.</> : null}</PageHeader>
       <DeploymentGate>
         <Suspense fallback={<FeedSkeleton />}>
           <Feed />

@@ -11,7 +11,7 @@ import { chain, CHAIN_ID, deployment, RPC_URL } from "@/lib/config";
 import { publicClient } from "@/lib/client";
 import { burner } from "@/lib/burner";
 import { setTokenMeta, tokenMeta } from "@/lib/token";
-import { DEV_TOOLS, PRIVY_APP_ID, PRIVY_CLIENT_ID } from "@/lib/wallet-mode";
+import { DEV_TOOLS, PRIVY_APP_ID, PRIVY_CLIENT_ID, PRIVY_CREATE_ON_LOGIN, PRIVY_LOGIN_METHODS } from "@/lib/wallet-mode";
 import { PrivySponsorBridge } from "./privy-login";
 
 /* ------------------------------------ wallet mode ------------------------------------ */
@@ -112,8 +112,8 @@ function PrivyTree({ qc, children }: { qc: QueryClient; children: ReactNode }) {
       appId={PRIVY_APP_ID}
       clientId={PRIVY_CLIENT_ID || undefined}
       config={{
-        loginMethods: ["email", "wallet"],
-        embeddedWallets: { ethereum: { createOnLogin: "users-without-wallets" } },
+        loginMethods: PRIVY_LOGIN_METHODS,
+        embeddedWallets: { ethereum: { createOnLogin: PRIVY_CREATE_ON_LOGIN } },
         defaultChain: chain,
         supportedChains: [chain],
         appearance: { theme: "dark", accentColor: "#f59e0b" },

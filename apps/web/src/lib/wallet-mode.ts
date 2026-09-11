@@ -17,6 +17,10 @@ import { CHAIN_ID } from "./config";
 export const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID || "";
 export const PRIVY_CLIENT_ID = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID || "";
 export const PRIVY_SPONSOR_GAS = process.env.NEXT_PUBLIC_PRIVY_SPONSOR_GAS === "1";
+/** Privy login methods passed to PrivyProvider; the sign-in copy is built from the same list. */
+export const PRIVY_LOGIN_METHODS: ("email" | "wallet")[] = ["email", "wallet"];
+/** Privy embedded-wallet creation policy passed to PrivyProvider. */
+export const PRIVY_CREATE_ON_LOGIN = "users-without-wallets" as const;
 
 /** Local anvil chain: plain wagmi + burner keys instead of Privy. Fixed at build time, so server and client agree. */
 export const DEV_TOOLS = CHAIN_ID === 31337;

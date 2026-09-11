@@ -16,11 +16,11 @@ import { deployment } from "@/lib/config";
 import { eqHash } from "@/lib/crypto";
 import { fmtDec, fmtTime, fmtUsdc, shortAddr } from "@/lib/format";
 import {
-  QUALIFY_THRESHOLD,
   concentration,
   isZeroHash,
   readOptional,
   tradeRows,
+  useMarketConstants,
   useMarketEvents,
   usePreviewInfo,
   usePurchase,
@@ -53,6 +53,7 @@ function Body({ a }: { a: Address }) {
   const stake = useSellerStake(a);
   const score = useSellerScore(a);
   const stats = useSellerStats(a);
+  const threshold = useMarketConstants().data?.qualifyThreshold;
   const events = useMarketEvents();
   const rows = useMemo(() => (events.data ? tradeRows(events.data) : []), [events.data]);
   const sales = rows.filter((r) => r.seller?.toLowerCase() === a.toLowerCase());
@@ -111,7 +112,6 @@ function Body({ a }: { a: Address }) {
           <h2 id="action-title" className="text-sm font-semibold text-ink">
             Open sales
           </h2>
-          <p className="text-xs text-muted">Anyone can move these along: release payment once the buyer’s protection window ends, or refund a buyer whose key never arrived.</p>
           <ul className="card divide-y divide-line">
             {[...open].reverse().map((r) => (
               <KeeperRow key={r.purchaseId.toString()} id={r.purchaseId} />
@@ -121,7 +121,7 @@ function Body({ a }: { a: Address }) {
       )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <Card title="Reputation" subtitle="From completed sales only, and tied to this wallet.">
+        <Card title="Reputation">
           {!s || !stats.data ? (
             <Skeleton className="h-32" />
           ) : (
@@ -139,25 +139,25 @@ function Body({ a }: { a: Address }) {
                   )
                 ) : (
                   <div className="text-base font-medium text-ink">
-                    New seller · <span className="font-mono tabular-nums">{n}</span> of {QUALIFY_THRESHOLD.toString()} sales
+                    New seller · <span className="font-mono tabular-nums">{n}</span>
+                    {threshold !== undefined ? ` of ${threshold.toString()}` : ""} completed sales
                   </div>
                 )}
-                {!s.eligible && (
+                {!s.eligible && threshold !== undefined && threshold > 0n && (
                   <div
                     role="progressbar"
                     aria-label="Completed sales toward a seller score"
                     aria-valuemin={0}
-                    aria-valuemax={Number(QUALIFY_THRESHOLD)}
+                    aria-valuemax={Number(threshold)}
                     aria-valuenow={n}
                     className="h-1.5 w-full max-w-md overflow-hidden rounded-full bg-panel-2"
                   >
-                    <div className="h-1.5 rounded-full bg-accent" style={{ width: `${Math.min(100, n)}%` }} />
+                    <div className="h-1.5 rounded-full bg-accent" style={{ width: `${Math.min(100, (n * 100) / Number(threshold))}%` }} />
                   </div>
                 )}
-                <p className="max-w-[70ch] text-xs leading-relaxed text-muted">
-                  A sale counts once it’s delivered, completed and leaves the seller paid. The seller score appears after 100 of them: the average star rating, weighted by what each buyer
-                  paid. Unrated sales add nothing.
-                </p>
+                {!s.eligible && threshold !== undefined && (
+                  <p className="max-w-[70ch] text-xs leading-relaxed text-muted">The seller score appears after {threshold.toString()} completed sales.</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
                 <Stat label="Completed sales" value={n} />
@@ -169,7 +169,7 @@ function Body({ a }: { a: Address }) {
           )}
         </Card>
 
-        <Card title="Stake" subtitle="Collateral that backs open sales. More stake allows more sales at once; it isn’t a quality score.">
+        <Card title="Stake" subtitle="Collateral that backs open sales.">
           {!stake.data ? (
             <Skeleton className="h-28" />
           ) : (
@@ -213,7 +213,7 @@ function Body({ a }: { a: Address }) {
           {versions.isLoading ? (
             <Skeleton className="h-16" />
           ) : !hasVersions ? (
-            <p className="text-sm text-muted">No environments listed yet. Listings are created with the seller agent (see the repository README).</p>
+            <p className="text-sm text-muted">No environments listed yet.</p>
           ) : (
             <ul className="card divide-y divide-line">
               {[...versions.data!].reverse().map((id) => (
@@ -252,7 +252,7 @@ function Body({ a }: { a: Address }) {
             {a}
           </p>
         </DetailSection>
-        <DetailSection title="Who buys from this seller" hint="Worked out in your browser from purchase and settlement events since the deployment block. It can’t prove that different wallets have different owners, so trading between related wallets is still possible.">
+        <DetailSection title="Who buys from this seller" hint={`From purchase and settlement events since block ${deployment?.startBlock.toString() ?? "0"}. Wallets with the same owner can’t be told apart.`}>
           {events.isLoading ? (
             <Skeleton className="h-20" />
           ) : (
@@ -423,7 +423,7 @@ function PreviewActions({ versionId, paid, reclaimable, deadline }: { versionId:
     setErr(null);
     try {
       const r = await startPreview(versionId);
-      setRunMsg(r === "running" ? "The preview is running. It takes a few minutes; the report is published on-chain when it finishes." : "The TEE already has a report for this environment and is publishing it.");
+      setRunMsg(r === "running" ? "The preview is running. The report is published on-chain when it finishes." : "The TEE already has a report for this environment and is publishing it.");
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -434,7 +434,7 @@ function PreviewActions({ versionId, paid, reclaimable, deadline }: { versionId:
       <div className="space-y-3 rounded-md bg-panel-2 p-3.5 text-[13px]">
         {!paid ? (
           <>
-            <p className="text-muted">Get a signed preview. The TEE quotes the model cost, you pay it, and it runs the reference models on your environment. Buyers can’t purchase until it’s done.</p>
+            <p className="text-muted">No preview report yet, so buyers can’t purchase. Get a quote from the TEE, then pay it to start the run.</p>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 className={quote ? "btn btn-sm" : "btn btn-primary btn-sm"}
@@ -477,7 +477,7 @@ function PreviewActions({ versionId, paid, reclaimable, deadline }: { versionId:
           </>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-muted">Preview paid. If it didn’t start, or the TEE restarted, start it again. A finished run is cached.</span>
+            <span className="text-muted">Preview paid. If no report appears, start it again.</span>
             <button className="btn btn-sm" onClick={runPreview}>
               Start preview
             </button>

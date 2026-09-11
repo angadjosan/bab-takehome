@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useAccount, useChainId, useConnect, useDisconnect, useReadContract, useSwitchChain } from "wagmi";
-import { CHAIN_ID, CHAIN_NAME, deployment, IS_MAINNET, GAS_FAUCET_URL } from "@/lib/config";
+import { CHAIN_ID, CHAIN_NAME, deployment, GAS_FAUCET_URL, NATIVE_SYMBOL, TEE_TRUST_URL, TEST_TOKEN } from "@/lib/config";
 import { tokenAbi } from "@/lib/abi";
 import { BURNER_CONNECTOR_ID } from "@/lib/burner";
 import { fmtTime, fmtUsdc, shortAddr } from "@/lib/format";
@@ -23,12 +23,10 @@ const NAV = [
   { href: "/jurors", label: "Jurors" },
 ];
 
-/** The full trust model lives in the repository README; the app keeps short disclosures inline. */
-const TRUST_MODEL_URL = "https://github.com/angadjosan/bab-takehome#readme";
-
 export function SiteHeader() {
   const path = usePathname();
   const { mode, devTools } = useWalletMode();
+  const token = useTokenInfo();
   const isActive = (href: string) => (href === "/" ? path === "/" || path.startsWith("/listing") : path.startsWith(href));
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-bg">
@@ -64,7 +62,7 @@ export function SiteHeader() {
           </NavLink>
         ))}
       </nav>
-      {!IS_MAINNET && <TestnetBanner />}
+      {(TEST_TOKEN || token.hasFaucet) && <TestnetBanner />}
     </header>
   );
 }
@@ -86,8 +84,9 @@ function NavLink({ href, active, compact, children }: { href: string; active: bo
 }
 
 /**
- * Always-visible test-mode strip: the token is worth nothing, the faucet for the connected wallet
- * (rate-limited on-chain; shows when it can be used again), and test ETH for gas unless gas is sponsored.
+ * Test-token strip, shown when the deployment file marks the token as a test token or the token
+ * exposes a public faucet: the faucet for the connected wallet (rate-limited on-chain; shows when it
+ * can be used again), and a gas faucet link when one is configured and gas isn't sponsored.
  */
 function TestnetBanner() {
   const { address, isConnected } = useAccount();
@@ -129,7 +128,7 @@ function TestnetBanner() {
           ))}
         {!sponsored && GAS_FAUCET_URL && (
           <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-muted underline decoration-line-strong underline-offset-[3px] hover:text-ink hover:decoration-accent">
-            Test ETH for fees <IconExternal className="h-3 w-3" />
+            {NATIVE_SYMBOL} for fees <IconExternal className="h-3 w-3" />
           </a>
         )}
       </div>
@@ -293,13 +292,19 @@ export function SiteFooter() {
     <footer className="border-t border-line pb-[env(safe-area-inset-bottom)]">
       <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 text-xs text-muted sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <p className="leading-relaxed">
-          <span className="font-medium text-ink">RL Environment Market</span> · test market on {CHAIN_NAME}, <span translate="no">{token.symbol}</span> has no value. Every number
-          here is read live from the chain or the TEE and checked in your browser.
+          <span className="font-medium text-ink">RL Environment Market</span> · {CHAIN_NAME}
+          {(TEST_TOKEN || token.hasFaucet) && (
+            <>
+              , <span translate="no">{token.symbol}</span> has no value
+            </>
+          )}
         </p>
         <nav aria-label="Footer" className="flex shrink-0 flex-wrap items-start gap-x-4 gap-y-2">
-          <a href={TRUST_MODEL_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-ink">
-            Trust model <IconExternal className="h-3 w-3" />
-          </a>
+          {TEE_TRUST_URL && (
+            <a href={TEE_TRUST_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-ink">
+              TEE attestation <IconExternal className="h-3 w-3" />
+            </a>
+          )}
           <Link href="/keys" className="hover:text-ink">
             Delivery keys
           </Link>

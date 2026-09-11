@@ -3,21 +3,17 @@ import { base, baseSepolia, foundry } from "viem/chains";
 import { generatedDeployments } from "@/generated/contracts";
 
 /**
- * Chain selection. Everything chain-specific (RPC, explorer, token, addresses) derives from
- * NEXT_PUBLIC_CHAIN_ID. Supported: 84532 Base Sepolia (default: the public testnet deployment with
- * TestUSDC), 31337 local Anvil, and 8453 Base mainnet (supported, unused).
+ * Chain selection. Everything chain-specific derives from NEXT_PUBLIC_CHAIN_ID, or, when it is unset,
+ * from the single chain deployment synced into src/generated. Chain name, default RPC, explorer and
+ * native-currency symbol come from viem's chain definitions and the deployment file; nothing is
+ * mapped by hand here.
  */
-export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 84532);
-/** Gas for testnet users: Base Sepolia ETH faucets listed by Base. */
-export const GAS_FAUCET_URL = CHAIN_ID === 84532 ? "https://docs.base.org/base-chain/tools/network-faucets" : null;
+const syncedChainIds = Object.keys(generatedDeployments).filter((k) => /^\d+$/.test(k));
+export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || (syncedChainIds.length === 1 ? syncedChainIds[0] : 0));
 
-const DEFAULT_RPC: Record<number, string> = {
-  8453: "https://mainnet.base.org",
-  84532: "https://sepolia.base.org",
-  31337: "http://127.0.0.1:8545",
-};
+const KNOWN: Record<number, Chain> = { [base.id]: base, [baseSepolia.id]: baseSepolia, [foundry.id]: foundry };
 
-export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || DEFAULT_RPC[CHAIN_ID] || "";
+export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || KNOWN[CHAIN_ID]?.rpcUrls.default.http[0] || "";
 const PUBLIC_TEE_URL = (process.env.NEXT_PUBLIC_TEE_URL || "").replace(/\/+$/, "");
 /**
  * Base URL the browser uses for the TEE API: the TEE itself when it is served over https, otherwise
@@ -32,9 +28,8 @@ export const TEE_VIA_PROXY = TEE_URL === "/api/tee";
  * The app pings its POST /api/wake right after a dispute opens so jurors start immediately (the
  * service's own sweep catches anything missed). Empty string disables the ping.
  */
-export const JURORS_URL = (process.env.NEXT_PUBLIC_JURORS_URL ?? (CHAIN_ID === 84532 ? "https://rl-env-market-jurors.vercel.app" : "")).replace(/\/+$/, "");
+export const JURORS_URL = (process.env.NEXT_PUBLIC_JURORS_URL ?? (CHAIN_ID === baseSepolia.id ? "https://rl-env-market-jurors.vercel.app" : "")).replace(/\/+$/, "");
 
-const KNOWN: Record<number, Chain> = { 8453: base, 84532: baseSepolia, 31337: foundry };
 const baseChain: Chain =
   KNOWN[CHAIN_ID] ??
   defineChain({
@@ -46,17 +41,13 @@ const baseChain: Chain =
 
 export const chain: Chain = { ...baseChain, rpcUrls: { ...baseChain.rpcUrls, default: { http: [RPC_URL] } } };
 
-export const CHAIN_NAME = CHAIN_ID === 8453 ? "Base" : CHAIN_ID === 84532 ? "Base Sepolia" : CHAIN_ID === 31337 ? "Local Anvil" : chain.name;
+/** Display name of the chain, from viem's chain definition. */
+export const CHAIN_NAME = chain.name;
+/** Symbol of the chain's gas currency, from viem's chain definition. */
+export const NATIVE_SYMBOL = chain.nativeCurrency.symbol;
 /** Real money: mainnet USDC. Copy across the app changes accordingly. */
-export const IS_MAINNET = CHAIN_ID === 8453;
-export const IS_LOCAL = CHAIN_ID === 31337;
-
-const EXPLORERS: Record<number, string> = { 8453: "https://basescan.org", 84532: "https://sepolia.basescan.org" };
-export const EXPLORER: string | null = EXPLORERS[CHAIN_ID] ?? null;
-
-export const txUrl = (hash: string) => (EXPLORER ? `${EXPLORER}/tx/${hash}` : null);
-export const addressUrl = (addr: string) => (EXPLORER ? `${EXPLORER}/address/${addr}` : null);
-export const blockUrl = (n: bigint | number) => (EXPLORER ? `${EXPLORER}/block/${n}` : null);
+export const IS_MAINNET = CHAIN_ID === base.id;
+export const IS_LOCAL = CHAIN_ID === foundry.id;
 
 export type Deployment = {
   chainId: number;
@@ -118,3 +109,26 @@ function loadDeployment(): Deployment | null {
 }
 
 export const deployment = loadDeployment();
+
+/** The deployment file marks the payment token as a valueless test token (`testToken: true`). */
+export const TEST_TOKEN = deployment?.raw.testToken === true;
+
+const str = (v: unknown) => (typeof v === "string" && /^https?:\/\//.test(v) ? v.replace(/\/+$/, "") : null);
+const deploymentExplorer = Array.isArray(deployment?.raw.explorers) ? str((deployment!.raw.explorers as { base?: unknown }[])[0]?.base) : null;
+
+/** Block explorer: the deployment file's first explorer, else viem's default for the chain. */
+export const EXPLORER: string | null = deploymentExplorer ?? str(chain.blockExplorers?.default.url);
+
+export const txUrl = (hash: string) => (EXPLORER ? `${EXPLORER}/tx/${hash}` : null);
+export const addressUrl = (addr: string) => (EXPLORER ? `${EXPLORER}/address/${addr}` : null);
+export const blockUrl = (n: bigint | number) => (EXPLORER ? `${EXPLORER}/block/${n}` : null);
+
+/** Where to get gas on a test chain: NEXT_PUBLIC_GAS_FAUCET_URL, or the deployment file's `gasFaucetUrl`. None otherwise. */
+export const GAS_FAUCET_URL: string | null = str(process.env.NEXT_PUBLIC_GAS_FAUCET_URL) ?? str(deployment?.raw.gasFaucetUrl);
+
+/** Public attestation page of the TEE serving this market, from the synced TEE deployment record. */
+const teeRecord = generatedDeployments["phala-tee"] as Record<string, unknown> | undefined;
+export const TEE_TRUST_URL: string | null =
+  teeRecord && Number(teeRecord.chainId) === CHAIN_ID && deployment && typeof teeRecord.market === "string" && teeRecord.market.toLowerCase() === deployment.market.toLowerCase()
+    ? str(teeRecord.trustUrl)
+    : null;

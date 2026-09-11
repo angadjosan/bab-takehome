@@ -4,10 +4,9 @@ import Link from "next/link";
 import { formatEther } from "viem";
 import { useAccount, useBalance, useReadContract } from "wagmi";
 import { marketAbi, tokenAbi } from "@/lib/abi";
-import { deployment, GAS_FAUCET_URL } from "@/lib/config";
+import { deployment, GAS_FAUCET_URL, NATIVE_SYMBOL, TEST_TOKEN } from "@/lib/config";
 import { fmtDec, fmtUsdc } from "@/lib/format";
 import { useClaimable } from "@/lib/market";
-import { tokenValueNote } from "@/lib/token";
 import { PRIVY_SPONSOR_GAS } from "@/lib/wallet-mode";
 import { useTokenInfo, useWalletMode } from "./providers";
 import { TxStatus, useTx } from "./tx";
@@ -40,21 +39,19 @@ export function AccountPanel({ onClose }: { onClose: () => void }) {
         </div>
         {claimable.data !== undefined && hasClaim && (
           <div className="mt-1.5 flex items-baseline justify-between gap-3">
-            <span className="text-muted" title="Refunds, returned deposits, sale proceeds and juror rewards wait here until you withdraw them.">
-              Ready to withdraw
-            </span>
+            <span className="text-muted">Ready to withdraw</span>
             <span className="font-mono font-medium text-warn tabular-nums">{fmtUsdc(claimable.data)}</span>
           </div>
         )}
         {!(mode === "privy" && PRIVY_SPONSOR_GAS) && (
           <div className="mt-1.5 flex items-baseline justify-between gap-3">
-            <span className="text-muted">Network fees (ETH)</span>
+            <span className="text-muted">Network fees ({NATIVE_SYMBOL})</span>
             <span className={cx("font-mono tabular-nums", ethLow ? "text-warn" : "text-muted")}>{eth.data === undefined ? "…" : fmtDec(Number(formatEther(eth.data.value)), 4)}</span>
           </div>
         )}
         {ethLow && !(mode === "privy" && PRIVY_SPONSOR_GAS) && GAS_FAUCET_URL && (
           <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="link mt-1 block text-[11px]">
-            Get free test ETH for fees
+            Get {NATIVE_SYMBOL} for fees
           </a>
         )}
         {hasClaim && deployment && (
@@ -71,7 +68,11 @@ export function AccountPanel({ onClose }: { onClose: () => void }) {
             <TxStatus state={faucet.state} />
           </>
         )}
-        <p className="mt-2 text-[11px] leading-relaxed text-muted">{tokenValueNote()}</p>
+        {(TEST_TOKEN || token.hasFaucet) && (
+          <p className="mt-2 text-[11px] leading-relaxed text-muted">
+            <span translate="no">{token.symbol}</span> is a test token with no value.
+          </p>
+        )}
       </div>
       <nav aria-label="Account" className="flex flex-col">
         <Link href={`/seller/${address}`} className="rounded px-1.5 py-1.5 transition-colors duration-150 hover:bg-panel-2" onClick={onClose}>

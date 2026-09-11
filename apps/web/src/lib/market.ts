@@ -21,9 +21,9 @@ export const GROUND_LABEL: Record<number, string> = {
   3: "Preview not reproducible",
 };
 export const GROUND_HELP: Record<number, string> = {
-  1: "The payload differs from its commitment, the key is invalid, the specified build fails, or the environment reproducibly crashes under its declared configuration. Re-checked by the mechanical verifier inside the TEE.",
-  2: "A specific numbered claim in the frozen description contradicts the product. Decided by three randomly drawn, staked AI jurors using commit–reveal voting.",
-  3: "Re-running the committed reference protocol deviates from the signed preview beyond the precommitted tolerance. Re-run by the TEE runner.",
+  1: "The payload differs from its commitment, the key is invalid, the specified build fails, or the environment reproducibly crashes under its declared configuration. Checked by the TEE verifier.",
+  2: "A specific numbered claim in the frozen description contradicts the product. Decided by staked jurors drawn at random.",
+  3: "Re-running the committed reference protocol deviates from the signed preview beyond the precommitted tolerance. Re-run by the TEE.",
 };
 export const isMechanical = (g: number) => g === 1 || g === 3;
 export const DISPUTE_STATUS = ["None", "Awaiting juror selection", "Voting / under review", "Resolved"] as const;
@@ -341,7 +341,12 @@ export async function fetchSellerStats(a: Address): Promise<SellerStats> {
   };
 }
 
-export const QUALIFY_THRESHOLD = 100n;
+/** Public constants of the deployed EnvMarket (never change after deployment). */
+export type MarketConstants = { seats: number; qualifyThreshold: bigint; maxJurors: number; owner: Address };
+export async function fetchMarketConstants(): Promise<MarketConstants> {
+  const [seats, threshold, maxJurors, owner] = await Promise.all([read("SEATS"), read("QUALIFYING_TX_THRESHOLD"), read("MAX_JURORS"), read("owner")]);
+  return { seats: num(seats), qualifyThreshold: big(threshold), maxJurors: num(maxJurors), owner: addr(owner) };
+}
 
 export async function fetchIsRunner(a: Address): Promise<boolean | undefined> {
   const v = await readOptional("isRunner", [a]);
@@ -475,6 +480,9 @@ export function useClaimable(a?: Address | null) {
 }
 export function useMarketParams() {
   return useQuery({ queryKey: ["params"], queryFn: fetchParams, enabled: on, staleTime: 60_000 });
+}
+export function useMarketConstants() {
+  return useQuery({ queryKey: ["market-constants"], queryFn: fetchMarketConstants, enabled: on, staleTime: Infinity });
 }
 export function useBlockNumber() {
   return useQuery({ queryKey: ["block"], queryFn: () => publicClient.getBlockNumber(), enabled: on, refetchInterval: 4_000 });
