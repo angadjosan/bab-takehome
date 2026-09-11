@@ -106,9 +106,6 @@ Requirements: Node 22, Foundry, Docker (sandbox for seller code), Python 3.12 wi
 # Full stack in the browser on a private anvil chain: deploy, TEE (local-dev), seller lists
 # py-repair-kit with a real Fireworks preview, 3 juror agents, web app on :3100.
 scripts/local-stack.sh                 # SKIP_PREVIEW=1 to skip inference; JURORS=1,2 to vote seat 3 by hand
-
-# The whole story headless (list, preview, buy, decrypt, dispute, jurors, refund, finalize, rate)
-agents/demo/local.sh                   # logs in agents/.data/local-run/<ts>/
 ```
 
 Web app against Base Sepolia: run `scripts/sync-web.sh`, then `cd apps/web && npm install && NEXT_PUBLIC_TEE_URL=<tee> npm run dev`. Env vars: `NEXT_PUBLIC_CHAIN_ID` (default 84532), `NEXT_PUBLIC_TEE_URL`, `NEXT_PUBLIC_PRIVY_APP_ID`, and optionally `NEXT_PUBLIC_PRIVY_SPONSOR_GAS=1` and `NEXT_PUBLIC_RPC_URL`. Agents send transactions on anvil and 84532 only, unless `ALLOW_LIVE_TX=1`.

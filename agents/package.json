@@ -10,7 +10,6 @@
   "scripts": {
     "seller": "tsx src/seller/cli.ts",
     "buyer": "tsx src/buyer/cli.ts",
-    "e2e": "tsx demo/e2e.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
