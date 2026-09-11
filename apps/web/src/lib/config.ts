@@ -24,11 +24,11 @@ const PUBLIC_TEE_URL = (process.env.NEXT_PUBLIC_TEE_URL || "").replace(/\/+$/, "
 export const TEE_URL = /^https:\/\//.test(PUBLIC_TEE_URL) ? PUBLIC_TEE_URL : "/api/tee";
 export const TEE_VIA_PROXY = TEE_URL === "/api/tee";
 /**
- * The juror service: a separate Vercel project running the three AI jurors as durable workflows.
- * The app pings its POST /api/wake right after a dispute opens so jurors start immediately (the
- * service's own sweep catches anything missed). Empty string disables the ping.
+ * The juror service (a separate Vercel project, NEXT_PUBLIC_JURORS_URL). The app pings its
+ * POST /api/wake right after a dispute opens so jurors start immediately (the service's own sweep
+ * catches anything missed). Unset disables the ping.
  */
-export const JURORS_URL = (process.env.NEXT_PUBLIC_JURORS_URL ?? (CHAIN_ID === baseSepolia.id ? "https://rl-env-market-jurors.vercel.app" : "")).replace(/\/+$/, "");
+export const JURORS_URL = (process.env.NEXT_PUBLIC_JURORS_URL ?? "").replace(/\/+$/, "");
 
 const baseChain: Chain =
   KNOWN[CHAIN_ID] ??

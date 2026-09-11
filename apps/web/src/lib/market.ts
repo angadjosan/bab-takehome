@@ -435,16 +435,6 @@ export async function fetchParams(): Promise<Params> {
   };
 }
 
-/** Mirrors EnvMarketViews._quote: requested = min(n × price/taskCount, cap); bond = clamp(requested, floor, cap). */
-export function disputeQuote(price: bigint, taskCount: number, selected: number, p: { refundCapBps: number; bondFloor: bigint; bondCap: bigint }) {
-  const perTask = taskCount ? price / BigInt(taskCount) : 0n;
-  const cap = (price * BigInt(p.refundCapBps)) / 10000n;
-  const raw = BigInt(selected) * perTask;
-  const requested = raw < cap ? raw : cap;
-  const bond = requested < p.bondFloor ? p.bondFloor : requested > p.bondCap ? p.bondCap : requested;
-  return { perTask, cap, requested, bond };
-}
-
 /* ---------------------------------- hooks ---------------------------------- */
 
 const on = !!deployment;
