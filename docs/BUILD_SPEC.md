@@ -24,12 +24,14 @@ demo path.
   is the runner/relay/verifier signer registered in EnvMarket. It sends txs to Base mainnet.
   Attestation evidence: app id + image digest on the EigenCloud verify dashboard and the
   AppController contract; the app also serves its attestation token at `/attestation`.
-- **Inference: OpenRouter** (`https://openrouter.ai/api/v1`, OpenAI-compatible, env
-  `OPENROUTER_API_KEY`), called from inside the TEE for the reference panel and validator, and by
-  the juror processes. Panel = the newest real OpenRouter model ids in the GLM, Kimi and Qwen
-  families (resolve at runtime from `GET /api/v1/models`, record the exact ids in the report; the
+- **Inference: Fireworks AI** (`https://api.fireworks.ai/inference/v1`, OpenAI-compatible
+  chat completions + tool calling, `Authorization: Bearer $FIREWORKS_API_KEY`), called from inside
+  the TEE for the reference panel and validator, and by the juror processes. (Supersedes an earlier
+  OpenRouter choice — any OpenRouter code should become a generic provider config defaulting to
+  Fireworks.) Panel = the newest real Fireworks model ids (`accounts/fireworks/models/...`) in the
+  GLM, Kimi and Qwen families (resolve at runtime from `GET /inference/v1/models`, record the exact ids in the report; the
   requested names "GLM 5.3 / Kimi K3 / Qwen 3.8" are recorded as `requested`). Validator = a
-  different model family (e.g. a DeepSeek or gpt-oss model), recorded in the report.
+  different model family (e.g. a DeepSeek or gpt-oss model on Fireworks), recorded in the report.
 - Env names: `BASE_RPC=https://mainnet.base.org`, `CHAIN_ID=8453`. Local tests: anvil 31337.
 
 Mainnet params (override the demo table below on 8453): price 2 USDC, collateral 2 USDC per sale,
