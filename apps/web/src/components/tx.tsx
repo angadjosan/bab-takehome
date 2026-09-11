@@ -83,7 +83,7 @@ export function TxStatus({ state }: { state: TxState }) {
       {state.status === "error" ? (
         <>
           <ErrorText error={{ message: friendlyError(state.error) }} />
-          {state.hash && <TxLink hash={state.hash} label="view transaction" />}
+          {state.hash && <TxLink hash={state.hash} label="view the failed transaction" />}
         </>
       ) : (
         <div className="flex flex-wrap items-center gap-2 text-muted">

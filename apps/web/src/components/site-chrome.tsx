@@ -162,6 +162,8 @@ function WagmiWalletButton() {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const { data: bal } = useReadContract({
     address: deployment?.token,
     abi: tokenAbi,
@@ -175,7 +177,11 @@ function WagmiWalletButton() {
   useEffect(() => setMounted(true), []);
   useEffect(() => {
     const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
-    const k = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const k = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || !ref.current?.contains(document.activeElement)) return;
+      setOpen(false);
+      triggerRef.current?.focus(); // return focus to the control that opened the panel
+    };
     document.addEventListener("mousedown", h);
     document.addEventListener("keydown", k);
     return () => {
@@ -183,6 +189,11 @@ function WagmiWalletButton() {
       document.removeEventListener("keydown", k);
     };
   }, []);
+
+  // move keyboard focus into the panel when it opens
+  useEffect(() => {
+    if (open) panelRef.current?.querySelector<HTMLElement>("button, a[href], summary, input")?.focus();
+  }, [open]);
 
   if (!mounted)
     return (
@@ -198,7 +209,7 @@ function WagmiWalletButton() {
   return (
     <div className="relative" ref={ref}>
       {!isConnected ? (
-        <button className="btn btn-sm" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)} disabled={isPending}>
+        <button className="btn btn-sm" ref={triggerRef} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)} disabled={isPending}>
           {isPending ? "Connecting…" : "Connect wallet"}
         </button>
       ) : wrongChain ? (
@@ -206,13 +217,18 @@ function WagmiWalletButton() {
           {switching ? "Switching…" : "Switch network"}
         </button>
       ) : (
-        <button className="btn btn-sm" aria-haspopup="dialog" aria-expanded={open} aria-label={`Account menu${hasClaim ? ", you have funds to withdraw" : ""}`} onClick={() => setOpen((o) => !o)}>
+        <button className="btn btn-sm" ref={triggerRef} aria-haspopup="dialog" aria-expanded={open} aria-label={`Account menu${hasClaim ? ", you have funds to withdraw" : ""}`} onClick={() => setOpen((o) => !o)}>
           <span aria-hidden className={cx("h-1.5 w-1.5 rounded-full", hasClaim ? "bg-warn" : "bg-ok")} />
           <span className="font-mono tabular-nums">{bal !== undefined ? fmtUsdc(bal as bigint) : shortAddr(address)}</span>
         </button>
       )}
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] overscroll-contain rounded-md bg-panel p-2 [box-shadow:var(--overlay-shadow)]">
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-label={isConnected ? "Your account" : "Connect a wallet"}
+          className="absolute right-0 z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] overscroll-contain rounded-md bg-panel p-2 [box-shadow:var(--overlay-shadow)]"
+        >
           {!isConnected ? (
             <>
               <p className="px-2 pt-1 pb-2 text-xs leading-relaxed text-muted">Browsing needs no wallet. You need one to buy, report a problem, release a payment, rate, or withdraw.</p>

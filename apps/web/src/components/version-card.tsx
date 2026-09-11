@@ -104,22 +104,16 @@ export function EnvRating({ stats, className }: { stats?: VersionStats; classNam
 }
 
 /** Seller standing in one line: new/eligible, sales count, stake. The address links to the account page. */
-export function SellerLine({ seller, link = false }: { seller: `0x${string}`; link?: boolean }) {
+export function SellerLine({ seller }: { seller: `0x${string}` }) {
   const stake = useSellerStake(seller);
   const score = useSellerScore(seller);
   const n = score.data?.qualifyingTx;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted">
       <span>Sold by</span>
-      {link ? (
-        <Link href={`/seller/${seller}`} className="link font-mono" translate="no" title={seller}>
-          {shortAddr(seller)}
-        </Link>
-      ) : (
-        <span className="font-mono text-ink" translate="no" title={seller}>
-          {shortAddr(seller)}
-        </span>
-      )}
+      <Link href={`/seller/${seller}`} className="link font-mono" translate="no" title={seller}>
+        {shortAddr(seller)}
+      </Link>
       {!score.data ? (
         <span>…</span>
       ) : score.data.eligible ? (

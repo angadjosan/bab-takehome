@@ -10,7 +10,7 @@ const jetbrainsMono = JetBrains_Mono({ variable: "--font-jetbrains-mono", subset
 export const metadata: Metadata = {
   title: { default: "RL Environment Market", template: "%s · RL Environment Market" },
   description:
-    "Buy reinforcement-learning environments before you can inspect them: signed TEE preview, on-chain escrow, encrypted key delivery, a challenge window, AI-juror disputes, and purchase-linked reputation. Base Sepolia testnet.",
+    "Buy reinforcement-learning environments before you can inspect them: signed TEE preview, on-chain escrow, encrypted key delivery, a protection window, AI-juror disputes, and purchase-linked reputation. Base Sepolia testnet.",
 };
 
 export const viewport: Viewport = {

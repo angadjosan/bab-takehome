@@ -166,14 +166,25 @@ export function Mono({ children, className }: { children: ReactNode; className?:
   );
 }
 
-/** A 32-byte hash: truncated (full value in the title and on copy), or wrapped in full. */
-export function HashValue({ value, full, n }: { value?: string | null; full?: boolean; n?: number }) {
+/** A 32-byte hash, truncated; the full value is in the title and on copy. */
+export function HashValue({ value, n }: { value?: string | null; n?: number }) {
   if (!value) return <span className="text-faint">—</span>;
   return (
     <span className="inline-flex max-w-full min-w-0 items-center gap-0.5 align-middle">
-      <Mono className={full ? "[overflow-wrap:anywhere]" : "whitespace-nowrap"}>
-        <span title={full ? undefined : value}>{full ? value : shortHash(value, n)}</span>
+      <Mono className="whitespace-nowrap">
+        <span title={value}>{shortHash(value, n)}</span>
       </Mono>
+      <CopyButton value={value} label="hash" />
+    </span>
+  );
+}
+
+/** A hash shown in full, wrapping anywhere (commitment lists). */
+export function FullHash({ value }: { value?: string | null }) {
+  if (!value) return <span className="text-faint">—</span>;
+  return (
+    <span className="inline-flex max-w-full min-w-0 items-center gap-0.5 align-middle">
+      <Mono className="[overflow-wrap:anywhere]">{value}</Mono>
       <CopyButton value={value} label="hash" />
     </span>
   );
@@ -208,7 +219,7 @@ export function TxLink({ hash, label }: { hash?: string | null; label?: string }
   const u = txUrl(hash);
   const text = label ?? shortHash(hash, 6);
   return u ? (
-    <a href={u} target="_blank" rel="noreferrer" translate="no" title={hash} className="inline-flex items-center gap-1 font-mono text-xs text-muted underline decoration-line-strong underline-offset-[3px] transition-colors duration-150 hover:text-ink hover:decoration-accent">
+    <a href={u} target="_blank" rel="noreferrer" translate="no" title={hash} aria-label={`${label ?? `Transaction ${shortHash(hash, 6)}`}, opens the block explorer`} className="inline-flex items-center gap-1 font-mono text-xs text-muted underline decoration-line-strong underline-offset-[3px] transition-colors duration-150 hover:text-ink hover:decoration-accent">
       {text}
       <IconExternal className="h-3 w-3" />
     </a>
@@ -298,7 +309,7 @@ export function BackLink({ href, children }: { href: string; children: ReactNode
   );
 }
 
-export function Card({ title, subtitle, action, children, className, pad = true, id }: { title?: ReactNode; subtitle?: ReactNode; action?: ReactNode; children: ReactNode; className?: string; pad?: boolean; id?: string }) {
+export function Card({ title, subtitle, action, children, className, id }: { title?: ReactNode; subtitle?: ReactNode; action?: ReactNode; children: ReactNode; className?: string; id?: string }) {
   return (
     <section id={id} className={cx("card min-w-0", className)}>
       {(title || action) && (
@@ -310,7 +321,7 @@ export function Card({ title, subtitle, action, children, className, pad = true,
           {action}
         </header>
       )}
-      <div className={pad ? "card-pad" : ""}>{children}</div>
+      <div className="card-pad">{children}</div>
     </section>
   );
 }
@@ -326,10 +337,20 @@ export function IconChevron({ className = "h-4 w-4" }: IconProps) {
 /**
  * The one place crypto detail lives: a collapsed disclosure with a plain summary line
  * (e.g. "✓ Verified in your browser · 9 checks"). Hashes, addresses, signatures and tx links go inside.
+ * Children mount on first open (then stay mounted), so hidden panels don't render or fetch on page load.
  */
 export function Details({ summary, status, children, defaultOpen, id, className }: { summary: ReactNode; status?: "ok" | "bad" | "pending" | "neutral"; children: ReactNode; defaultOpen?: boolean; id?: string; className?: string }) {
+  const [opened, setOpened] = useState(false);
+  const mounted = opened || !!defaultOpen;
   return (
-    <details id={id} open={defaultOpen} className={cx("group card overflow-hidden", className)}>
+    <details
+      id={id}
+      open={defaultOpen}
+      onToggle={(e) => {
+        if (e.currentTarget.open) setOpened(true);
+      }}
+      className={cx("group card overflow-hidden", className)}
+    >
       <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 transition-colors duration-150 select-none hover:bg-panel-2 sm:px-5 [&::-webkit-details-marker]:hidden">
         {status === "ok" ? (
           <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ok-soft text-ok">
@@ -349,7 +370,7 @@ export function Details({ summary, status, children, defaultOpen, id, className 
           <IconChevron className="h-3.5 w-3.5 transition-transform duration-150 group-open:rotate-90" />
         </span>
       </summary>
-      <div className="space-y-6 border-t border-line px-4 py-4 sm:px-5 sm:py-5">{children}</div>
+      <div className="space-y-6 border-t border-line px-4 py-4 sm:px-5 sm:py-5">{mounted ? children : null}</div>
     </details>
   );
 }

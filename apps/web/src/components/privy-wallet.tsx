@@ -22,6 +22,8 @@ export function PrivyWalletButton() {
   const [open, setOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const { data: bal } = useReadContract({
     address: deployment?.token,
     abi: tokenAbi,
@@ -32,7 +34,11 @@ export function PrivyWalletButton() {
   const claimable = useClaimable(address);
   useEffect(() => {
     const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
-    const k = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const k = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || !ref.current?.contains(document.activeElement)) return;
+      setOpen(false);
+      triggerRef.current?.focus(); // return focus to the control that opened the panel
+    };
     document.addEventListener("mousedown", h);
     document.addEventListener("keydown", k);
     return () => {
@@ -40,6 +46,10 @@ export function PrivyWalletButton() {
       document.removeEventListener("keydown", k);
     };
   }, []);
+  // move keyboard focus into the panel when it opens
+  useEffect(() => {
+    if (open) panelRef.current?.querySelector<HTMLElement>("button, a[href], summary, input")?.focus();
+  }, [open]);
 
   if (!ready)
     return (
@@ -61,12 +71,25 @@ export function PrivyWalletButton() {
 
   return (
     <div className="relative" ref={ref}>
-      <button className="btn btn-sm" aria-haspopup="dialog" aria-expanded={open} aria-label={`Account menu${hasClaim ? ", you have funds to withdraw" : ""}`} onClick={() => setOpen((o) => !o)}>
+      <button
+        ref={triggerRef}
+        className="btn btn-sm"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`Account menu${hasClaim ? ", you have funds to withdraw" : ""}`}
+        title={hasClaim ? "You have funds to withdraw" : "Your account"}
+        onClick={() => setOpen((o) => !o)}
+      >
         <span aria-hidden className={cx("h-1.5 w-1.5 rounded-full", hasClaim ? "bg-warn" : "bg-ok")} />
         <span className="font-mono tabular-nums">{bal !== undefined ? fmtUsdc(bal as bigint) : active ? shortAddr(active) : "Account"}</span>
       </button>
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] space-y-3 overscroll-contain rounded-md bg-panel p-3 [box-shadow:var(--overlay-shadow)]">
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-label="Your account"
+          className="absolute right-0 z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] space-y-3 overscroll-contain rounded-md bg-panel p-3 [box-shadow:var(--overlay-shadow)]"
+        >
           <div className="text-xs text-muted">
             Signed in as <span className="text-ink [overflow-wrap:anywhere]">{who}</span>
           </div>

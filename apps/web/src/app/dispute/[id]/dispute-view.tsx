@@ -847,8 +847,8 @@ function JuryDetails({ d, events }: { d: Dispute; events: MarketEvent[] }) {
                 <tr>
                   <th scope="col">Seat</th>
                   <th scope="col">Address</th>
-                  <th scope="col">Vote tx</th>
-                  <th scope="col">Reveal tx</th>
+                  <th scope="col">Vote transaction</th>
+                  <th scope="col">Reveal transaction</th>
                 </tr>
               </thead>
               <tbody>
@@ -884,7 +884,7 @@ function SelectionRow({ sel }: { sel: MarketEvent }) {
       <dt>Round {String(sel.args.round)} seed</dt>
       <dd className="flex flex-wrap items-center gap-2">
         <HashValue value={String(sel.args.seed ?? "")} />
-        <TxLink hash={sel.transactionHash} label="draw tx" />
+        <TxLink hash={sel.transactionHash} label="jury draw transaction" />
       </dd>
     </>
   );

@@ -7,7 +7,7 @@ import { DeploymentGate, TeeMissingNotice } from "@/components/gate";
 import { BuyPanel } from "@/components/buy-panel";
 import { ReportDetails, ReportScores, useReportCheck } from "@/components/report-panel";
 import { EnvRating, SellerLine } from "@/components/version-card";
-import { AddressLink, BackLink, Chip, DetailSection, Details, Empty, HashValue, Notice, Skeleton, Verified } from "@/components/ui";
+import { AddressLink, BackLink, Chip, DetailSection, Details, Empty, FullHash, HashValue, Notice, Skeleton, Verified } from "@/components/ui";
 import { describe, useDoc } from "@/lib/docs";
 import { fmtTime, fmtUsdc, fmtWindow, pct } from "@/lib/format";
 import { isZeroHash, readOptional, useMarketParams, usePreviewInfo, useVersion, useVersionStats, type Version } from "@/lib/market";
@@ -199,7 +199,7 @@ function TrackRecord({ v }: { v: Version }) {
   const s = useVersionStats(v.id);
   return (
     <section aria-label="Track record" className="space-y-2 px-1 text-xs">
-      <SellerLine seller={v.seller} link />
+      <SellerLine seller={v.seller} />
       {!s.data ? (
         <Skeleton className="h-4 w-48" />
       ) : (
@@ -261,7 +261,7 @@ function DescriptionDetails({ v }: { v: Version }) {
         />
         {q.data && (
           <a href={q.data.url} target="_blank" rel="noreferrer" className="link">
-            Raw description.json
+            Open the original description.json
           </a>
         )}
         {q.error && <span className="text-bad">{(q.error as Error).message}</span>}
@@ -358,7 +358,7 @@ function ManifestDetails({ v }: { v: Version }) {
         )}
         {q.data && (
           <a href={q.data.url} target="_blank" rel="noreferrer" className="link">
-            Raw manifest.json
+            Open the original manifest.json
           </a>
         )}
       </div>
@@ -411,7 +411,7 @@ function Commitments({ v }: { v: Version }) {
           <div key={k} className="grid gap-1 sm:grid-cols-[9rem_minmax(0,1fr)]">
             <dt className="font-mono text-xs text-muted">{k}</dt>
             <dd className="min-w-0">
-              <HashValue value={val} full />
+              <FullHash value={val} />
               <div className="text-xs text-muted">{hint}</div>
             </dd>
           </div>
@@ -442,11 +442,11 @@ function TermsDetails({ v }: { v: Version }) {
         </dd>
         <dt>Delivery window</dt>
         <dd>{fmtWindow(v.deliveryWindow)}; after that anyone can trigger a full refund</dd>
-        <dt>Challenge window</dt>
+        <dt>Protection window</dt>
         <dd>{fmtWindow(v.challengeWindow)} after the key is delivered</dd>
         <dt>Refund cap</dt>
         <dd>{p ? `${pct(p.refundCapBps)} of price (${fmtUsdc(cap)}) after delivery; each task refunded once` : "…"}</dd>
-        <dt>Dispute bond</dt>
+        <dt>Report deposit</dt>
         <dd>{p ? `requested refund, clamped to ${fmtUsdc(p.bondFloor, { symbol: false })}–${fmtUsdc(p.bondCap)}; returned if you win` : "…"}</dd>
         <dt>Case fee</dt>
         <dd>{p ? `${fmtUsdc(p.caseFee)}, paid by the losing side` : "…"}</dd>
