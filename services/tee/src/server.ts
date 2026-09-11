@@ -1,5 +1,6 @@
 /** HTTP API (Hono). See README for the full contract. */
 import { Hono, type Context } from 'hono';
+import { cors } from 'hono/cors';
 import { sha256Hex } from '@envmarket/shared';
 import { processUpload, UploadError } from './bundle.ts';
 import type { Ctx } from './context.ts';
@@ -39,6 +40,10 @@ export function buildApp(ctx: Ctx, watcher: Watcher | null): Hono {
   const app = new Hono();
   const perListing = new RateLimiter(ctx.cfg.preview.ratePerListingPerHour, 3_600_000);
   const global = new RateLimiter(ctx.cfg.preview.rateGlobalPerHour, 3_600_000);
+
+  // Browser clients (apps/web) read public docs/reports/deliveries and POST evidence cross-origin.
+  // Permissive, credential-less CORS: nothing here relies on cookies or ambient authority.
+  app.use('*', cors({ origin: '*', allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'OPTIONS'], allowHeaders: ['content-type'], exposeHeaders: ['x-sha256'], maxAge: 600 }));
 
   app.use('*', async (c, next) => {
     const t0 = Date.now();
