@@ -1,0 +1,17 @@
+{
+  "taskId": "A1",
+  "set": "audit",
+  "title": "Values containing '#' come back empty or cut off",
+  "statement": "We load CI settings with buildkit.dotenv.parse_dotenv() and some values are truncated:\n\n    >>> from buildkit.dotenv import parse_dotenv\n    >>> parse_dotenv('CI_COLOR=#36a64f\\nWEBHOOK_URL=https://hooks.example.com/services/T0#alerts\\n')\n    {'CI_COLOR': '', 'WEBHOOK_URL': 'https://hooks.example.com/services/T0'}\n\nWe expected {'CI_COLOR': '#36a64f', 'WEBHOOK_URL': 'https://hooks.example.com/services/T0#alerts'}. Inline comments such as 'RETRIES=3 # per job' must keep working. The module docstring describes the file format; please make parsing follow it.",
+  "targetSkill": "text-format parsing (.env comments and quoting)",
+  "difficulty": "easy",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["buildkit/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}

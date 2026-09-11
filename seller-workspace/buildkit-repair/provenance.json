@@ -1,0 +1,30 @@
+{
+  "type": "envmarket.provenance.v1",
+  "environmentId": "buildkit-repair",
+  "environmentVersion": "buildkit-repair@1.0.0",
+  "origin": "seller-authored",
+  "authoredBy": "the listing seller",
+  "authoredFor": "this EnvMarket listing only",
+  "createdAt": "2026-09-11",
+  "upstreamSources": [],
+  "copiedCode": [],
+  "copiedIssueText": [],
+  "thirdPartyComponents": [
+    {"name": "pytest", "version": "8.3.5", "license": "MIT", "use": "test runner (grading and visible tests only)", "modified": false},
+    {"name": "pluggy", "version": "1.6.0", "license": "MIT", "use": "pytest dependency", "modified": false},
+    {"name": "iniconfig", "version": "2.3.0", "license": "MIT", "use": "pytest dependency", "modified": false},
+    {"name": "packaging", "version": "26.3", "license": "Apache-2.0 OR BSD-2-Clause", "use": "pytest dependency", "modified": false},
+    {"name": "python:3.12-slim", "digest": "sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea", "license": "PSF-2.0 and Debian package licenses", "use": "runtime base image", "modified": false}
+  ],
+  "specificationsReferenced": [
+    "Semantic Versioning 2.0.0 (semver.org), precedence rules only; no code or text copied",
+    "npm range syntax (^, ~, x-ranges, ||) as a behavioural reference; no code or text copied",
+    "RFC 6901 JSON Pointer; the hidden tests for T4 use the example document from RFC 6901 section 5"
+  ],
+  "generationMethod": "The library (src/buildkit, 6 modules) was written by hand as a correct reference, together with two audit-only modules (buildkit/dotenv.py, buildkit/resolve.py) that exist only inside audit-tasks/. Each task's starting state is the correct module with one defect injected through a file overlay. Task statements, hidden tests and visible tests were written by the seller against the documented behaviour in each module's docstring. The grader and environment driver are the seller's py-repair-kit grader with only names and version strings changed.",
+  "contamination": "Written for this listing on 2026-09-11 and not taken from any public dataset or benchmark. The buildkit code, bug reports and tests are new; the underlying topics (semver, globbing, cron, JSON Pointer, config merging) are widely documented.",
+  "auditTasks": {"count": 2, "curation": "seller-supplied (not independently curated)"},
+  "funders": [],
+  "relatedParties": [],
+  "conflicts": []
+}

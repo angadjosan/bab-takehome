@@ -1,0 +1,17 @@
+{
+  "taskId": "A2",
+  "set": "audit",
+  "title": "resolve() picks a version that one requirement rejects",
+  "statement": "buildkit.resolve.resolve() returned a yaml version that one of our packages rules out:\n\n    >>> from buildkit.resolve import resolve\n    >>> resolve([('cli', 'yaml', '^1.4.0 || ^2.0.0'), ('web', 'yaml', '>=2.0.0')], {'yaml': ['1.4.2', '1.9.0']})\n    {'yaml': '1.9.0'}\n\nweb needs >=2.0.0, so no available version works for both, and we expected a ResolutionError. Simple ranges seem to resolve correctly. The module docstring says the chosen version must satisfy every range on the package. Please fix resolve() for any mix of ranges.",
+  "targetSkill": "constraint satisfaction over version ranges",
+  "difficulty": "medium",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["buildkit/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}

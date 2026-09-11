@@ -1,0 +1,17 @@
+{
+  "taskId": "T6",
+  "set": "purchased",
+  "title": "Staging overrides leak into the prod config",
+  "statement": "We build per-environment configs from shared defaults with buildkit.config.merge_layers(). Building one environment changes the next one:\n\n    >>> from buildkit.config import merge_layers\n    >>> defaults = {'db': {'host': 'localhost', 'port': 5432}}\n    >>> staging = merge_layers(defaults, {'db': {'host': 'staging-db'}})\n    >>> prod = merge_layers(defaults, {'db': {'port': 6432}})\n    >>> prod\n    {'db': {'host': 'staging-db', 'port': 6432}}    # expected host 'localhost'\n    >>> defaults\n    {'db': {'host': 'staging-db', 'port': 6432}}    # the defaults changed too\n\nWe have also seen edits made to a merged config show up in our defaults afterwards. The module docstring describes the merge contract. Please fix merge_layers() (and load(), which uses it) so it meets that contract; precedence and the list/dict rules must stay as documented.",
+  "targetSkill": "aliasing and mutation (deep merge without shared state)",
+  "difficulty": "medium",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["buildkit/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}

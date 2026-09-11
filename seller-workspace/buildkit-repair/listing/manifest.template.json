@@ -1,0 +1,132 @@
+{
+  "schemaVersion": "1",
+  "environmentType": "coding",
+  "environmentId": "buildkit-repair",
+  "environmentVersion": "buildkit-repair@1.0.0",
+  "bundleDigest": "<FILL: 0x sha256 of the canonical tar of the purchased payload WITHOUT manifest.json>",
+  "imageDigest": "<FILL: 0x sha256 image id of the runner image built from Dockerfile.runner (see IMAGE_DIGEST)>",
+  "image": {
+    "base": "python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea",
+    "dockerfile": "Dockerfile.runner",
+    "archive": "<FILL: sha256 of `docker save` archive shipped with the bundle, or null if referenced by digest>"
+  },
+  "taskRoot": "<FILL: 0x merkle root over envmarket.task.v1 leaves>",
+  "taskCount": 6,
+  "taskIds": ["T1", "T2", "T3", "T4", "T5", "T6"],
+  "taskMaskOrder": "bit i of an on-chain taskMask refers to taskIds[i]",
+  "auditRoot": "<FILL: 0x merkle root over envmarket.audit.v1 leaves>",
+  "auditTaskCount": 2,
+  "entrypoints": {
+    "reset": {"argv": ["python", "-m", "grader.env", "reset", "{taskId}", "--seed", "{seed}", "--workdir", "{workdir}"]},
+    "step": {"argv": ["python", "-m", "grader.env", "step", "--workdir", "{workdir}", "--action", "{actionJson}"]},
+    "grade": {"argv": ["python", "-m", "grader.env", "grade", "--workdir", "{workdir}"], "artifact": "the episode's final workspace directory"},
+    "close": {"argv": ["python", "-m", "grader.env", "close", "--workdir", "{workdir}"]},
+    "serve": {"argv": ["python", "-m", "grader.env", "serve"], "protocol": "JSON lines: {id, cmd: reset|step|grade|close|ping, ...} -> {id, ok, ...}"},
+    "gradeArtifact": {"argv": ["python", "-m", "grader.grade", "--task", "{taskId}", "--workspace", "{dir}", "--termination", "submitted"]},
+    "cwd": "bundle root",
+    "output": "exactly one JSON object per line on stdout"
+  },
+  "schemas": {
+    "observation.reset": {
+      "taskId": "string", "title": "string", "statement": "string (issue-style bug report with a short repro)",
+      "files": "string[] workspace-relative paths", "editable": "string[] glob patterns",
+      "visibleTestCmd": "string", "actionBudget": "int", "timeBudgetSec": "number", "actions": "object"
+    },
+    "action": {
+      "oneOf": [
+        {"type": "list_files", "path": "string? (default '.')"},
+        {"type": "read_file", "path": "string"},
+        {"type": "write_file", "path": "string (must match editable: buildkit/*.py)", "content": "string (<= 256 KiB UTF-8)"},
+        {"type": "run_visible_tests"},
+        {"type": "submit"}
+      ]
+    },
+    "action.jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "Machine-readable form of `action`: one JSON Schema per action, discriminated by `type`. A harness generates one tool per branch (tool name = the `type` const, arguments = the other properties). x-terminal marks the action that ends the episode; x-countsAgainstBudget says whether it uses one of resources.actionBudget.",
+      "discriminator": {"propertyName": "type"},
+      "oneOf": [
+        {"title": "list_files", "description": "List files in the workspace, or in one subdirectory of it.", "type": "object", "properties": {"type": {"const": "list_files"}, "path": {"type": "string", "description": "workspace-relative directory; default '.'"}}, "required": ["type"], "additionalProperties": false, "x-terminal": false, "x-countsAgainstBudget": true},
+        {"title": "read_file", "description": "Read one workspace file (the first 64 KiB).", "type": "object", "properties": {"type": {"const": "read_file"}, "path": {"type": "string", "description": "workspace-relative file path"}}, "required": ["type", "path"], "additionalProperties": false, "x-terminal": false, "x-countsAgainstBudget": true},
+        {"title": "write_file", "description": "Replace the full content of an editable workspace file (buildkit/*.py) with the complete new file text (at most 256 KiB UTF-8).", "type": "object", "properties": {"type": {"const": "write_file"}, "path": {"type": "string", "description": "workspace-relative path matching an editable pattern"}, "content": {"type": "string", "description": "complete new file content"}}, "required": ["type", "path", "content"], "additionalProperties": false, "x-terminal": false, "x-countsAgainstBudget": true},
+        {"title": "run_visible_tests", "description": "Run the visible test suite and return the tail of its output.", "type": "object", "properties": {"type": {"const": "run_visible_tests"}}, "required": ["type"], "additionalProperties": false, "x-terminal": false, "x-countsAgainstBudget": true},
+        {"title": "submit", "description": "Submit the workspace for hidden-test grading.", "type": "object", "properties": {"type": {"const": "submit"}}, "required": ["type"], "additionalProperties": false, "x-terminal": true, "x-countsAgainstBudget": false}
+      ]
+    },
+    "observation.step": {
+      "type": "string", "ok": "bool", "error": "string?", "errorCode": "string?",
+      "list_files": {"files": "string[]"},
+      "read_file": {"path": "string", "content": "string (<= 64 KiB)", "truncated": "bool", "bytes": "int"},
+      "write_file": {"path": "string", "bytes": "int"},
+      "run_visible_tests": {"command": "string", "exitCode": "int", "passed": "bool", "timedOut": "bool", "output": "string (tail, <= 8000 chars)"},
+      "envelope": {"done": "bool", "termination": "null|submitted|budget_exhausted|timeout", "actionsUsed": "int", "actionsRemaining": "int", "elapsedSec": "number"}
+    },
+    "gradeResult": {
+      "taskId": "string", "score": "0|1", "success": "bool", "termination": "submitted|budget_exhausted|timeout|incomplete",
+      "passed": "int", "failed": "int", "diagnostics": "object (private; never shown to the agent or published)"
+    }
+  },
+  "grader": {
+    "entrypoint": "python -m grader.grade",
+    "version": "1.0.0",
+    "dependencies": "requirements.lock (pytest 8.3.5, pluggy 1.6.0, iniconfig 2.3.0, packaging 26.3; sha256-pinned)",
+    "successRule": "all hidden tests pass AND termination == submitted",
+    "method": "rebuild starting state (src/ + overlay) in a fresh temp dir, copy only editable files from the workspace, add hidden tests, run pytest in a subprocess with a timeout, parse JUnit XML",
+    "externalJudge": null
+  },
+  "resources": {
+    "cpu": 1,
+    "memoryMB": 512,
+    "pids": 128,
+    "accelerator": null,
+    "diskMB": 256,
+    "rootFilesystem": "read-only; tmpfs at /tmp",
+    "episodeDurationSec": 600,
+    "actionBudget": 12,
+    "actionBudgetNote": "submit does not count; after 12 tool actions only submit is accepted",
+    "visibleTestTimeoutSec": 60,
+    "gradeTimeoutSec": 120,
+    "concurrency": "episodes are independent; one workdir per episode, safe to run in parallel"
+  },
+  "determinism": {
+    "randomnessSources": [],
+    "seedPolicy": "seed is recorded in episode state and grade diagnostics but does not alter task content",
+    "clocks": "no module or test reads the clock (cron.next_run takes now as an argument); wall-clock time only affects the episode time budget",
+    "environment": {"PYTHONHASHSEED": "0", "TZ": "UTC", "LC_ALL": "C.UTF-8"},
+    "supportedRuntime": "CPython 3.12 in the runner image (verified on linux/arm64 under Docker) and natively (verified on macOS arm64, CPython 3.12.14)",
+    "resultsVary": false
+  },
+  "networkPolicy": {"mode": "offline", "fixtures": [], "externalDependencies": []},
+  "referenceProtocol": {
+    "models": ["GLM 5.3", "Kimi K3", "Qwen 3.8"],
+    "harness": "<FILL: harness id + digest>",
+    "prompt": "<FILL: system prompt digest>",
+    "decoding": {"temperature": 0, "seed": 0, "maxTokens": "<FILL>"},
+    "taskSelection": "all purchased tasks, one episode each; audit tasks reported separately",
+    "actionBudget": 12,
+    "timeBudgetSec": 600,
+    "successRule": "all hidden tests pass"
+  },
+  "license": {
+    "id": "envmarket-internal-use-1.0",
+    "file": "LICENSE-ENV.md",
+    "sha256": "<FILL>",
+    "summary": "Seller-authored. Non-exclusive license for internal training and evaluation; redistribution of tasks, tests or solutions requires separate written permission (LICENSE-ENV.md).",
+    "exclusive": false,
+    "redistribution": false
+  },
+  "provenance": {
+    "file": "provenance.json",
+    "sha256": "<FILL>",
+    "summary": "seller-authored for this listing on 2026-09-11; no upstream dataset or project code; third-party components are pytest and its dependencies only"
+  },
+  "conflicts": {"funders": [], "relatedParties": [], "notes": "none declared; audit tasks are seller-supplied, not independently curated"},
+  "commercialTerms": {
+    "price": "<FILL: USDC, 6 decimals>",
+    "perItemAllocation": "price / taskCount per purchased task",
+    "deliveryWindowSec": 600,
+    "challengeWindowSec": 300,
+    "refundCapBps": 5000,
+    "collateral": "<FILL: USDC>"
+  }
+}

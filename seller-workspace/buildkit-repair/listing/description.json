@@ -1,0 +1,125 @@
+{
+  "type": "envmarket.description.v1",
+  "environmentId": "buildkit-repair",
+  "environmentVersion": "buildkit-repair@1.0.0",
+  "title": "buildkit-repair: 6 bug-repair tasks on a small build-tool library",
+  "summary": "Six issue-style repair tasks on buildkit, a small stdlib-only Python 3.12 library of build-tool helpers (semver ranges, dependency ordering, path globs, JSON Pointer, cron schedules, layered config). The seller wrote it for this listing. In each episode an agent reads files, edits a library module, runs a visible test and submits. A hidden pytest suite grades the final workspace offline and deterministically.",
+  "environmentType": "coding",
+  "claims": [
+    {
+      "id": "C1",
+      "category": "taskCount",
+      "text": "The purchased product contains exactly 6 tasks (T1 to T6). A separate set of 2 seller-supplied audit tasks (A1, A2) is disclosed. It is not delivered and is not counted in the 6.",
+      "check": "tasks/ contains exactly six task directories, each with a task.json; manifest taskCount = 6, auditTaskCount = 2."
+    },
+    {
+      "id": "C2",
+      "category": "provenance",
+      "text": "Seller-authored and new. The seller wrote the library, task statements, visible and hidden tests, reference solutions and audit tasks for this listing; the environment was created on 2026-09-11. No task, test or module is copied from or derived from a dataset, benchmark or third-party project.",
+      "check": "provenance.json (origin seller-authored, createdAt 2026-09-11, upstreamSources, copiedCode and copiedIssueText empty)."
+    },
+    {
+      "id": "C3",
+      "category": "skills",
+      "text": "One module and target skill per task: T1 semver.py, semver prerelease precedence; T2 graph.py, deterministic topological-sort tie-breaking; T3 globmatch.py, glob ** semantics in a pattern-to-regex translation; T4 jsonpointer.py, RFC 6901 escaping; T5 cron.py, next-run search across day boundaries; T6 config.py, deep merge without shared mutable state.",
+      "check": "targetSkill field of each tasks/<id>/task.json; the file in tasks/<id>/overlay and solutions/<id>."
+    },
+    {
+      "id": "C4",
+      "category": "difficulty",
+      "text": "Seller-assigned difficulty labels: 2 easy (T1, T4), 3 medium (T2, T3, T6), 1 hard (T5). Audit tasks: A1 easy, A2 medium.",
+      "check": "difficulty field of each task.json."
+    },
+    {
+      "id": "C5",
+      "category": "taskDesign",
+      "text": "Each starting state is the correct src/ library with one module replaced through overlay/ by a copy containing one injected defect. In every purchased task the starting state and the reference solution differ only in that module, by at most 9 diff lines. Each statement is an issue-style bug report with a short repro. It describes the symptom and points to the module docstring as the specification, and does not state the fix.",
+      "check": "diff tasks/<id>/overlay/buildkit/<module>.py solutions/<id>/buildkit/<module>.py | grep -c '^[<>]'; statement field of each task.json."
+    },
+    {
+      "id": "C6",
+      "category": "testCoverage",
+      "text": "Hidden tests per task as collected by pytest: T1 10, T2 11, T3 9, T4 10, T5 11, T6 11 (62 in total); audit tasks A1 8, A2 8. On the starting state 4 to 8 hidden tests fail per purchased task (T1 7, T2 6, T3 4, T4 5, T5 8, T6 6). Each task also has 1 or 2 visible tests, at least one of which fails on the starting state.",
+      "check": "PYTHONPATH=src python -m pytest --collect-only -q tasks/<id>/tests; the table printed by scripts/verify.sh."
+    },
+    {
+      "id": "C7",
+      "category": "dependencies",
+      "text": "The buildkit library and the environment driver (grader/) use only the Python 3.12 standard library. The only third-party packages are pytest 8.3.5, pluggy 1.6.0, iniconfig 2.3.0 and packaging 26.3. They are used only to run visible and hidden tests, and requirements.lock pins them by exact version and sha256 hash.",
+      "check": "imports in src/, tasks/*/overlay, solutions/ and grader/; requirements.lock."
+    },
+    {
+      "id": "C8",
+      "category": "runtime",
+      "text": "Runs on CPython 3.12. The runner image is built from Dockerfile.runner on python:3.12-slim pinned by digest sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea and runs as a non-root user. No GPU or accelerator is needed.",
+      "check": "Dockerfile.runner FROM line and USER line; IMAGE_DIGEST."
+    },
+    {
+      "id": "C9",
+      "category": "network",
+      "text": "Fully offline at run time. Resetting, stepping, running visible tests and grading need no network access. scripts/verify.sh --docker runs every task with --network none.",
+      "check": "Run scripts/verify.sh --docker."
+    },
+    {
+      "id": "C10",
+      "category": "determinism",
+      "text": "Deterministic. No module or test in src/, tasks/, solutions/ or audit-tasks/ reads the clock or uses randomness: cron.next_run takes now as an argument and the tests pass fixed datetimes. The grader reads wall-clock time only to enforce the episode time budget. The reset seed is recorded but does not change task content. Grading runs with PYTHONHASHSEED=0 and TZ=UTC, and grading the same final workspace again gives the same score, passed and failed counts.",
+      "check": "grep -rnE 'datetime\\.now|date\\.today|time\\.time|utcnow|random' src tasks solutions; scripts/verify_tasks.py grades each solved task twice and compares."
+    },
+    {
+      "id": "C11",
+      "category": "budgets",
+      "text": "Each episode allows 12 tool actions (list_files, read_file, write_file, run_visible_tests) plus a final submit, which does not count against the budget, and 600 seconds of wall-clock time. A visible-test run times out after 60 s and hidden grading after 120 s. An episode that ends by budget exhaustion or timeout scores 0.",
+      "check": "actionBudget, timeBudgetSec and gradeTimeoutSec in each task.json; grader/env.py."
+    },
+    {
+      "id": "C12",
+      "category": "validity",
+      "text": "For every purchased and audit task, at least one hidden test and at least one visible test fail on the starting state, and all hidden and visible tests pass once the reference solution is applied through the environment's own write_file action.",
+      "check": "Run scripts/verify.sh (native or --docker)."
+    },
+    {
+      "id": "C13",
+      "category": "isolation",
+      "text": "Hidden tests are never copied into the agent workspace. Grading rebuilds the starting state and copies in only the files matching the task's editable pattern (buildkit/*.py, excluding conftest.py).",
+      "check": "grader/tasks.py materialize_workspace; grader/grade.py grade_workspace."
+    },
+    {
+      "id": "C14",
+      "category": "delivery",
+      "text": "Delivery includes src/buildkit (the correct library), all 6 purchased tasks (statement, starting-state overlay, visible tests, hidden tests), a reference solution for each in solutions/, the grader and environment driver, requirements.lock, Dockerfile.runner, IMAGE_DIGEST and the verification scripts. The audit-only modules (buildkit/dotenv.py, buildkit/resolve.py) and audit solutions are not in the bundle.",
+      "check": "Contents of the delivered bundle."
+    },
+    {
+      "id": "C15",
+      "category": "resources",
+      "text": "Every task, including grading, runs inside a container limited to 1 CPU, 512 MB of memory and 128 processes, with a read-only root filesystem and a 256 MB tmpfs at /tmp.",
+      "check": "Run scripts/verify.sh --docker, which applies exactly these limits."
+    },
+    {
+      "id": "C16",
+      "category": "size",
+      "text": "src/buildkit has 6 modules plus __init__.py, with fewer than 700 lines of Python in total. No module is longer than 160 lines.",
+      "check": "wc -l src/buildkit/*.py"
+    },
+    {
+      "id": "C17",
+      "category": "license",
+      "text": "Licensed for non-exclusive internal training and evaluation. Redistribution, resale or publication of tasks, tests or solutions requires separate written permission (LICENSE-ENV.md).",
+      "check": "LICENSE-ENV.md"
+    },
+    {
+      "id": "C18",
+      "category": "provenance",
+      "text": "provenance.json lists no upstream sources, no copied code and no copied issue text. The only third-party components are pytest 8.3.5, pluggy 1.6.0, iniconfig 2.3.0, packaging 26.3 and the python:3.12-slim base image, all unmodified. The behaviour follows public specifications (Semantic Versioning 2.0.0, npm range syntax, RFC 6901), and T4's hidden tests use the RFC 6901 section 5 example document. There are no funders or related parties to disclose.",
+      "check": "provenance.json; tasks/T4/tests/test_hidden.py."
+    }
+  ],
+  "notClaimed": [
+    "No claim is made that training on these tasks improves model performance.",
+    "Difficulty labels are the seller's judgment, not a measured property.",
+    "No claim is made that the hidden tests catch every incorrect fix.",
+    "No claim that the topics are unfamiliar to models: semver, globbing, cron, JSON Pointer and config merging are widely documented, even though this code, these bug reports and these tests are new.",
+    "No claim that the environment's source has never been visible outside the market; the claim is only that it is seller-written and not derived from any dataset."
+  ]
+}

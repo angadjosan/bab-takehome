@@ -1,0 +1,17 @@
+{
+  "taskId": "T2",
+  "set": "purchased",
+  "title": "topo_order() does not follow its own tie-break rule",
+  "statement": "Our CI cache keys are built from buildkit.graph.topo_order(), and its docstring promises a specific order: at each step, the smallest node whose dependencies have all been emitted. That is not what we get:\n\n    >>> from buildkit.graph import topo_order\n    >>> topo_order({'libcore': [], 'app': ['libcore'], 'tests': []})\n    ['libcore', 'tests', 'app']     # expected ['libcore', 'app', 'tests']\n\nOnce libcore is done, both app and tests are ready, and 'app' < 'tests'. affected() returns nodes in the same wrong order; build_levels() looks fine. Please make topo_order() and everything built on it follow the documented rule for any graph, and keep cycle reporting as documented.",
+  "targetSkill": "deterministic graph algorithms (topological sort tie-breaking)",
+  "difficulty": "medium",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["buildkit/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}

@@ -1,0 +1,17 @@
+{
+  "taskId": "T4",
+  "set": "purchased",
+  "title": "Lockfile lookups fail for keys containing '~1'",
+  "statement": "We address lockfile entries with buildkit.jsonpointer and build the pointers with escape(). Lookups fail for any package whose key contains a tilde range:\n\n    >>> from buildkit.jsonpointer import escape, get\n    >>> lock = {'deps': {'left-pad@~1.1': {'version': '1.1.3'}}}\n    >>> get(lock, '/deps/' + escape('left-pad@~1.1') + '/version')\n    buildkit.jsonpointer.JsonPointerError: no member 'left-pad@/.1'\n\nescape() produces '/deps/left-pad@~01.1/version', which looks right to us. Keys containing '/' (like '@scope/pkg') work. The docstring says parse(to_pointer(keys)) == keys for every list of string keys. Please make parse(), get() and set() handle every key correctly per RFC 6901.",
+  "targetSkill": "standards compliance (RFC 6901 escaping)",
+  "difficulty": "easy",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["buildkit/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}

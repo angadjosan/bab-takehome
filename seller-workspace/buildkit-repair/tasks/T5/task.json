@@ -1,0 +1,17 @@
+{
+  "taskId": "T5",
+  "set": "purchased",
+  "title": "Weekly jobs sometimes skip a whole week",
+  "statement": "Our scheduler calls buildkit.cron.next_run() after each run and after restarts. A job set for Tuesdays at 09:00 was pushed a full week out when the scheduler restarted on a Monday afternoon:\n\n    >>> from datetime import datetime\n    >>> from buildkit.cron import next_run\n    >>> next_run('0 9 * * 2', datetime(2026, 9, 14, 10, 30))    # Monday 10:30\n    datetime.datetime(2026, 9, 22, 9, 0)    # expected datetime.datetime(2026, 9, 15, 9, 0)\n    >>> next_run('0 9 * * 2', datetime(2026, 9, 14, 8, 30))     # Monday 08:30\n    datetime.datetime(2026, 9, 15, 9, 0)    # correct\n\nMonthly jobs have the same problem: next_run('0 3 1 * *', datetime(2026, 9, 30, 4, 0)) returns 2026-11-01 03:00 instead of 2026-10-01 03:00. Daily schedules look fine. The module docstring is the spec: the earliest matching minute strictly after now. Please fix next_run() for all expressions. It must keep taking now as an argument and must not read the clock.",
+  "targetSkill": "calendar search logic (cron next-run across day boundaries)",
+  "difficulty": "hard",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["buildkit/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}

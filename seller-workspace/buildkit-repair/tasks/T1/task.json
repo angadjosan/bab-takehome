@@ -1,0 +1,17 @@
+{
+  "taskId": "T1",
+  "set": "purchased",
+  "title": "max_satisfying() picks rc.9 over rc.10",
+  "statement": "Our release tooling picks the wrong release candidate now that we are past rc.9:\n\n    >>> from buildkit.semver import max_satisfying, parse, sort_versions\n    >>> max_satisfying(['2.0.0-rc.9', '2.0.0-rc.10'], '>=2.0.0-rc.1')\n    '2.0.0-rc.9'          # expected '2.0.0-rc.10'\n    >>> parse('2.0.0-rc.10') > parse('2.0.0-rc.9')\n    False                 # expected True\n\nNightly builds sort wrong too: sort_versions(['1.0.0-nightly.20260901.12', '1.0.0-nightly.20260901.3']) leaves .12 before .3. We follow the precedence rules in the buildkit/semver.py docstring (semver 2.0.0, section 11). Please fix ordering everywhere it is used (comparisons, sorting, range checks, max_satisfying) without changing the public API.",
+  "targetSkill": "spec-conformant ordering (semver prerelease precedence)",
+  "difficulty": "easy",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["buildkit/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}

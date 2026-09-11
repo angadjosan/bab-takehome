@@ -1,0 +1,17 @@
+{
+  "taskId": "T3",
+  "set": "purchased",
+  "title": "src/**/*.py misses files directly under src/",
+  "statement": "Our build selects its inputs with buildkit.globmatch patterns, and top-level files keep dropping out:\n\n    >>> from buildkit.globmatch import match, select\n    >>> match('src/**/*.py', 'src/main.py')\n    False        # expected True\n    >>> match('src/**/*.py', 'src/pkg/util.py')\n    True\n    >>> match('**/test_*.py', 'test_cli.py')\n    False        # expected True\n    >>> select(['src/main.py', 'src/pkg/util.py'], ['src/**/*.py'])\n    ['src/pkg/util.py']\n\nThe module docstring defines the pattern syntax, including what ** may match. Please fix matching so it follows the docstring for every pattern; the other wildcards must keep working as documented.",
+  "targetSkill": "pattern-to-regex translation (glob ** semantics)",
+  "difficulty": "medium",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": ["buildkit/*.py"],
+  "startingState": {"mechanism": "overlay", "base": "src/", "overlayDir": "overlay/"},
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass"
+}
