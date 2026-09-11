@@ -64,6 +64,11 @@ export async function verifyReport(ctx: Ctx, versionId: bigint, version: Version
     fail('no signature provided');
   }
   if (!eq(report.attestation.signer, report.signer)) fail('attestation.signer != report.signer');
-  checks.push(`attestation.kind = ${report.attestation.kind}${report.attestation.kind === 'none-local-dev' ? ' (LOCAL DEV: no TEE attestation; operator can read plaintext)' : ''}`);
+  const kindNote: Record<string, string> = {
+    'none-local-dev': ' (LOCAL DEV: no TEE attestation; operator can read plaintext)',
+    'phala-dstack-tdx': ' (Phala Cloud dstack CVM, Intel TDX; DCAP quote over sha512(binding))',
+    'eigencompute-tdx': ' (EigenCompute, Intel TDX; KMS-issued attestation JWT)',
+  };
+  checks.push(`attestation.kind = ${report.attestation.kind}${kindNote[report.attestation.kind] ?? ''}`);
   return { report, reportText, reportHash, signer, checks };
 }

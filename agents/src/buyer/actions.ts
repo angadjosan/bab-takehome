@@ -148,11 +148,13 @@ export async function inspectListing(ctx: Ctx, versionId: bigint): Promise<Listi
         appId: a.appId ?? null,
         verifyUrl: a.verifyUrl ?? null,
         signerMatches: report ? String(a.signer ?? '').toLowerCase() === report.signer.toLowerCase() : null,
-        quoteDigestOk: token ? sha256Hex(token) === String(a.quoteDigest ?? '').toLowerCase() : null,
+        // EigenCompute: sha256 of the JWT string; Phala dstack: sha256 of the raw TDX quote bytes
+        quoteDigestOk: token ? (kind === 'phala-dstack-tdx' ? sha256Hex(new Uint8Array(Buffer.from(token.replace(/^0x/, ''), 'hex'))) : sha256Hex(token)) === String(a.quoteDigest ?? '').toLowerCase() : null,
       };
       if (report && kind !== report.attestation.kind) errors.push(`TEE attestation kind ${kind} != report ${report.attestation.kind}`);
       if (attestation.signerMatches === false) errors.push('TEE /attestation signer differs from report signer');
-      checks.push(`TEE /attestation: kind=${kind}${kind === 'none-local-dev' ? ' (local dev, NOT a TEE)' : ''}${attestation.appId ? ` appId=${attestation.appId}` : ''}${attestation.quoteDigestOk ? ' quoteDigest=sha256(token) ✓' : ''}`);
+      const phala = kind === 'phala-dstack-tdx';
+      checks.push(`TEE /attestation: kind=${kind}${kind === 'none-local-dev' ? ' (local dev, NOT a TEE)' : phala ? ' (Phala Cloud dstack CVM, Intel TDX quote)' : ''}${attestation.appId ? ` appId=${attestation.appId}` : ''}${attestation.quoteDigestOk ? ` quoteDigest=sha256(${phala ? 'quote' : 'token'}) ✓` : ''}${phala && attestation.verifyUrl ? ` verify: ${attestation.verifyUrl}` : ''}`);
     } catch (e) {
       errors.push(`attestation: ${(e as Error).message}`);
     }
