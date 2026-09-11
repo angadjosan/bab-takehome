@@ -41,7 +41,7 @@ Real:
 - **Inference.** Fireworks serves the reference panel `glm-5p3` (GLM 5.3), `kimi-k3` (Kimi K3) and `qwen3p8-max` (Qwen 3.8). Episodes run in [`harness/envmarket_coding`](harness/README.md), built on Prime Intellect's open-source `verifiers` 0.3.1. The tools are generated from the environment's manifest, and buyers can load the same environment into `vf-eval` or prime-rl. The validator is `deepseek-v4-pro-0813`. The jurors are `deepseek-v4p1-flash`, `gpt-oss-120b` and `glm-5p2`.
 - **Crypto.** Bundles are AES-256-GCM. Keys are wrapped with HPKE (RFC 9180), and task commitments use salted OpenZeppelin Merkle trees. Reports, receipts and findings are EIP-712 signatures, verified on-chain.
 - **Chain.** Escrow, reserved collateral, delivery and challenge deadlines, three dispute grounds, on-chain juror selection, commit-reveal, tally, majority rewards and minority/non-reveal slashing are all in the contract. So are capped per-task refunds, seller-paid preview fees, reputation and pull payments. Every flow is a real Base Sepolia transaction.
-- **Wallets.** Privy handles email, Google or external wallets, and creates an embedded wallet for users who have none.
+- **Wallets.** Privy handles email or external-wallet sign-in, and creates an embedded wallet for users who have none.
 
 Testnet: the token is TestUSDC and **has no value**. The stakes, bonds and collateral demonstrate accounting, not economic deterrence. Windows use demo values: a 5 min challenge window where production would use 7 days, a 10 min delivery window, and 3 min each for commit and reveal.
 
