@@ -172,6 +172,53 @@ async def run(args: argparse.Namespace) -> int:
     return 0
 
 
+async def selftest(args: argparse.Namespace) -> int:
+    """Everything a run needs except a bundle: the sandbox as configured (same flags as a run), a network
+    probe executed as a sandboxed uid through the episode command wrapper, the verifiers import, and a
+    4-token completion from the first --model. Emits {"type": "selftest", ...}; exit 0 iff all pass."""
+    from .environment import default_work_root
+    from .sandbox import Sandbox
+
+    out: dict = {"type": "selftest", "sandbox": args.sandbox, "ok": False}
+    ok = False
+    try:
+        sb = Sandbox(args.sandbox, image=args.image, netdeny=args.netdeny, grader_python=args.grader_python)
+        out["describe"] = sb.describe()
+        out["netdenyRequested"] = bool(args.netdeny)
+        out["netdenyActive"] = bool(sb.netdeny)
+        out["netdenyError"] = sb.netdeny_error
+        work_root = Path(args.work_dir).resolve() if args.work_dir else default_work_root()
+        out["probe"] = sb.selftest(work_root)
+        ok = bool(out["probe"]["ok"])
+    except Exception as e:  # report, never raise: the caller exposes this as a diagnostic
+        out["error"] = f"{type(e).__name__}: {e}"[:400]
+    try:
+        import verifiers
+
+        out["verifiers"] = getattr(verifiers, "__version__", "?")
+    except Exception as e:
+        out["verifiers"] = f"import failed: {type(e).__name__}: {e}"[:300]
+        ok = False
+    models = [m.strip() for spec in args.model for m in spec.split(",") if m.strip()]
+    if models:
+        api_key = os.environ.get(args.api_key_env) or os.environ.get("LLM_API_KEY")
+        if not api_key:
+            out["llm"] = {"ok": False, "model": models[0], "error": f"no API key in {args.api_key_env} or LLM_API_KEY"}
+        else:
+            from openai import AsyncOpenAI
+
+            try:
+                client = AsyncOpenAI(base_url=args.base_url, api_key=api_key, max_retries=1, timeout=90)
+                r = await client.chat.completions.create(model=models[0], messages=[{"role": "user", "content": "Reply with OK."}], max_tokens=4, temperature=0)
+                out["llm"] = {"ok": True, "model": models[0], "served": r.model}
+            except Exception as e:
+                out["llm"] = {"ok": False, "model": models[0], "error": f"{type(e).__name__}: {e}"[:300]}
+        ok = ok and bool(out["llm"]["ok"])
+    out["ok"] = ok
+    _emit(out, None)
+    return 0 if ok else 1
+
+
 async def regrade(args: argparse.Namespace) -> int:
     """Deterministic re-grade: rebuild each episode's final workspace from its stored `finalFiles`
     and grade it again with the hidden tests; the score and graded tree must match exactly."""
@@ -236,6 +283,12 @@ def build_parser() -> argparse.ArgumentParser:
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--digest", action="store_true", help="print harnessDigest / promptDigest (+ toolsDigest with --bundle) and exit")
     mode.add_argument("--regrade", metavar="RESULTS_JSONL", help="deterministically re-grade stored episodes")
+    mode.add_argument(
+        "--selftest",
+        action="store_true",
+        help="sandbox + provider self-test (no bundle, no seller code): sandbox init, a network probe run as a "
+        "sandboxed uid (must be blocked), the verifiers import, and a tiny call to the first --model; one JSON line",
+    )
     p.add_argument("--bundle", help="purchased payload dir (manifest.json) or seller workspace")
     p.add_argument("--audit-dir", help="audit tasks dir (default <bundle>/audit-tasks)")
     p.add_argument("--split", choices=["purchased", "audit"], default="purchased")
@@ -280,6 +333,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.digest:
         _emit(digest_info(args.bundle, args.audit_dir, args.action_budget, args.time_budget), None)
         return 0
+    if args.selftest:
+        return asyncio.run(selftest(args))
     if not args.bundle:
         print("error: --bundle is required", file=sys.stderr)
         return 2

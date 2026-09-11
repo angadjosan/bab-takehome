@@ -34,7 +34,7 @@ import { getCacheEntry, previewCacheKey, putCacheEntry, signEntry, type PreviewC
 import { abiHas, ZERO32, type VersionTerms } from './chain.ts';
 import { domainOf, requireChain, type Ctx } from './context.ts';
 import { COST_MODEL_VERSION, feeUsdcBaseUnits, quotePreviewCost, tokenBudgetFor, type CostQuote } from './cost.ts';
-import { bundleDigest, missingEpisode, runHarness, toEpisodeResult, type EpisodeResult } from './harnessRunner.ts';
+import { bundleDigest, missingEpisode, runHarness, selftestShowsNetwork, toEpisodeResult, type EpisodeResult } from './harnessRunner.ts';
 import { errMsg, logger } from './log.ts';
 import { llmClient, resolveModels, type ResolvedModels } from './models.ts';
 import { prepareVenv } from './sandbox.ts';
@@ -387,6 +387,7 @@ interface FreshRun {
 async function runFresh(ctx: Ctx, versionId: bigint, upload: UploadRecord, models: ResolvedModels): Promise<FreshRun> {
   const cfg = ctx.cfg;
   const h = requireHarness(ctx);
+  if (selftestShowsNetwork()) throw new HttpError(503, 'harness sandbox self-test reached the network from a sandboxed uid; refusing to run seller code (see /health harness.selftest)');
   const { dir: payloadDir, checks } = openBundle(ctx, upload, `pv${versionId}`);
   const bad = checks.filter((c) => !c.ok);
   if (bad.length) throw new HttpError(500, 'stored bundle failed integrity checks', bad);

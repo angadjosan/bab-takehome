@@ -29,10 +29,13 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import logging
 import os
 import platform
 import shutil
 import subprocess
+import sys
+import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,6 +54,26 @@ BASE_ENV = {
     "TZ": "UTC",
     "LC_ALL": "C.UTF-8",
 }
+
+
+log = logging.getLogger(__name__)
+
+# Run as a sandboxed phase uid by Sandbox.selftest(): it must not reach the network.
+_NET_PROBE = """
+import socket
+r = []
+try:
+    socket.create_connection(("1.1.1.1", 443), timeout=5).close()
+    r.append("tcp:OPEN")
+except OSError as e:
+    r.append("tcp:blocked(%s:%s)" % (type(e).__name__, e.errno))
+try:
+    socket.getaddrinfo("api.fireworks.ai", 443)
+    r.append("dns:OPEN")
+except OSError as e:
+    r.append("dns:blocked(%s)" % type(e).__name__)
+print(" ".join(r))
+"""
 
 
 class SandboxError(RuntimeError):
@@ -88,6 +111,7 @@ class Sandbox:
         self.kind, self.image, self.memory_mb, self.cpus, self.pids = kind, image, memory_mb, cpus, pids
         self.grader_python = grader_python or shutil.which("python3.12") or shutil.which("python3") or "python3"
         self.netdeny = str(Path(netdeny).resolve()) if netdeny else None
+        self.netdeny_error: str | None = None
         self.unshare_net = False
         self._uids = itertools.count(1)
         if kind == "docker":
@@ -106,7 +130,14 @@ class Sandbox:
                 r = subprocess.run(["python3", self.netdeny, "python3", "-c", probe], capture_output=True, text=True, timeout=20)
                 seccomp = r.stdout.strip() == "DENIED"
                 if not seccomp:
-                    raise SandboxError(f"sandbox unshare: --netdeny launcher did not deny sockets ({r.stdout.strip() or r.stderr.strip()[:200]})")
+                    self.netdeny_error = (r.stdout.strip() or r.stderr.strip())[:200]
+                    if not self.unshare_net:
+                        raise SandboxError(f"sandbox unshare: --netdeny launcher did not deny sockets ({self.netdeny_error}) and there is no network namespace; refusing to run seller code with network")
+                    # The network namespace (unshare --net) is the primary barrier; a launcher that cannot
+                    # install its filter adds nothing, so it is dropped (and reported) instead of failing
+                    # every episode. selftest() proves the barrier with a real connect attempt.
+                    log.warning("--netdeny launcher unusable (%s); relying on the network namespace", self.netdeny_error)
+                    self.netdeny = None
             if not self.unshare_net and not seccomp:
                 raise SandboxError("sandbox unshare: no network namespace (unshare --net failed) and no --netdeny seccomp launcher; refusing to run seller code with network")
 
@@ -232,6 +263,30 @@ class Sandbox:
     def kill(self, cmd: Command) -> None:
         if cmd.container:
             _ok(["docker", "kill", cmd.container], timeout=15)
+
+    def selftest(self, work_root: Path, timeout_sec: float = 30) -> dict:
+        """Prove the barrier: run a probe as a fresh phase uid through the same command wrapper that
+        episodes and graders use (unshare/setpriv/prlimit[/netdeny] or docker) and require that it cannot
+        open a TCP connection. Returns {ok, network, probe, exit, stderr}; runs no seller code."""
+        root = self.prepare_root(Path(work_root))
+        d = Path(tempfile.mkdtemp(prefix="selftest-", dir=root))
+        try:
+            uid = self.next_uid()
+            self.grant(d, uid, True)
+            self.check_layout([root], [])
+            cmd = self.command(Path(sys.prefix), ["-c", _NET_PROBE], d, [], [d], uid, timeout_sec)
+            r = subprocess.run(cmd.argv, cwd=cmd.cwd, env=cmd.env, capture_output=True, text=True, timeout=timeout_sec + 30)
+            out = r.stdout.strip()
+            ok = r.returncode == 0 and out.startswith("tcp:") and "tcp:OPEN" not in out
+            return {
+                "ok": ok,
+                "network": "open" if "tcp:OPEN" in out else ("blocked" if ok else "unknown"),
+                "probe": out[:200],
+                "exit": r.returncode,
+                "stderr": r.stderr.strip()[-300:],
+            }
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
 
     # ------------------------------------------------------------------ grader venv
     def prepare_venv(self, cache_root: Path, requirements_lock: bytes) -> Path:

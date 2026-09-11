@@ -202,8 +202,60 @@ export async function bundleDigest(ctx: Ctx, h: HarnessInfo, payloadDir: string,
 
 export function sandboxArgs(sb: SandboxInfo): string[] {
   if (sb.kind === 'docker') return ['--sandbox', 'docker', '--image', sb.image!];
-  if (sb.kind === 'linux-root') return ['--sandbox', 'unshare', ...(sb.seccompNetDeny ? ['--netdeny', NETDENY] : []), '--grader-python', 'python3'];
+  if (sb.kind === 'linux-root') {
+    // The network namespace (`unshare --net`; the Phala compose grants SYS_ADMIN) is the primary
+    // barrier; the seccomp launcher is used only when no namespace is available, or as a second layer
+    // with HARNESS_NETDENY=always. Either way the harness refuses to run without one working barrier,
+    // and harnessSelftest() proves it with a real connect attempt from a sandboxed uid.
+    const netdeny = sb.seccompNetDeny && (!sb.unshareNet || process.env.HARNESS_NETDENY === 'always');
+    return ['--sandbox', 'unshare', ...(netdeny ? ['--netdeny', NETDENY] : []), '--grader-python', 'python3'];
+  }
   throw new Error(`sandbox ${sb.description}`);
+}
+
+// ------------------------------------------------------------------------------ diagnostics
+/**
+ * Non-secret diagnostics served on /health: the startup self-test and the outcome of the most recent
+ * harness run (exit code, record count, distinct infra-failure errors: one line each, paths under
+ * /data redacted, no task content, no transcripts).
+ */
+export interface HarnessRunDiag {
+  at: string;
+  label: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  records: number;
+  infraFailures: number;
+  errors: string[];
+}
+export const harnessDiag: { selftest: Record<string, unknown> | null; lastRun: HarnessRunDiag | null } = { selftest: null, lastRun: null };
+
+export function diagLine(s: string): string {
+  const line = s.trim().split('\n').filter((l) => l.trim()).pop() ?? '';
+  return line.replace(/\/data\/[^\s'"]*/g, '<path>').replace(/\s+/g, ' ').trim().slice(0, 240);
+}
+
+/** Run `--selftest` with the exact sandbox flags a preview uses; stores and returns the result. */
+export async function harnessSelftest(ctx: Ctx, h: { dir: string; python: string }, model?: string): Promise<Record<string, unknown>> {
+  const scratch = harnessScratch(ctx, 'selftest');
+  const key = ctx.cfg.llm.apiKey ?? (ctx.cfg.llm.provider === 'ollama' ? 'ollama-local' : '');
+  try {
+    const args = ['--selftest', ...sandboxArgs(ctx.sandbox), '--work-dir', path.join(scratch, 'work'), '--base-url', ctx.cfg.llm.baseUrl, '--api-key-env', 'HARNESS_LLM_API_KEY', ...(model ? ['--model', model] : [])];
+    const r = await runPy(h, args, harnessEnv(ctx.cfg, { HARNESS_LLM_API_KEY: key, LLM_BASE_URL: ctx.cfg.llm.baseUrl }), 240_000);
+    const line = r.lines.find((l) => l.type === 'selftest') ?? { type: 'selftest', ok: false, error: `no selftest output (exit ${r.code}${r.timedOut ? ', timed out' : ''}): ${diagLine(r.stderr)}` };
+    harnessDiag.selftest = { at: new Date().toISOString(), exitCode: r.code, ...line };
+  } catch (e) {
+    harnessDiag.selftest = { at: new Date().toISOString(), ok: false, error: diagLine(errMsg(e)) };
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+  return harnessDiag.selftest!;
+}
+
+/** True when the self-test ran and showed a sandboxed uid can reach the network: previews must refuse. */
+export function selftestShowsNetwork(): boolean {
+  const p = (harnessDiag.selftest?.probe ?? null) as { network?: string } | null;
+  return p?.network === 'open';
 }
 
 function harnessScratch(ctx: Ctx, label: string): string {
@@ -260,6 +312,14 @@ export async function runHarness(
   }
   const records = r.lines.filter((l) => l.type === 'episode') as HarnessRecord[];
   if (r.code !== 0 || r.timedOut) logger.warn('harness run ended abnormally', { label: a.label, exit: r.code, timedOut: r.timedOut, records: records.length, stderr: r.stderr.slice(-400) });
+  const errs = new Set<string>();
+  const infra = records.filter((x) => x.status === 'infra_failure');
+  for (const x of infra) {
+    const e = (x as unknown as { error?: unknown }).error;
+    if (e) errs.add(diagLine(String(e)));
+  }
+  if (r.code !== 0 || r.timedOut) errs.add(`exit ${r.code}${r.timedOut ? ' (timed out)' : ''}: ${diagLine(r.stderr)}`);
+  harnessDiag.lastRun = { at: new Date().toISOString(), label: a.label, exitCode: r.code, timedOut: r.timedOut, records: records.length, infraFailures: infra.length, errors: [...errs].slice(0, 5) };
   logger.info('harness run done', { label: a.label, split: a.split, models: a.models.length, records: records.length, ms: Date.now() - t0 });
   return { records, summaries: r.lines.filter((l) => l.type === 'summary'), exitCode: r.code, timedOut: r.timedOut, stderrTail: r.stderr.slice(-2000), transcripts };
 }

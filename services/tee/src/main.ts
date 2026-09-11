@@ -2,7 +2,7 @@
 import * as path from 'node:path';
 import { serve } from '@hono/node-server';
 import { importCacheDir } from './cache.ts';
-import { loadHarness, type HarnessInfo } from './harnessRunner.ts';
+import { harnessSelftest, loadHarness, type HarnessInfo } from './harnessRunner.ts';
 import { makeAttestor } from './attestation.ts';
 import { Chain_, marketAbi } from './chain.ts';
 import { loadConfig } from './config.ts';
@@ -41,6 +41,12 @@ export async function startService(overrides: Partial<Record<string, string>> = 
     logger.error('reference harness unavailable: previews and PreviewNotReproducible checks are disabled', { error: errMsg(e) });
   }
   const ctx: Ctx = { cfg, keys, blobs, priv, sandbox, chain, attestor, harness, workRoot, cacheRoot };
+  if (harness && sandbox.kind !== 'unavailable') {
+    // Prove the sandbox (a sandboxed uid must not reach the network) and the provider path at boot;
+    // the result is served on /health.harness.selftest and gates previews (see preview.ts).
+    const model = cfg.rawEnv.HARNESS_SELFTEST_MODEL ?? (cfg.llm.provider === 'fireworks' ? 'accounts/fireworks/models/glm-5p3' : undefined);
+    void harnessSelftest(ctx, harness, model).then((s) => logger[s.ok ? 'info' : 'error']('harness self-test', { ok: s.ok, probe: s.probe, llm: s.llm, verifiers: s.verifiers, error: s.error }));
+  }
   if (cfg.rawEnv.PREVIEW_CACHE_IMPORT_DIR) {
     const n = await importCacheDir(ctx, path.resolve(cfg.rawEnv.PREVIEW_CACHE_IMPORT_DIR));
     logger.info('preview cache import dir processed', { imported: n });

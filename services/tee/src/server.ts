@@ -8,6 +8,7 @@ import { casePacket, storeEvidence } from './evidence.ts';
 import { listRationales, storeRationale } from './rationales.ts';
 import { errMsg, logger } from './log.ts';
 import { attachStoredReport, disclosures, getStoredReport, HttpError, previewPreconditions, previewState, previewVersion, protocolCommitment, protocolSpec, quotePreview } from './preview.ts';
+import { harnessDiag } from './harnessRunner.ts';
 import { getCacheEntry, importSealed, listCacheKeys, type SealedCacheExport } from './cache.ts';
 import { serveDelivery } from './relay.ts';
 import { normHash } from './store.ts';
@@ -87,6 +88,7 @@ export function buildApp(ctx: Ctx, watcher: Watcher | null): Hono {
         encPubKey: ctx.keys.encPublicKey,
       },
       sandbox: ctx.sandbox.description,
+      harness: { selftest: harnessDiag.selftest, lastRun: harnessDiag.lastRun },
       inference: { provider: ctx.cfg.llm.provider, baseUrl: ctx.cfg.llm.baseUrl, keyConfigured: !!ctx.cfg.llm.apiKey || ctx.cfg.llm.provider === 'ollama' },
       submitTxs: ctx.cfg.submitTxs,
       watcher: watcher?.status() ?? null,
