@@ -5,11 +5,11 @@ import { useState } from "react";
 import { parseEventLogs, type Hex } from "viem";
 import { useAccount, useReadContract } from "wagmi";
 import { marketAbi, tokenAbi } from "@/lib/abi";
-import { deployment } from "@/lib/config";
+import { deployment, TEST_TOKEN } from "@/lib/config";
 import { useWalletEncKey } from "@/lib/enc-derive";
 import { fmtUsdc } from "@/lib/format";
 import { useEncKeys } from "@/lib/keys";
-import { isZeroHash, useMarketParams, useSellerStake, type Version } from "@/lib/market";
+import { isZeroHash, useSellerStake, type Version } from "@/lib/market";
 import { useTokenInfo, useWalletMode } from "./providers";
 import { FaucetStatus, useFaucet } from "./faucet";
 import { friendlyError, RequireWallet, TxStatus } from "./tx";
@@ -21,13 +21,9 @@ export function BuyPanel({ v }: { v: Version }) {
   const { address } = useAccount();
   const { mode } = useWalletMode();
   const stake = useSellerStake(v.seller);
-  const params = useMarketParams();
   const blockers: string[] = [];
   if (!v.active) blockers.push("The seller has paused sales of this version.");
   if (isZeroHash(v.reportHash)) blockers.push("No signed preview report is attached yet.");
-  // buy() requires collateral ≥ caseFee + price·penaltyBps/10000 (CollateralBelowRequirement)
-  const required = params.data ? params.data.caseFee + (v.price * BigInt(params.data.penaltyBps)) / 10000n : undefined;
-  if (required !== undefined && v.collateral < required) blockers.push(`This version’s collateral (${fmtUsdc(v.collateral)}) is below the ${fmtUsdc(required)} the market requires per sale.`);
   if (stake.data && stake.data.available < v.collateral)
     blockers.push(`The seller’s available stake (${fmtUsdc(stake.data.available)}) is below the ${fmtUsdc(v.collateral)} collateral each sale reserves.`);
   if (address && address.toLowerCase() === v.seller.toLowerCase()) blockers.push("This is your own listing.");
@@ -124,7 +120,7 @@ function BuyAction({ v }: { v: Version }) {
           </span>
           {token.hasFaucet ? (
             <button className="btn btn-sm" disabled={faucet.busy} onClick={() => faucet.run("Faucet", { address: deployment!.token, abi: tokenAbi, functionName: "faucet" })}>
-              {faucet.busy ? "Sending test tokens…" : `Get test ${token.symbol}`}
+              {faucet.busy ? `Sending ${token.symbol}…` : `Get ${TEST_TOKEN ? "test " : ""}${token.symbol}`}
             </button>
           ) : (
             <span className="text-warn">Add {token.symbol} to your wallet to continue.</span>

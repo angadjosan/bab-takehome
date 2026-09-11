@@ -6,7 +6,7 @@ import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { encodeAbiParameters, keccak256, parseAbiParameters, type Address, type Hex } from "viem";
 import { useAccount, useSignMessage } from "wagmi";
 import { DeploymentGate } from "@/components/gate";
-import { EventList } from "@/components/events";
+import { EventList, outcomeLabel, roundFailure } from "@/components/events";
 import { RequireWallet, TxStatus, useTx } from "@/components/tx";
 import {
   AddressLink,
@@ -76,11 +76,6 @@ function claimSentence(d: Dispute) {
           ? "doesn’t reproduce its preview score"
           : "don’t reproduce their preview scores";
   return `The buyer says ${t.text} ${what}`;
-}
-
-function outcomeLabel(d: Dispute): { text: string; tone: Tone } {
-  if (d.fallbackNoQuorum) return { text: "Closed, no fault", tone: "neutral" };
-  return d.verdict === 1 ? { text: "Buyer wins", tone: "ok" } : { text: "Seller wins", tone: "neutral" };
 }
 
 export function DisputeView({ id }: { id: string }) {
@@ -254,7 +249,7 @@ function Stages({ d, n }: { d: Dispute; n: number }) {
       {
         label: d.round > 1 ? `Jury drawn (round ${d.round})` : "Jury drawn",
         state: d.status === 1 ? "active" : drawn ? "done" : resolved ? "skipped" : "todo",
-        note: d.status === 1 ? `Draw by ${fmtTime(d.selectionDeadline)}` : undefined,
+        note: d.status === 1 ? `Round fails if ${n} jurors can’t be seated by ${fmtTime(d.selectionDeadline)}` : undefined,
       },
       {
         label: "Votes cast",
@@ -724,7 +719,8 @@ function JuryCard({ d, n, events, primary }: { d: Dispute; n: number; events: Ma
         {awaiting && (
           <div className="space-y-3 text-[13px]">
             <p className="text-muted">
-              {prevFailed && `Round ${String(prevFailed.args.round)} failed with ${String(prevFailed.args.reveals)} of ${n} votes revealed. `}
+              {prevFailed &&
+                `Round ${String(prevFailed.args.round)} ended without a verdict: ${roundFailure(events, d.id.toString(), Number(prevFailed.args.round), Number(prevFailed.args.reveals ?? 0))}. `}
               {cur !== undefined &&
                 (cur > d.selectionBlock
                   ? `Draw block ${d.selectionBlock.toString()} is mined; the jury can be drawn now.`

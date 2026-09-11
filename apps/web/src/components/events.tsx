@@ -4,8 +4,29 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type { MarketEvent } from "@/lib/client";
 import { fmtAgo, fmtTime, fmtUsdc, maskToIndexes, shortAddr } from "@/lib/format";
-import { GROUND_LABEL, useBlockTimes } from "@/lib/market";
+import { GROUND_LABEL, useBlockTimes, useMarketEvents } from "@/lib/market";
 import { cx, TxLink, type Tone } from "./ui";
+
+/** Outcome of a resolved dispute; getDispute().fallbackNoQuorum marks a no-fault close (_resolveFallback). */
+export function outcomeLabel(o: { fallbackNoQuorum: boolean; verdict: number }): { text: string; tone: Tone } {
+  if (o.fallbackNoQuorum) return { text: "Closed, no fault", tone: "neutral" };
+  return o.verdict === 1 ? { text: "Buyer wins", tone: "ok" } : { text: "Seller wins", tone: "neutral" };
+}
+
+/**
+ * Why a RoundFailed round ended without a verdict, from the events around it. selectJurors emits it with
+ * reveals = 0 and no JurorsSelected when the panel can't be filled after the selection deadline;
+ * tallyDispute emits it with the round's reveal count. The revealed votes come from VoteRevealed.
+ */
+export function roundFailure(all: MarketEvent[] | undefined, disputeId: string, round: number, reveals: number): string {
+  const mine = (all ?? []).filter((x) => String(x.args.disputeId) === disputeId && Number(x.args.round) === round);
+  const seated = reveals > 0 || mine.some((x) => x.eventName === "JurorsSelected");
+  if (!seated) return "no jury was seated by the selection deadline";
+  const votes = mine.filter((x) => x.eventName === "VoteRevealed");
+  const ups = votes.filter((x) => Number(x.args.verdict) === 1).length;
+  const split = votes.length === reveals && reveals > 0 ? ` (${ups} uphold, ${reveals - ups} reject)` : "";
+  return `${reveals} vote${reveals === 1 ? "" : "s"} revealed${split}`;
+}
 
 const s = (e: MarketEvent, k: string) => String(e.args[k] ?? "");
 const b = (e: MarketEvent, k: string) => BigInt((e.args[k] as bigint) ?? 0n);
@@ -17,8 +38,8 @@ const tasks = (mask: bigint) => {
 
 type Described = { title: ReactNode; detail?: ReactNode; tone: Tone; href?: string };
 
-/** Plain-language title and one-line detail for every EnvMarket event. */
-export function describeEvent(e: MarketEvent): Described {
+/** Plain-language title and one-line detail for every EnvMarket event. `all` (the market's events) gives context some events need. */
+export function describeEvent(e: MarketEvent, all?: MarketEvent[]): Described {
   const listing = `/listing/${s(e, "versionId")}`;
   const purchase = `/purchase/${s(e, "purchaseId")}`;
   const dispute = `/dispute/${s(e, "disputeId")}`;
@@ -83,7 +104,12 @@ export function describeEvent(e: MarketEvent): Described {
         href: dispute,
       };
     case "RoundFailed":
-      return { title: `Jury round ${s(e, "round")} had too few votes`, detail: `Dispute #${s(e, "disputeId")} · ${s(e, "reveals")} revealed`, tone: "warn", href: dispute };
+      return {
+        title: `Jury round ${s(e, "round")} ended without a verdict`,
+        detail: `Dispute #${s(e, "disputeId")} · ${roundFailure(all, s(e, "disputeId"), Number(e.args.round), Number(e.args.reveals ?? 0))}`,
+        tone: "warn",
+        href: dispute,
+      };
     case "FallbackNoQuorum":
       return { title: "Closed without a verdict", detail: `Dispute #${s(e, "disputeId")}`, tone: "warn", href: dispute };
     case "VerifierTimeout":
@@ -95,13 +121,17 @@ export function describeEvent(e: MarketEvent): Described {
         tone: e.args.upheld ? "ok" : "neutral",
         href: dispute,
       };
-    case "DisputeResolved":
+    case "DisputeResolved": {
+      // _resolveFallback emits FallbackNoQuorum in the same transaction, right before DisputeResolved
+      const noFault = !!all?.some((x) => x.eventName === "FallbackNoQuorum" && x.transactionHash === e.transactionHash && String(x.args.disputeId) === s(e, "disputeId"));
+      const o = outcomeLabel({ fallbackNoQuorum: noFault, verdict: Number(e.args.verdict) });
       return {
-        title: `Dispute #${s(e, "disputeId")} decided for the ${Number(e.args.verdict) === 1 ? "buyer" : "seller"}`,
+        title: `Dispute #${s(e, "disputeId")}: ${o.text.toLowerCase()}`,
         detail: `Refund ${fmtUsdc(b(e, "refund"))} · seller paid ${fmtUsdc(b(e, "sellerProceeds"))}${b(e, "penalties") > 0n ? ` · penalty ${fmtUsdc(b(e, "penalties"))}` : ""}`,
-        tone: Number(e.args.verdict) === 1 ? "ok" : "neutral",
+        tone: o.tone,
         href: dispute,
       };
+    }
     case "PurchaseSettled":
       return {
         title: `Payment released for purchase #${s(e, "purchaseId")}`,
@@ -171,11 +201,13 @@ const DOT: Record<Tone, string> = {
 
 export function EventList({ events, empty = "No events yet.", compact, showTx = true }: { events: MarketEvent[]; empty?: string; compact?: boolean; showTx?: boolean }) {
   const times = useBlockTimes(events.map((e) => e.blockNumber));
+  const market = useMarketEvents();
+  const all = market.data ?? events;
   if (!events.length) return <p className="py-3 text-sm text-muted">{empty}</p>;
   return (
     <ul className="divide-y divide-line">
       {events.map((e) => {
-        const d = describeEvent(e);
+        const d = describeEvent(e, all);
         const t = times.data?.get(e.blockNumber);
         const body = (
           <div className="min-w-0">

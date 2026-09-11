@@ -33,14 +33,16 @@ import {
 import { marketAbi, tokenAbi } from "@/lib/abi";
 import { deployment, CHAIN_ID } from "@/lib/config";
 import { eqHash, listTar, sha256Hex, utf8, type TarEntry } from "@/lib/crypto";
-import { describe, useDoc } from "@/lib/docs";
+import { describe, useDoc, useHealth, useProtocol } from "@/lib/docs";
 import { wakeJurors } from "@/lib/jurors";
-import { fmtKiB, fmtTime, fmtUsdc, fmtWindow, maskToIndexes, pct, popcount } from "@/lib/format";
+import { fmtKiB, fmtTime, fmtUsdc, fmtWindow, maskToIndexes, pct, popcount, shortAddr } from "@/lib/format";
 import { downloadBytes, useEncKeys } from "@/lib/keys";
 import { useWalletEncKey } from "@/lib/enc-derive";
 import {
-  GROUND_HELP,
   GROUND_LABEL,
+  isMechanical,
+  useIsVerifier,
+  useMarketConstants,
   eventsForPurchase,
   useBlockTimes,
   useClaimable,
@@ -57,6 +59,30 @@ import type { MarketEvent } from "@/lib/client";
 
 function parseId(id: string): bigint | null {
   return /^\d+$/.test(id) && id.length < 30 ? BigInt(id) : null;
+}
+
+/**
+ * Who decides a dispute ground, from the contract: FalseDescription goes to a jury of SEATS jurors; the
+ * other grounds need a finding signed by an isVerifier address. The verifier is named when the TEE's
+ * /health signer holds that role; the re-run tolerance for PreviewNotReproducible comes from TEE GET /protocol.
+ */
+function GroundHelp({ g }: { g: number }) {
+  const consts = useMarketConstants();
+  const health = useHealth();
+  const verifier = useIsVerifier(health.data?.signer);
+  const protocol = useProtocol();
+  if (!isMechanical(g)) return <>Decided by {consts.data ? `${consts.data.seats} ` : ""}staked jurors.</>;
+  const signer = verifier.data === true ? health.data?.signer : undefined;
+  const rep = g === 3 ? protocol.data?.spec?.reproducibility : undefined;
+  const llmTol = typeof rep?.llmRerunTolerancePp === "number" ? rep.llmRerunTolerancePp : undefined;
+  const detTol = typeof rep?.deterministicRegradeTolerance === "number" ? rep.deterministicRegradeTolerance : undefined;
+  return (
+    <>
+      Decided by a finding signed by {signer ? <span title={signer}>the TEE signer {shortAddr(signer)}</span> : "an address with the contract’s verifier role"}.
+      {llmTol !== undefined && ` Re-run tolerance: ${llmTol} percentage points per model.`}
+      {detTol !== undefined && ` Regrade tolerance: ${detTol}.`}
+    </>
+  );
 }
 
 export function PurchaseView({ id }: { id: string }) {
@@ -767,7 +793,9 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
               <input type="radio" name="ground" className="mt-1 accent-[var(--accent-fill)]" checked={ground === g} onChange={() => setGround(g)} />
               <span className="min-w-0">
                 <span className="font-medium text-ink">{GROUND_LABEL[g]}</span>
-                <span className="mt-0.5 block text-xs text-muted">{GROUND_HELP[g]}</span>
+                <span className="mt-0.5 block text-xs text-muted">
+                  <GroundHelp g={g} />
+                </span>
               </span>
             </label>
           ))}

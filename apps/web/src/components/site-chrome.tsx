@@ -85,8 +85,9 @@ function NavLink({ href, active, compact, children }: { href: string; active: bo
 
 /**
  * Test-token strip, shown when the deployment file marks the token as a test token or the token
- * exposes a public faucet: the faucet for the connected wallet (rate-limited on-chain; shows when it
- * can be used again), and a gas faucet link when one is configured and gas isn't sponsored.
+ * exposes a public faucet: the "no value" note (deployment file flag only), the faucet for the
+ * connected wallet (rate-limited on-chain; shows when it can be used again), and a gas faucet link
+ * when one is configured and gas isn't sponsored.
  */
 function TestnetBanner() {
   const { address, isConnected } = useAccount();
@@ -107,24 +108,29 @@ function TestnetBanner() {
   return (
     <div className="border-t border-line bg-panel">
       <div className="mx-auto flex min-h-9 max-w-6xl flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-1.5 text-xs sm:px-6">
-        <span className="inline-flex items-center gap-2 text-muted">
-          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warn" />
-          <span>
-            <span className="font-medium text-ink">Test market.</span> <span translate="no">{token.symbol}</span> is a test token with no value.
+        {TEST_TOKEN && (
+          <span className="inline-flex items-center gap-2 text-muted">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warn" />
+            <span>
+              <span className="font-medium text-ink">Test market.</span> <span translate="no">{token.symbol}</span> is a test token with no value.
+            </span>
           </span>
-        </span>
+        )}
         {deployment &&
           token.hasFaucet &&
           (isConnected ? (
             <span className="flex flex-wrap items-center gap-2" aria-live="polite">
               <button className="btn btn-sm" disabled={faucet.busy || coolingDown} onClick={() => faucet.run("Faucet", { address: deployment!.token, abi: tokenAbi, functionName: "faucet" })}>
-                Get test {token.symbol}
+                Get {TEST_TOKEN ? "test " : ""}
+                {token.symbol}
               </button>
               {coolingDown && <span className="text-muted">Next top-up after {fmtTime(waitUntil)}</span>}
               <FaucetStatus state={faucet.state} />
             </span>
           ) : (
-            <span className="text-muted">{mode === "privy" ? "Sign in" : "Connect a wallet"} to get free test {token.symbol}.</span>
+            <span className="text-muted">
+              {mode === "privy" ? "Sign in" : "Connect a wallet"} to get {token.symbol} from the faucet.
+            </span>
           ))}
         {!sponsored && GAS_FAUCET_URL && (
           <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-muted underline decoration-line-strong underline-offset-[3px] hover:text-ink hover:decoration-accent">
@@ -293,7 +299,7 @@ export function SiteFooter() {
       <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 text-xs text-muted sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <p className="leading-relaxed">
           <span className="font-medium text-ink">RL Environment Market</span> · {CHAIN_NAME}
-          {(TEST_TOKEN || token.hasFaucet) && (
+          {TEST_TOKEN && (
             <>
               , <span translate="no">{token.symbol}</span> has no value
             </>

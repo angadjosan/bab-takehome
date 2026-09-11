@@ -79,6 +79,11 @@ export const getHealth = () => getJson<Health>("/health");
 export type Attestation = { kind?: string; appId?: string | null; verifyUrl?: string | null; quoteDigest?: string | null; signerRoles?: Record<string, boolean | string> | null } & Record<string, unknown>;
 export const getAttestation = () => getJson<Attestation>("/attestation");
 
+/** GET /protocol → the TEE's reference preview protocol (services/tee preview.ts protocolSpec). Only the fields the app renders are typed. */
+export type ProtocolReproducibility = { repeatCount?: number; deterministicRegradeTolerance?: number; deterministicRegrade?: string; llmRerunTolerancePp?: number; llmRerun?: string };
+export type Protocol = { spec: ({ id?: string; reproducibility?: ProtocolReproducibility } & Record<string, unknown>) | null; specCommitment: Hex | null } & Record<string, unknown>;
+export const getProtocol = () => getJson<Protocol>("/protocol");
+
 /* ------------------------------ preview report (strict) ------------------------------ */
 
 export type Outcome = { attempted: number; solved: number; pass1Rounded: number | null };

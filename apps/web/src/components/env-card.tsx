@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo } from "react";
-import { describe, fmtPass, modelRuns, useDoc, useVerifiedReport } from "@/lib/docs";
+import { describe, fmtPass, modelRuns, reportChecksOk, useDoc, useVerifiedReport } from "@/lib/docs";
 import { isZeroHash, useSellerScore, useVersionStats, type Version } from "@/lib/market";
 import { modelName, panelAverage, REFERENCE_MODELS_NOTE } from "@/lib/models";
 import type { ModelResult } from "@/lib/tee";
@@ -48,7 +48,7 @@ export function EnvCard({ v, hidden, onFacts }: { v: Version; hidden?: boolean; 
   const noReport = isZeroHash(v.reportHash);
   const descBad = !!doc.error || doc.data?.ok === false;
   const rv = report.data;
-  const reportBad = !!rv && (!rv.hashMatchesChain || !rv.bundleMatches || !rv.versionMatches || rv.signatureValid === false);
+  const reportBad = !!rv && !reportChecksOk(rv);
   const status: Status = !v.active
     ? { label: "Not for sale", tone: "warn" }
     : noReport

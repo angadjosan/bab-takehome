@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { recoverTypedDataAddress, type Address, type Hex } from "viem";
 import { deployment, TEE_URL } from "./config";
 import { eqHash, sha256Hex } from "./crypto";
-import { fetchBlob, getAttestation, getHealth, getReportBlob, getReportState, type PreviewReport, type SignedReport } from "./tee";
+import { fetchBlob, getAttestation, getHealth, getProtocol, getReportBlob, getReportState, type PreviewReport, type SignedReport } from "./tee";
 import { fetchIsRunner, isZeroHash, useMarketEvents, type Version } from "./market";
 import { fetchEip712Domain } from "./reads-listing";
 
@@ -179,6 +179,18 @@ export function useAttestation() {
 }
 export function useHealth() {
   return useQuery({ queryKey: ["health"], queryFn: getHealth, enabled: !!TEE_URL, staleTime: 60_000, retry: 0 });
+}
+export function useProtocol() {
+  return useQuery({ queryKey: ["protocol"], queryFn: getProtocol, enabled: !!TEE_URL, staleTime: 5 * 60_000, retry: 0 });
+}
+
+/** The report checks out against the chain: sha256 = reportHash, bundle and version match, and its signature (when served) recovers. */
+export function reportChecksOk(rv: ReportVerification) {
+  return rv.hashMatchesChain && rv.bundleMatches && rv.versionMatches && rv.signatureValid !== false;
+}
+/** At least one model has episodes that actually ran (not only infrastructure failures). */
+export function hasValidRuns(r: PreviewReport) {
+  return r.models.some((m) => modelRuns(m).ran);
 }
 
 /** pass1Rounded is an integer percent (multiple of 5) or null when nothing was attempted. */

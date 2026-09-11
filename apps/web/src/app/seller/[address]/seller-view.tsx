@@ -31,7 +31,7 @@ import {
   type TradeRow,
 } from "@/lib/market";
 import { getPreviewQuote, startPreview, type PreviewQuote } from "@/lib/tee";
-import { useHealth } from "@/lib/docs";
+import { hasValidRuns, reportChecksOk, useHealth, useVerifiedReport } from "@/lib/docs";
 import { ClaimBanner, StateBadge } from "../../purchase/[id]/purchase-view";
 
 export function SellerView({ address }: { address: string }) {
@@ -102,7 +102,7 @@ function Body({ a }: { a: Address }) {
           ) : undefined
         }
       >
-        {isMe ? "Your sales, purchases, stake and listings in one place." : "What this seller has sold, how buyers rated it, and how much stake backs its sales."}
+        {isMe ? "Your sales, purchases, stake and listings in one place." : null}
       </PageHeader>
 
       {isMe && <ClaimBanner />}
@@ -132,7 +132,7 @@ function Body({ a }: { a: Address }) {
                     <div className="flex flex-wrap items-center gap-3">
                       <Stars value={rating} size="text-xl" />
                       <span className="font-mono text-xl font-medium text-ink tabular-nums">{fmtDec(rating, 2)}</span>
-                      <span className="text-[13px] text-muted">weighted by what each buyer paid</span>
+                      <span className="text-[13px] text-muted">weighted by each rated sale’s price minus its refund</span>
                     </div>
                   ) : (
                     <div className="text-base font-medium text-ink">No buyer ratings yet</div>
@@ -366,9 +366,22 @@ export function KeeperRow({ id }: { id: bigint }) {
 
 /* ------------------------------ versions + previews ------------------------------ */
 
+/** Preview chip: "Verified preview" only when the report checks out against the chain and at least one model has valid runs. */
+function previewChip(hasReport: boolean, paid: boolean, report: ReturnType<typeof useVerifiedReport>): { text: string; tone: Tone } {
+  if (!hasReport) return paid ? { text: "Preview paid", tone: "info" } : { text: "No preview yet", tone: "neutral" };
+  const rv = report.data;
+  if (rv && !reportChecksOk(rv)) return { text: "Report mismatch", tone: "bad" };
+  if (report.error) return { text: "Report unavailable", tone: "warn" };
+  if (!rv) return { text: "Checking preview", tone: "neutral" };
+  if (!hasValidRuns(rv.report)) return { text: "No valid runs", tone: "warn" };
+  return { text: "Verified preview", tone: "ok" };
+}
+
 function VersionRow({ id, isMe }: { id: bigint; isMe: boolean }) {
   const v = useVersion(id);
   const pi = usePreviewInfo(id);
+  const report = useVerifiedReport(v.data);
+  const events = useMarketEvents();
   const now = useNow();
   if (!v.data)
     return (
@@ -379,6 +392,9 @@ function VersionRow({ id, isMe }: { id: bigint; isMe: boolean }) {
   const hasReport = !isZeroHash(v.data.reportHash);
   const info = pi.data;
   const paid = !!info && info.paidAt > 0 && !info.reclaimed;
+  const chip = previewChip(hasReport, paid, report);
+  const released = events.data?.find((e) => e.eventName === "PreviewFeeReleased" && String(e.args.versionId) === id.toString());
+  const recipient = released?.args.recipient !== undefined ? String(released.args.recipient) : undefined;
   return (
     <li className="space-y-3 px-4 py-3.5 text-sm sm:px-5">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -390,13 +406,25 @@ function VersionRow({ id, isMe }: { id: bigint; isMe: boolean }) {
         </span>
         <span className="flex flex-wrap gap-1.5 sm:ml-auto">
           {!v.data.active && <Chip tone="warn">Not for sale</Chip>}
-          {hasReport ? <Chip tone="ok">Verified preview</Chip> : paid ? <Chip tone="info">Preview running</Chip> : <Chip>No preview yet</Chip>}
+          <Chip tone={chip.tone}>{chip.text}</Chip>
         </span>
       </div>
       {info && info.paidAt > 0 && (
         <p className="text-xs text-muted">
           Preview fee <span className="font-mono tabular-nums">{fmtUsdc(info.fee)}</span>{" "}
-          {info.released ? "paid to the TEE operator" : info.reclaimed ? "returned to the seller" : "held until the report is published"}
+          {info.released ? (
+            recipient ? (
+              <>
+                paid out to <AddressLink address={recipient} />
+              </>
+            ) : (
+              "paid out"
+            )
+          ) : info.reclaimed ? (
+            "returned to the seller"
+          ) : (
+            "held until the report is published"
+          )}
         </p>
       )}
       {isMe && !hasReport && info !== null && info !== undefined && (
@@ -423,7 +451,13 @@ export function PreviewActions({ versionId, paid, reclaimable, deadline }: { ver
     setErr(null);
     try {
       const r = await startPreview(versionId);
-      setRunMsg(r === "running" ? "The preview is running. The report is published on-chain when it finishes." : "The TEE already has a report for this environment and is publishing it.");
+      // the TEE only sends attachReport itself when its /health reports submitTxs
+      const publishes = health.data?.submitTxs === true;
+      setRunMsg(
+        r === "running"
+          ? `The preview is running.${publishes ? " The TEE publishes the report on-chain when it finishes." : ""}`
+          : `The TEE already has a report for this environment${publishes ? " and is publishing it" : ""}.`,
+      );
     } catch (e) {
       setErr((e as Error).message);
     }

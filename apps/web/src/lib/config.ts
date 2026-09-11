@@ -45,8 +45,6 @@ export const chain: Chain = { ...baseChain, rpcUrls: { ...baseChain.rpcUrls, def
 export const CHAIN_NAME = chain.name;
 /** Symbol of the chain's gas currency, from viem's chain definition. */
 export const NATIVE_SYMBOL = chain.nativeCurrency.symbol;
-/** Real money: mainnet USDC. Copy across the app changes accordingly. */
-export const IS_MAINNET = CHAIN_ID === base.id;
 export const IS_LOCAL = CHAIN_ID === foundry.id;
 
 export type Deployment = {

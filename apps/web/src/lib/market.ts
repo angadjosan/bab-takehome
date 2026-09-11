@@ -20,11 +20,7 @@ export const GROUND_LABEL: Record<number, string> = {
   2: "Description is false",
   3: "Preview not reproducible",
 };
-export const GROUND_HELP: Record<number, string> = {
-  1: "The payload differs from its commitment, the key is invalid, the specified build fails, or the environment reproducibly crashes under its declared configuration. Checked by the TEE verifier.",
-  2: "A specific numbered claim in the frozen description contradicts the product. Decided by staked jurors drawn at random.",
-  3: "Re-running the committed reference protocol deviates from the signed preview beyond the precommitted tolerance. Re-run by the TEE.",
-};
+/** openDispute sends FalseDescription to a jury; the other grounds wait for a verifier-signed finding (resolveMechanical). */
 export const isMechanical = (g: number) => g === 1 || g === 3;
 export const DISPUTE_STATUS = ["None", "Awaiting juror selection", "Voting / under review", "Resolved"] as const;
 export const VERDICTS = ["None", "Uphold (buyer wins)", "Reject (seller wins)"] as const;
@@ -351,6 +347,14 @@ export async function fetchMarketConstants(): Promise<MarketConstants> {
 export async function fetchIsRunner(a: Address): Promise<boolean | undefined> {
   const v = await readOptional("isRunner", [a]);
   return typeof v === "boolean" ? v : undefined;
+}
+
+export async function fetchIsVerifier(a: Address): Promise<boolean | undefined> {
+  const v = await readOptional("isVerifier", [a]);
+  return typeof v === "boolean" ? v : undefined;
+}
+export function useIsVerifier(a?: Address | null) {
+  return useQuery({ queryKey: ["is-verifier", a], queryFn: () => fetchIsVerifier(a!), enabled: on && !!a, staleTime: 60_000 });
 }
 
 export async function fetchClaimable(a: Address): Promise<bigint | undefined> {

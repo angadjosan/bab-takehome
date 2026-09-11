@@ -9,15 +9,25 @@ import { DepositAction, WithdrawAction } from "@/components/token-action";
 import { RequireWallet } from "@/components/tx";
 import { AddressLink, Card, Chip, IconArrowRight, Notice, PageHeader, Skeleton, Stat, cx } from "@/components/ui";
 import { fmtUsdc, fmtWindow, pct } from "@/lib/format";
-import { fetchJurorInfo, fetchJurors, useMarketConstants, useMarketEvents, useMarketParams, type JurorInfo } from "@/lib/market";
+import { fetchJurorInfo, fetchJurors, GROUND_LABEL, isMechanical, useMarketConstants, useMarketEvents, useMarketParams, type JurorInfo } from "@/lib/market";
 import { ClaimBanner } from "../purchase/[id]/purchase-view";
+
+/** The dispute grounds openDispute sends to a jury. */
+const JURY_GROUNDS = Object.entries(GROUND_LABEL)
+  .filter(([g]) => !isMechanical(Number(g)))
+  .map(([, label]) => `“${label}”`)
+  .join(", ");
 
 export function JurorsView() {
   const consts = useMarketConstants();
   return (
     <div className="space-y-8">
       <PageHeader title="Jurors">
-        {consts.data ? <>Jurors drawn at random from this pool, {consts.data.seats} per case, decide disputes over a false description.</> : null}
+        {consts.data ? (
+          <>
+            Jurors drawn at random from this pool, {consts.data.seats} per case, decide disputes filed as {JURY_GROUNDS}.
+          </>
+        ) : null}
       </PageHeader>
       <DeploymentGate>
         <Body />
@@ -45,11 +55,16 @@ function Body() {
       .reverse();
   }, [address, events.data]);
 
-  const totals = (jurors.data ?? []).reduce((a, j) => ({ total: a.total + j.total, locked: a.locked + j.locked, eligible: a.eligible + (j.approved && seatStake !== undefined && j.free >= seatStake ? 1 : 0) }), {
-    total: 0n,
-    locked: 0n,
-    eligible: 0,
-  });
+  // jurorList keeps removed jurors (approved = false), so count approval explicitly
+  const totals = (jurors.data ?? []).reduce(
+    (a, j) => ({
+      total: a.total + j.total,
+      locked: a.locked + j.locked,
+      approved: a.approved + (j.approved ? 1 : 0),
+      covered: a.covered + (j.approved && seatStake !== undefined && j.free >= seatStake ? 1 : 0),
+    }),
+    { total: 0n, locked: 0n, approved: 0, covered: 0 },
+  );
 
   return (
     <>
@@ -68,8 +83,8 @@ function Body() {
           ) : (
             <>
               <div className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
-                <Stat label="Approved" value={jurors.data!.length} hint={consts.data ? `of ${consts.data.maxJurors} max` : undefined} />
-                <Stat label="Can be drawn now" value={totals.eligible} hint={consts.data ? `${consts.data.seats} needed per case` : undefined} />
+                <Stat label="Approved" value={totals.approved} hint={consts.data ? `of ${consts.data.maxJurors} max` : undefined} />
+                <Stat label="Free stake ≥ juror stake" value={totals.covered} hint={consts.data ? `${consts.data.seats} seats per case` : undefined} />
                 <Stat label="Staked" value={fmtUsdc(totals.total, { symbol: false })} />
                 <Stat label="Locked in cases" value={fmtUsdc(totals.locked, { symbol: false })} />
               </div>
@@ -101,7 +116,6 @@ function Body() {
                   </table>
                 </div>
               )}
-              {seatStake !== undefined && <p className="text-xs text-muted">A juror can be drawn when their free stake covers one case ({fmtUsdc(seatStake)}).</p>}
             </>
           )}
         </section>
@@ -119,7 +133,7 @@ function Body() {
                   </div>
                   <div className="space-y-1.5">
                     <div className="text-xs font-medium text-ink">Add stake</div>
-                    <DepositAction label="Deposit" functionName="depositJurorStake" hint={seatStake !== undefined ? `keep at least ${fmtUsdc(seatStake)} free to be drawn` : undefined} />
+                    <DepositAction label="Deposit" functionName="depositJurorStake" />
                   </div>
                   <div className="space-y-1.5">
                     <div className="text-xs font-medium text-ink">Withdraw free stake</div>
@@ -181,7 +195,7 @@ function Body() {
 }
 
 function JurorRow({ j, seatStake, me }: { j: JurorInfo; seatStake?: bigint; me?: string }) {
-  const eligible = j.approved && seatStake !== undefined && j.free >= seatStake;
+  const covered = seatStake !== undefined && j.free >= seatStake;
   const isMe = me?.toLowerCase() === j.address.toLowerCase();
   return (
     <tr className={cx(isMe && "bg-accent-soft")}>
@@ -191,7 +205,7 @@ function JurorRow({ j, seatStake, me }: { j: JurorInfo; seatStake?: bigint; me?:
           {isMe && <Chip tone="accent">you</Chip>}
         </span>
       </td>
-      <td>{!j.approved ? <Chip>not approved</Chip> : eligible ? <Chip tone="ok">can be drawn</Chip> : <Chip tone="warn">stake too low</Chip>}</td>
+      <td>{!j.approved ? <Chip>not approved</Chip> : seatStake === undefined ? null : covered ? <Chip tone="ok">free ≥ juror stake</Chip> : <Chip tone="warn">free &lt; juror stake</Chip>}</td>
       <td className="text-right font-mono">{fmtUsdc(j.total, { symbol: false })}</td>
       <td className="text-right font-mono">{fmtUsdc(j.locked, { symbol: false })}</td>
       <td className="text-right font-mono">{fmtUsdc(j.free, { symbol: false })}</td>

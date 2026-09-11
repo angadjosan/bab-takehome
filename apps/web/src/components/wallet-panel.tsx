@@ -64,12 +64,13 @@ export function AccountPanel({ onClose }: { onClose: () => void }) {
         {token.hasFaucet && deployment && (
           <>
             <button className="btn btn-sm mt-2 w-full" disabled={faucet.busy} onClick={() => faucet.run("Faucet", { address: deployment!.token, abi: tokenAbi, functionName: "faucet" })}>
-              Get test {token.symbol}
+              Get {TEST_TOKEN ? "test " : ""}
+              {token.symbol}
             </button>
             <FaucetStatus state={faucet.state} />
           </>
         )}
-        {(TEST_TOKEN || token.hasFaucet) && (
+        {TEST_TOKEN && (
           <p className="mt-2 text-[11px] leading-relaxed text-muted">
             <span translate="no">{token.symbol}</span> is a test token with no value.
           </p>
