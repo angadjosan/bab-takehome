@@ -21,7 +21,7 @@ tests, grading and signing. It does not protect model inference. Local dev mode
 | `keys.ts` | `MNEMONIC` (KMS) → secp256k1 signer at `m/44'/60'/0'/0/0`. X25519 sk = HKDF-SHA256(BIP39 seed, info `envmarket.tee.x25519.v1`). Storage key = HKDF(seed, `envmarket.tee.storage.v1`). Local dev uses `RUNNER_PK` as the ikm. |
 | `store.ts` | Public blob store (`DATA_DIR/blobs/<sha256>`) and private records (AES-256-GCM with the storage key, `ns/id` bound as AAD, root-only dir). |
 | `bundle.ts` | `POST /seller/upload`: unwrap keys, decrypt, check the canonical tar, bundleHash, manifest (bundleDigest, grader digest, image ref, counts), task and audit Merkle roots with the salts, and the public docs. Then a preflight in the sandbox: install `requirements.lock`, import the grader, collect hidden tests, apply reference solutions. |
-| `harness.ts` | The real LLM agent harness: one pass@1 episode per (model, task). |
+| `harnessRunner.ts` | Client for the open-source reference harness `harness/envmarket_coding` (Prime Intellect `verifiers` 0.3.1), run as a subprocess (`--digest`, run, `--regrade`) per harness/README.md. It runs one pass@1 episode per (model, task). This replaced the former TypeScript tool loop, which has been deleted. |
 | `validator.ts` | Fixed versioned prompt, bounded JSON schema, 120-word / 1000-byte render, output screening. |
 | `preview.ts` | `POST /preview/:versionId`: on-chain terms must match the upload. Runs the panel and the validator, builds `report.json`, signs `PreviewReport`, submits `attachReport`. |
 | `relay.ts` | On `Purchased`: build the wrapper, wrap `K_bundle` to `buyerEncPubKey` (EMKW2, aad = wrapperHash), persist, sign `DeliveryReceipt`, then submit `recordDelivery`. |
@@ -77,27 +77,40 @@ against the live `/models` list. It never substitutes a different family; a mode
 listed is reported as `unavailable`. For every model and every purchased task (T1..T5) and
 audit task (A1..A2) it runs one episode (pass@1), with up to `PREVIEW_CONCURRENCY` in parallel.
 
-- **Agent phase.** `python -m grader.env serve` runs offline in the sandbox over a kit holding
-  only `src/`, `grader/` and this task's statement, overlay and visible tests. Hidden tests,
-  solutions and other tasks are absent. The model gets OpenAI-style function calling
-  (`list_files`, `read_file`, `write_file`, `run_visible_tests`, `submit`), temperature 0,
-  seed 1337, an action budget of 12 (submit is free), and a wall-clock budget of
-  `EPISODE_TIME_SEC`.
-- **Grade phase.** A separate sandboxed process with a different uid runs `python -m grader.grade`
-  with the hidden tests.
+- **Harness.** Episodes run in the open-source reference harness `harness/envmarket_coding`
+  (Prime Intellect `verifiers` 0.3.1 `MultiTurnEnv`). The TEE invokes
+  `python -m envmarket_coding.run --bundle … --split purchased|audit --model … --seed 1337
+  --temperature 0 --max-tokens … --action-budget 12 --time-budget EPISODE_TIME_SEC --sandbox docker|unshare
+  [--netdeny runtime/netdeny.py] --venv <grader venv>` once per split, with all panel models.
+- **Agent phase.** Inside the harness sandbox, `python -m grader.env serve` runs offline over a
+  kit holding only `src/`, `grader/` and this task's statement, overlay and visible tests. Hidden
+  tests, solutions and other tasks are absent. The tools are generated from the bundle manifest
+  (`list_files`, `read_file`, `write_file`, `run_visible_tests`, `submit`).
+- **Grade phase.** A separate sandboxed process runs `python -m grader.grade` with the hidden tests.
+- **Records.** Each episode record (`status`, `solved`, `termination`, `grade`, `finalFiles`, `usage`,
+  `transcriptHash`) is mapped onto the TEE's stored episode. A model/task pair the harness never
+  reported counts as an infra failure. Plaintext records and transcripts are moved into the
+  encrypted store and deleted.
 - **Scoring.** Budget exhaustion, timeouts and missing submits count as failures. Infra failures
   are counted as attempted, not solved, and also reported in `infraFailures`. Scores are rounded
   to 5 pp, with purchased and audit reported separately.
-- **Validator.** `deepseek-v4-pro` reads the environment under the fixed prompt. Its output is
+- **Validator.** `deepseek-v4-pro-0813` reads the environment under the fixed prompt. It is the
+  first servable candidate: the pinned `deepseek-v4-pro` is listed by Fireworks but not served, and
+  the substitution is disclosed. Its output is
   screened for ≥8-token copied spans, code, paths, task ids and identifiers, long base64/hex, and
   obedience to embedded instructions. If screening fails, the report says "Explanation withheld by output screening." with the reasons.
 - **Report.** Per-task outcomes and transcripts stay in private records. Job statuses mean "graded"
   or "infra_failure", never solved or unsolved, so jobs don't leak per-task outcomes.
-  `protocol.harnessDigest` commits to the protocol spec (served at `/protocol`), including the
-  reproducibility tolerances.
+  `protocol.harnessDigest` is the sha256 of a published commitment (`/blobs/<digest>`) over:
+  - the protocol spec, including the harness's own `harnessDigest` (a hash of its source and lock),
+    its `protocol`, decoding and the reproducibility tolerances;
+  - the bundle's `toolsDigest`.
+
+  `protocol.promptDigest` is the harness `promptDigest`, and the protocol id is `envmarket.preview.v2`.
 
 **Relay.** The watcher sees `Purchased`. The service builds the wrapper (`relay` = its signer),
-wraps `K_bundle` to `buyerEncPubKey` with a stored ephemeral key and nonce, and persists the record
+wraps `K_bundle` to `buyerEncPubKey` (shared `wrapKeyAsync`: EMKW2, HPKE via @hpke/core, with
+`wrapperHash` as AAD) using a stored ephemeral key, and persists the record
 *before* signing. It then signs `DeliveryReceipt` and submits `recordDelivery`. After a restart
 it reuses the stored record, so the on-chain hashes always match what it serves.
 
@@ -107,8 +120,9 @@ it reuses the stored record, so the on-chain hashes always match what it serves.
   rebuilds and runs `check_tasks.py` twice. A masked task is confirmed only if both runs show a
   grader import failure, a crash, no collected hidden tests, or hidden tests failing on the
   delivered reference solution.
-- *PreviewNotReproducible.* (1) Re-grades every original episode's stored final workspace with a
-  tolerance of 0. (2) Re-runs each model once per masked task, with a per-model pass-rate
+- *PreviewNotReproducible.* Both halves run in the harness. (1) `--regrade` re-grades every
+  original episode's stored final workspace with a tolerance of 0: score and graded tree digest
+  must match. (2) A harness re-run of the masked tasks, once per model, with a per-model pass-rate
   tolerance of 5 pp over the masked tasks. At this population size, one changed outcome exceeds
   that tolerance.
 
@@ -195,6 +209,7 @@ network but runs no seller code; everything after it is offline.
 | `PREVIEW_CONCURRENCY` (6), `EPISODE_TIME_SEC` (300), `MAX_TOKENS` (8192), `VALIDATOR_MODEL` | optional | Preview and validator tuning. |
 | `PREVIEW_RATE_PER_LISTING_PER_HOUR` (3), `PREVIEW_RATE_GLOBAL_PER_HOUR` (12) | optional | Preview rate limits. |
 | `SANDBOX` (`auto`/`docker`/`unshare`), `SANDBOX_IMAGE` | optional | Sandbox selection. |
+| `HARNESS_DIR`, `HARNESS_PYTHON` | image | The reference harness checkout and its Python. The image uses `/app/harness/envmarket_coding` and `/opt/harness-venv/bin/python`; locally the default is `harness/envmarket_coding/.venv`. Without a harness, previews and PreviewNotReproducible checks return 503. |
 | `LLM_PROVIDER=ollama`, `LOCAL_AGENT_MODEL`, `LOCAL_VALIDATOR_MODEL` | local dev only | Harness check without a Fireworks key. It is labeled in the report and refused when `MNEMONIC` is set. |
 | `PREVIEW_CACHE_TRUSTED_SIGNERS` | optional | Comma-separated producer addresses whose sealed preview-cache exports are accepted (this service's own signer is always trusted). |
 | `PREVIEW_CACHE_IMPORT_DIR` | optional | A directory of sealed exports, imported at startup. |
