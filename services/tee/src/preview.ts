@@ -34,7 +34,7 @@ import { getCacheEntry, previewCacheKey, putCacheEntry, signEntry, type PreviewC
 import { abiHas, ZERO32, type VersionTerms } from './chain.ts';
 import { domainOf, requireChain, type Ctx } from './context.ts';
 import { COST_MODEL_VERSION, feeUsdcBaseUnits, quotePreviewCost, tokenBudgetFor, type CostQuote } from './cost.ts';
-import { bundleDigest, missingEpisode, runHarness, selftestShowsNetwork, toEpisodeResult, type EpisodeResult } from './harnessRunner.ts';
+import { bundleDigest, harnessLayoutCheck, missingEpisode, runHarness, selftestSandboxFailure, selftestShowsNetwork, toEpisodeResult, type EpisodeResult } from './harnessRunner.ts';
 import { errMsg, logger } from './log.ts';
 import { llmClient, resolveModels, type ResolvedModels } from './models.ts';
 import { prepareVenv } from './sandbox.ts';
@@ -388,11 +388,17 @@ async function runFresh(ctx: Ctx, versionId: bigint, upload: UploadRecord, model
   const cfg = ctx.cfg;
   const h = requireHarness(ctx);
   if (selftestShowsNetwork()) throw new HttpError(503, 'harness sandbox self-test reached the network from a sandboxed uid; refusing to run seller code (see /health harness.selftest)');
+  const sbFail = selftestSandboxFailure();
+  if (sbFail) throw new HttpError(503, `harness sandbox self-test failed; no episode could run, refusing to produce a report (see /health harness.selftest): ${sbFail.slice(0, 300)}`);
   const { dir: payloadDir, checks } = openBundle(ctx, upload, `pv${versionId}`);
-  const bad = checks.filter((c) => !c.ok);
-  if (bad.length) throw new HttpError(500, 'stored bundle failed integrity checks', bad);
   const auditDir = openAudit(ctx, upload, `pv${versionId}`);
   try {
+    const bad = checks.filter((c) => !c.ok);
+    if (bad.length) throw new HttpError(500, 'stored bundle failed integrity checks', bad);
+    // Same check the harness makes before any task: fail the preview here (no report) rather than
+    // report every episode as an infra failure.
+    const layout = await harnessLayoutCheck(ctx, [payloadDir, auditDir]);
+    if (!layout.ok) throw new HttpError(500, `sandbox layout check failed; refusing to run: ${layout.detail ?? ''}`);
     const dep = await prepareVenv(ctx.sandbox, ctx.cacheRoot, upload.requirementsLock);
     if (!dep.ok) throw new HttpError(500, 'dependency install failed', dep.log.slice(-1000));
     const tools = await bundleDigest(ctx, h, payloadDir, auditDir).catch((e) => {

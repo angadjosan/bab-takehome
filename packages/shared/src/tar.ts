@@ -267,6 +267,12 @@ function assertNoSymlinkComponents(root: string, target: string): void {
 export interface ExtractOptions {
   /** Allow extracting into a non-empty directory (existing files are never overwritten). */
   allowNonEmpty?: boolean;
+  /**
+   * Permission bits for `destDir` itself (e.g. 0o700 for plaintext that other uids must not reach).
+   * Applied with an explicit chmod, so the umask cannot widen or narrow it, and whether or not the
+   * directory already existed. Default: unchanged (created per the umask, existing mode kept).
+   */
+  mode?: number;
 }
 
 /**
@@ -276,8 +282,10 @@ export interface ExtractOptions {
  */
 export function extractTar(bytes: Uint8Array, destDir: string, opts: ExtractOptions = {}): string[] {
   const entries = readTar(bytes);
-  fs.mkdirSync(destDir, { recursive: true });
+  fs.mkdirSync(destDir, { recursive: true, ...(opts.mode !== undefined ? { mode: opts.mode } : {}) });
   if (!fs.statSync(destDir).isDirectory()) throw new Error(`tar: ${destDir} is not a directory`);
+  // before any entry is written, so plaintext never sits in a directory with the wrong mode
+  if (opts.mode !== undefined) fs.chmodSync(destDir, opts.mode);
   if (!opts.allowNonEmpty && fs.readdirSync(destDir).length > 0) {
     throw new Error(`tar: destination ${destDir} is not empty`);
   }

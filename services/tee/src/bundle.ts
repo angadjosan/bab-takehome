@@ -42,7 +42,8 @@ import {
 import type { Hex } from 'viem';
 import type { Ctx } from './context.ts';
 import { errMsg, logger } from './log.ts';
-import { NETDENY, RUNTIME_DIR, grantDir, nextUid, prepareVenv, runSandboxed, scratchDir } from './sandbox.ts';
+import { harnessLayoutCheck } from './harnessRunner.ts';
+import { NETDENY, RUNTIME_DIR, extractPrivate, grantDir, nextUid, prepareVenv, runSandboxed, scratchDir } from './sandbox.ts';
 import { buildValidatorInput, collectFiles } from './validator.ts';
 
 export interface Check {
@@ -180,7 +181,10 @@ export function parseImageRef(text: string): { ref: string; digest: Hex; fields:
   return candidate && m ? { ref: candidate, digest: `0x${m[1]}` as Hex, fields } : null;
 }
 
-/** Decrypt + verify + extract the purchased bundle into a fresh dir (readable by sandbox uids). */
+/**
+ * Decrypt + verify + extract the purchased bundle into a fresh root-only (0700) dir. The harness
+ * copies what each phase may see into per-phase kits; runTaskChecks grants the tree to one phase uid.
+ */
 export function openBundle(ctx: Ctx, rec: Pick<UploadRecord, 'ciphertextHash' | 'bundleHash' | 'bundleKey'>, label: string): { dir: string; checks: Check[] } {
   const checks: Check[] = [];
   const ct = ctx.blobs.get(rec.ciphertextHash);
@@ -198,9 +202,7 @@ export function openBundle(ctx: Ctx, rec: Pick<UploadRecord, 'ciphertextHash' | 
   }
   const bh = sha256Hex(tar);
   checks.push({ name: 'bundle.sha256', ok: bh === rec.bundleHash, detail: bh });
-  const dir = scratchDir(ctx.workRoot, `bundle-${label}`);
-  fs.rmSync(dir, { recursive: true, force: true });
-  extractTar(tar, dir);
+  const dir = extractPrivate(ctx.workRoot, `bundle-${label}`, tar);
   return { dir, checks };
 }
 
@@ -208,10 +210,7 @@ export function openAudit(ctx: Ctx, rec: Pick<UploadRecord, 'uploadId' | 'auditC
   const ct = ctx.priv.getBytes('audit-ct', rec.uploadId.slice(2));
   if (!ct || sha256Hex(ct) !== rec.auditCiphertextHash) throw new Error('audit ciphertext missing or corrupted');
   const tar = decryptFile(rec.auditKey, ct);
-  const dir = scratchDir(ctx.workRoot, `audit-${label}`);
-  fs.rmSync(dir, { recursive: true, force: true });
-  extractTar(tar, dir);
-  return dir;
+  return extractPrivate(ctx.workRoot, `audit-${label}`, tar);
 }
 
 /** Run runtime/check_tasks.py for `taskIds` inside the sandbox. */
@@ -328,10 +327,8 @@ export async function processUpload(ctx: Ctx, body: Record<string, any>): Promis
   }
 
   const label = ciphertextHash.slice(2, 14);
-  const payload = scratchDir(ctx.workRoot, `upload-${label}`);
-  fs.rmSync(payload, { recursive: true, force: true });
-  extractTar(tar, payload);
-  const auditDir = scratchDir(ctx.workRoot, `upload-audit-${label}`);
+  const payload = extractPrivate(ctx.workRoot, `upload-${label}`, tar);
+  let auditDir: string | null = null;
   try {
     // ---------------------------------------------------------------- manifest
     const manifestText = fs.readFileSync(path.join(payload, 'manifest.json'), 'utf8');
@@ -376,12 +373,9 @@ export async function processUpload(ctx: Ctx, body: Record<string, any>): Promis
       need('audit.decrypt', false, errMsg(e));
       throw new UploadError('audit ciphertext does not decrypt', checks);
     }
-    fs.rmSync(auditDir, { recursive: true, force: true });
-    let auditTaskIds: string[] = [];
-    if (manifest.auditTaskCount > 0) {
-      extractTar(auditTar, auditDir);
-      auditTaskIds = listTaskDirs(auditDir);
-    } else fs.mkdirSync(auditDir, { recursive: true });
+    const auditPath = extractPrivate(ctx.workRoot, `upload-audit-${label}`, manifest.auditTaskCount > 0 ? auditTar : null);
+    auditDir = auditPath;
+    const auditTaskIds = manifest.auditTaskCount > 0 ? listTaskDirs(auditPath) : [];
     need('manifest.auditTaskCount', manifest.auditTaskCount === auditTaskIds.length, `manifest ${manifest.auditTaskCount}, asset ${auditTaskIds.length}`);
     claim('auditTaskCount', auditTaskIds.length);
     need('audit.disjoint', !auditTaskIds.some((a) => taskIds.includes(a)));
@@ -413,7 +407,7 @@ export async function processUpload(ctx: Ctx, body: Record<string, any>): Promis
           environmentVersion,
           graderDigest,
           domain: AUDIT_DOMAIN,
-          tasks: auditTaskIds.map((id) => ({ taskId: id, taskHash: taskHashOfDir(path.join(auditDir, id)), salt: salts.audit![id] as Hex })),
+          tasks: auditTaskIds.map((id) => ({ taskId: id, taskHash: taskHashOfDir(path.join(auditPath, id)), salt: salts.audit![id] as Hex })),
         }).root
       : `0x${'00'.repeat(32)}`) as Hex;
     need('auditRoot', auditRoot === manifest.auditRoot, auditRoot);
@@ -441,6 +435,13 @@ export async function processUpload(ctx: Ctx, body: Record<string, any>): Promis
     claim('licenseHash', licenseHash);
     const requirementsLock = fs.readFileSync(path.join(payload, 'requirements.lock'), 'utf8');
 
+    // ---------------------------------------------------------------- sandbox layout
+    // The check the harness runs before every episode (plaintext dirs unreachable by sandbox uids),
+    // on these dirs, made by the same code path as preview's openBundle/openAudit: a regression is
+    // rejected here instead of turning every preview episode into an infra failure.
+    const layout = await harnessLayoutCheck(ctx, [payload, auditPath]);
+    need('sandbox.privateLayout', layout.ok, layout.detail);
+
     const failed = checks.filter((c) => !c.ok);
     if (failed.length) throw new UploadError(`upload rejected: ${failed.map((c) => c.name).join(', ')}`, checks);
 
@@ -459,7 +460,7 @@ export async function processUpload(ctx: Ctx, body: Record<string, any>): Promis
     if (dep.ok) {
       const solutions = fs.existsSync(path.join(payload, 'solutions')) ? path.join(payload, 'solutions') : null;
       const p = await runTaskChecks(ctx, dep.venv, payload, [path.join(payload, 'tasks')], taskIds, solutions);
-      const a = auditTaskIds.length ? await runTaskChecks(ctx, dep.venv, payload, [auditDir], auditTaskIds, null) : { output: { python: '', imports: { ok: true }, tasks: [] } as TaskCheckOutput, raw: '', error: null };
+      const a = auditTaskIds.length ? await runTaskChecks(ctx, dep.venv, payload, [auditPath], auditTaskIds, null) : { output: { python: '', imports: { ok: true }, tasks: [] } as TaskCheckOutput, raw: '', error: null };
       preflight = {
         ...preflight,
         imports: p.output?.imports ?? { ok: false, error: p.error ?? 'no output' },
@@ -546,7 +547,7 @@ export async function processUpload(ctx: Ctx, body: Record<string, any>): Promis
     };
   } finally {
     fs.rmSync(payload, { recursive: true, force: true });
-    fs.rmSync(auditDir, { recursive: true, force: true });
+    if (auditDir) fs.rmSync(auditDir, { recursive: true, force: true });
   }
 }
 

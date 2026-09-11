@@ -23,7 +23,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sha256Hex } from '@envmarket/shared';
+import { extractTar, sha256Hex } from '@envmarket/shared';
 import { errMsg, logger } from './log.ts';
 
 export const RUNTIME_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'runtime');
@@ -287,6 +287,46 @@ export async function prepareVenv(info: SandboxInfo, cacheRoot: string, requirem
 export function scratchDir(root: string, label: string): string {
   fs.mkdirSync(root, { recursive: true });
   return fs.mkdtempSync(path.join(root, `${label.replace(/[^A-Za-z0-9_-]/g, '_')}-`));
+}
+
+/** Mode of every directory that holds decrypted bundle / audit plaintext (hidden tests, solutions). */
+export const PRIVATE_DIR_MODE = 0o700;
+
+/**
+ * Throws unless `dir` is a real directory with no group/other permission bits. The service's parents
+ * (DATA_DIR, work/) are deliberately traversable (0711) so sandbox uids can reach their own scratch
+ * dirs, and `unshare` mode has no mount namespace, so the bundle dir's own mode is the only barrier.
+ * This implies the harness's Sandbox.check_layout (some ancestor denies o+x), which refuses to run any
+ * episode otherwise; runTaskChecks later re-grants the tree per phase (0750 root:<phase gid>).
+ */
+export function assertPrivateDir(dir: string): void {
+  const st = fs.lstatSync(dir);
+  if (!st.isDirectory()) throw new Error(`${dir} is not a directory`);
+  if ((st.mode & 0o077) !== 0) {
+    throw new Error(
+      `${dir} has mode ${(st.mode & 0o777).toString(8).padStart(4, '0')}: bundle and audit plaintext must sit in a ${PRIVATE_DIR_MODE.toString(8).padStart(4, '0')} directory (sandboxed uids share this filesystem)`,
+    );
+  }
+}
+
+/**
+ * The only way decrypted bundle / audit plaintext reaches disk: a fresh root-only directory (mode set
+ * explicitly, so neither the umask nor extractTar's defaults can widen it), then the archive, then a
+ * re-check. `tar === null` creates an empty private dir. Never remove-and-recreate the dir: that is how
+ * it once came back 0755 and every harness episode was refused.
+ */
+export function extractPrivate(root: string, label: string, tar: Uint8Array | null): string {
+  const dir = scratchDir(root, label); // mkdtemp: created 0700
+  try {
+    fs.chmodSync(dir, PRIVATE_DIR_MODE);
+    if (tar) extractTar(tar, dir, { mode: PRIVATE_DIR_MODE });
+    fs.chmodSync(dir, PRIVATE_DIR_MODE);
+    assertPrivateDir(dir);
+  } catch (e) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    throw e;
+  }
+  return dir;
 }
 
 let uidCounter = 0;

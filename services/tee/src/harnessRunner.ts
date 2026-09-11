@@ -18,12 +18,12 @@
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { sha256Hex } from '@envmarket/shared';
+import { sha256Hex, writeTar } from '@envmarket/shared';
 import type { ServiceConfig } from './config.ts';
 import type { Ctx } from './context.ts';
 import { tokenBudgetFor, usageCostUsd } from './cost.ts';
 import { errMsg, logger } from './log.ts';
-import { NETDENY, scratchDir, type SandboxInfo } from './sandbox.ts';
+import { NETDENY, assertPrivateDir, extractPrivate, scratchDir, type SandboxInfo } from './sandbox.ts';
 
 export interface HarnessDigest {
   type: 'digest';
@@ -235,12 +235,21 @@ export function diagLine(s: string): string {
   return line.replace(/\/data\/[^\s'"]*/g, '<path>').replace(/\s+/g, ' ').trim().slice(0, 240);
 }
 
-/** Run `--selftest` with the exact sandbox flags a preview uses; stores and returns the result. */
+/**
+ * Run `--selftest` with the exact sandbox flags a preview uses; stores and returns the result. A canary
+ * directory made by extractPrivate (the code path of openBundle/openAudit) goes in as --private-dir, so
+ * the harness's own layout check (the one load_environment runs before any task) is exercised at boot.
+ */
 export async function harnessSelftest(ctx: Ctx, h: { dir: string; python: string }, model?: string): Promise<Record<string, unknown>> {
   const scratch = harnessScratch(ctx, 'selftest');
   const key = ctx.cfg.llm.apiKey ?? (ctx.cfg.llm.provider === 'ollama' ? 'ollama-local' : '');
+  let canary: string | null = null;
   try {
-    const args = ['--selftest', ...sandboxArgs(ctx.sandbox), '--work-dir', path.join(scratch, 'work'), '--base-url', ctx.cfg.llm.baseUrl, '--api-key-env', 'HARNESS_LLM_API_KEY', ...(model ? ['--model', model] : [])];
+    canary = extractPrivate(ctx.workRoot, 'selftest-canary', writeTar([{ path: 'tasks/canary/tests/test_canary.py', type: 'file', data: new TextEncoder().encode('def test_canary():\n    assert True\n') }]));
+    const args = [
+      '--selftest', ...sandboxArgs(ctx.sandbox), '--work-dir', path.join(scratch, 'work'), '--private-dir', canary,
+      '--base-url', ctx.cfg.llm.baseUrl, '--api-key-env', 'HARNESS_LLM_API_KEY', ...(model ? ['--model', model] : []),
+    ];
     const r = await runPy(h, args, harnessEnv(ctx.cfg, { HARNESS_LLM_API_KEY: key, LLM_BASE_URL: ctx.cfg.llm.baseUrl }), 240_000);
     const line = r.lines.find((l) => l.type === 'selftest') ?? { type: 'selftest', ok: false, error: `no selftest output (exit ${r.code}${r.timedOut ? ', timed out' : ''}): ${diagLine(r.stderr)}` };
     harnessDiag.selftest = { at: new Date().toISOString(), exitCode: r.code, ...line };
@@ -248,6 +257,7 @@ export async function harnessSelftest(ctx: Ctx, h: { dir: string; python: string
     harnessDiag.selftest = { at: new Date().toISOString(), ok: false, error: diagLine(errMsg(e)) };
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
+    if (canary) fs.rmSync(canary, { recursive: true, force: true });
   }
   return harnessDiag.selftest!;
 }
@@ -256,6 +266,47 @@ export async function harnessSelftest(ctx: Ctx, h: { dir: string; python: string
 export function selftestShowsNetwork(): boolean {
   const p = (harnessDiag.selftest?.probe ?? null) as { network?: string } | null;
   return p?.network === 'open';
+}
+
+/**
+ * The self-test's error when it proved that no episode can run: the harness could not set up its
+ * sandbox (SandboxError, e.g. a bundle dir reachable by sandbox uids), or a sandboxed uid could list
+ * the private canary. Previews must refuse (every episode would be an infra failure) rather than
+ * produce a report. Null when the self-test has not run, passed, or failed for another reason (LLM).
+ */
+export function selftestSandboxFailure(): string | null {
+  const s = harnessDiag.selftest;
+  if (!s) return null;
+  const p = (s.probe ?? null) as { layout?: { ok?: boolean }; probe?: string } | null;
+  if (p?.layout?.ok === false) return `a sandboxed uid could list a private bundle dir (${p.probe ?? ''})`;
+  const err = typeof s.error === 'string' ? s.error : '';
+  return err.startsWith('SandboxError') ? err : null;
+}
+
+/**
+ * The layout check every episode depends on, run where a regression is cheap to see (upload, and the
+ * start of a preview before any model call) instead of as per-episode infra failures: each dir must be
+ * root-only (assertPrivateDir); under linux-root the harness's own `--selftest --private-dir` must also
+ * accept them (Sandbox.check_layout, as in load_environment) and a sandboxed uid must fail to list them.
+ */
+export async function harnessLayoutCheck(ctx: Ctx, dirs: string[]): Promise<{ ok: boolean; detail?: string }> {
+  try {
+    for (const d of dirs) assertPrivateDir(d);
+  } catch (e) {
+    return { ok: false, detail: diagLine(errMsg(e)) };
+  }
+  if (ctx.sandbox.kind !== 'linux-root' || !ctx.harness) return { ok: true };
+  const scratch = harnessScratch(ctx, 'layout');
+  try {
+    const args = ['--selftest', ...sandboxArgs(ctx.sandbox), '--work-dir', path.join(scratch, 'work'), ...dirs.flatMap((d) => ['--private-dir', d])];
+    const r = await runPy(ctx.harness, args, harnessEnv(ctx.cfg), 120_000);
+    const line = r.lines.find((l) => l.type === 'selftest');
+    const probe = (line?.probe ?? null) as { layout?: { ok?: boolean }; probe?: string } | null;
+    if (line && !line.error && probe?.layout?.ok === true) return { ok: true };
+    return { ok: false, detail: diagLine(String(line?.error ?? probe?.probe ?? `no selftest output (exit ${r.code}${r.timedOut ? ', timed out' : ''}): ${r.stderr}`)) };
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 function harnessScratch(ctx: Ctx, label: string): string {

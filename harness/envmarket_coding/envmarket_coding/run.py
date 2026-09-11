@@ -188,7 +188,7 @@ async def selftest(args: argparse.Namespace) -> int:
         out["netdenyActive"] = bool(sb.netdeny)
         out["netdenyError"] = sb.netdeny_error
         work_root = Path(args.work_dir).resolve() if args.work_dir else default_work_root()
-        out["probe"] = sb.selftest(work_root)
+        out["probe"] = sb.selftest(work_root, [Path(p) for p in args.private_dir])
         ok = bool(out["probe"]["ok"])
     except Exception as e:  # report, never raise: the caller exposes this as a diagnostic
         out["error"] = f"{type(e).__name__}: {e}"[:400]
@@ -288,6 +288,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="sandbox + provider self-test (no bundle, no seller code): sandbox init, a network probe run as a "
         "sandboxed uid (must be blocked), the verifiers import, and a tiny call to the first --model; one JSON line",
+    )
+    p.add_argument(
+        "--private-dir",
+        action="append",
+        default=[],
+        help="--selftest: a directory created the way bundle/audit dirs are created; it must pass the grader's "
+        "layout check (unreachable by sandbox uids) and a sandboxed uid must fail to list it; repeatable",
     )
     p.add_argument("--bundle", help="purchased payload dir (manifest.json) or seller workspace")
     p.add_argument("--audit-dir", help="audit tasks dir (default <bundle>/audit-tasks)")

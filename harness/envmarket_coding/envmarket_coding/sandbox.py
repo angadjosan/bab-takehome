@@ -58,9 +58,10 @@ BASE_ENV = {
 
 log = logging.getLogger(__name__)
 
-# Run as a sandboxed phase uid by Sandbox.selftest(): it must not reach the network.
+# Run as a sandboxed phase uid by Sandbox.selftest(): it must not reach the network, and must not
+# list or traverse any private dir passed as an argument (sys.argv[1:]).
 _NET_PROBE = """
-import socket
+import os, socket, sys
 r = []
 try:
     socket.create_connection(("1.1.1.1", 443), timeout=5).close()
@@ -72,6 +73,12 @@ try:
     r.append("dns:OPEN")
 except OSError as e:
     r.append("dns:blocked(%s)" % type(e).__name__)
+for i, p in enumerate(sys.argv[1:]):
+    try:
+        os.listdir(p)
+        r.append("private%d:OPEN" % i)
+    except OSError as e:
+        r.append("private%d:blocked(%s)" % (i, type(e).__name__))
 print(" ".join(r))
 """
 
@@ -264,24 +271,35 @@ class Sandbox:
         if cmd.container:
             _ok(["docker", "kill", cmd.container], timeout=15)
 
-    def selftest(self, work_root: Path, timeout_sec: float = 30) -> dict:
+    def selftest(self, work_root: Path, private: list[Path] | None = None, timeout_sec: float = 30) -> dict:
         """Prove the barrier: run a probe as a fresh phase uid through the same command wrapper that
         episodes and graders use (unshare/setpriv/prlimit[/netdeny] or docker) and require that it cannot
-        open a TCP connection. Returns {ok, network, probe, exit, stderr}; runs no seller code."""
+        open a TCP connection. `private` are directories created the way the caller creates bundle /
+        audit dirs (the TEE passes a canary made by its own openBundle code path): they must pass the
+        same check_layout() the grader runs (raises SandboxError otherwise), and in unshare mode the
+        probe must also fail to list them. Returns {ok, network, layout, probe, exit, stderr}; runs no
+        seller code."""
+        private = [Path(p).resolve() for p in (private or [])]
+        for p in private:
+            if not p.is_dir():
+                raise SandboxError(f"selftest private dir {p} does not exist")
         root = self.prepare_root(Path(work_root))
+        self.check_layout([root], private)
         d = Path(tempfile.mkdtemp(prefix="selftest-", dir=root))
         try:
             uid = self.next_uid()
             self.grant(d, uid, True)
-            self.check_layout([root], [])
-            cmd = self.command(Path(sys.prefix), ["-c", _NET_PROBE], d, [], [d], uid, timeout_sec)
+            # docker: private dirs are not mounted, so the probe (correctly) cannot see them either
+            cmd = self.command(Path(sys.prefix), ["-c", _NET_PROBE, *[str(p) for p in private]], d, [], [d], uid, timeout_sec)
             r = subprocess.run(cmd.argv, cwd=cmd.cwd, env=cmd.env, capture_output=True, text=True, timeout=timeout_sec + 30)
             out = r.stdout.strip()
-            ok = r.returncode == 0 and out.startswith("tcp:") and "tcp:OPEN" not in out
+            net_ok = r.returncode == 0 and out.startswith("tcp:") and "tcp:OPEN" not in out
+            layout_ok = r.returncode == 0 and ":OPEN" not in out.replace("tcp:OPEN", "").replace("dns:OPEN", "")
             return {
-                "ok": ok,
-                "network": "open" if "tcp:OPEN" in out else ("blocked" if ok else "unknown"),
-                "probe": out[:200],
+                "ok": net_ok and layout_ok,
+                "network": "open" if "tcp:OPEN" in out else ("blocked" if net_ok else "unknown"),
+                "layout": {"ok": layout_ok, "private": len(private)},
+                "probe": out[:300],
                 "exit": r.returncode,
                 "stderr": r.stderr.strip()[-300:],
             }
