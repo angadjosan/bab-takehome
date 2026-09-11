@@ -33,8 +33,9 @@ import { marketAbi } from "@/lib/abi";
 import { blockUrl, CHAIN_ID, deployment } from "@/lib/config";
 import { useHealth } from "@/lib/docs";
 import { fmtTime, fmtUsdc, maskToIndexes, pct } from "@/lib/format";
-import { eventsForDispute, isMechanical, isZeroHash, readOptional, useBlockNumber, useDispute, useMarketEvents, usePurchase, type Dispute, type Purchase, type Seat } from "@/lib/market";
+import { eventsForDispute, GROUND_LABEL, isMechanical, isZeroHash, readOptional, useBlockNumber, useDispute, useMarketEvents, usePurchase, type Dispute, type Purchase, type Seat } from "@/lib/market";
 import type { MarketEvent } from "@/lib/client";
+import { useSeatsPerRound } from "@/lib/reads-purchase";
 import { eqHash, sha256Hex } from "@/lib/crypto";
 import { fetchBlob, getFindings, loadLocalEvidence, requestCasePacket, type CasePacket, type RationaleDoc } from "@/lib/tee";
 import { listRationales, type ListedRationale } from "@/lib/rationales";
@@ -45,7 +46,10 @@ function parseId(id: string): bigint | null {
 }
 
 const isEmptyAddr = (a: string) => /^0x0+$/.test(a);
-const roundSeats = (d: Dispute, round = d.round) => d.seats.slice((round - 1) * 3, round * 3);
+/** Seats of one round; `n` = jurors per round, read from the contract's seats() view. */
+const roundSeats = (d: Dispute, n: number, round = d.round) => d.seats.slice((round - 1) * n, round * n);
+/** getDispute returns every round's seats back to back, so the round count is seats / seats-per-round. */
+const roundCount = (d: Dispute, n: number) => (n > 0 ? Math.floor(d.seats.length / n) : 0);
 
 /** "task 2" · "tasks 2 and 4" · "tasks 1, 2 and 4" */
 function taskList(mask: bigint) {
@@ -90,8 +94,9 @@ export function DisputeView({ id }: { id: string }) {
 function Inner({ id, raw }: { id: bigint | null; raw: string }) {
   const d = useDispute(id);
   const p = usePurchase(d.data?.purchaseId ?? null);
+  const seats = useSeatsPerRound();
   if (id === null) return <Empty title={`“${raw}” isn’t a dispute number`}>Dispute numbers are whole numbers, like /dispute/1.</Empty>;
-  if (d.isLoading || (d.data && p.isLoading))
+  if (d.isLoading || seats.isLoading || (d.data && p.isLoading))
     return (
       <div className="max-w-4xl space-y-6" aria-busy="true">
         <span className="sr-only">Loading dispute…</span>
@@ -108,16 +113,17 @@ function Inner({ id, raw }: { id: bigint | null; raw: string }) {
       </Empty>
     );
   if (!p.data) return <Empty title="The purchase behind this dispute wasn’t found">{(p.error as Error)?.message?.split("\n")[0]}</Empty>;
-  return <Body d={d.data} p={p.data} />;
+  if (!seats.data) return <Empty title="Couldn’t read the jury size from the contract">{(seats.error as Error)?.message?.split("\n")[0]}</Empty>;
+  return <Body d={d.data} p={p.data} n={seats.data} />;
 }
 
-function Body({ d, p }: { d: Dispute; p: Purchase }) {
+function Body({ d, p, n }: { d: Dispute; p: Purchase; n: number }) {
   const { address } = useAccount();
   const events = useMarketEvents();
   const mine = useMemo(() => (events.data ? eventsForDispute(events.data, d.id) : []), [events.data, d.id]);
   const resolved = d.status === 3;
   const mechanical = isMechanical(d.ground);
-  const hasSeat = !!address && d.status === 2 && roundSeats(d).some((s) => s.juror.toLowerCase() === address.toLowerCase());
+  const hasSeat = !!address && d.status === 2 && roundSeats(d, n).some((s) => s.juror.toLowerCase() === address.toLowerCase());
   const status = resolved ? outcomeLabel(d) : { text: d.status === 1 ? "Waiting for jury" : mechanical ? "Under review" : "Jury voting", tone: "warn" as Tone };
 
   return (
@@ -142,19 +148,15 @@ function Body({ d, p }: { d: Dispute; p: Purchase }) {
             </Link>
           </>
         }
-      >
-        {mechanical
-          ? "The TEE verifier re-checks the disputed tasks and signs a finding. No people or jurors are involved."
-          : "Three staked AI jurors, drawn at random, decide. They vote in secret, then reveal their votes."}
-      </PageHeader>
+      />
 
       <ClaimBanner />
 
-      <Stages d={d} />
+      <Stages d={d} n={n} />
 
-      {!mechanical && <MyJurySeat d={d} />}
-      {mechanical ? <MechanicalCard d={d} events={mine} /> : <JuryCard d={d} events={mine} primary={!hasSeat} />}
-      {resolved && <OutcomeCard d={d} p={p} />}
+      {!mechanical && <MyJurySeat d={d} n={n} />}
+      {mechanical ? <MechanicalCard d={d} p={p} events={mine} /> : <JuryCard d={d} n={n} events={mine} primary={!hasSeat} />}
+      {resolved && <OutcomeCard d={d} p={p} events={events.data} />}
       <ClaimCard d={d} p={p} />
 
       <Details summary="Details: randomness, evidence hash, jurors’ addresses and transactions">
@@ -179,7 +181,7 @@ function Body({ d, p }: { d: Dispute; p: Purchase }) {
             <dd className="font-mono tabular-nums">{fmtUsdc(p.price)}</dd>
           </dl>
         </DetailSection>
-        <DetailSection title="Evidence" hint="The buyer’s evidence is stored privately by the TEE. Only its sha256 is public, on-chain.">
+        <DetailSection title="Evidence hash">
           <HashValue value={d.evidenceHash} />
         </DetailSection>
         {mechanical ? (
@@ -189,14 +191,21 @@ function Body({ d, p }: { d: Dispute; p: Purchase }) {
           </>
         ) : (
           <>
-            <JuryDetails d={d} events={mine} />
-            <RationalesSection d={d} />
-            <DetailSection title="How jurors are paid">
-              <p className="text-xs leading-relaxed text-muted">
-                Each seat locks {fmtUsdc(d.jurorStake)} of stake. A juror who reveals earns up to {fmtUsdc(d.participationFee)} from the case fee; the rest, plus {pct(d.minoritySlashBps)} of each
-                minority juror’s stake, goes to the majority. A juror who doesn’t reveal loses {pct(d.nonRevealSlashBps)} of the stake to the reserve. Agreeing with the majority doesn’t make a
-                vote correct, and jurors may share a base model’s mistakes.
-              </p>
+            <JuryDetails d={d} n={n} events={mine} />
+            <RationalesSection d={d} n={n} />
+            <DetailSection title="Jury terms for this dispute">
+              <dl className="kv">
+                <dt>Seats per round</dt>
+                <dd className="font-mono tabular-nums">{n}</dd>
+                <dt>Stake locked per seat</dt>
+                <dd className="font-mono tabular-nums">{fmtUsdc(d.jurorStake)}</dd>
+                <dt>Participation fee</dt>
+                <dd className="font-mono tabular-nums">{fmtUsdc(d.participationFee)}</dd>
+                <dt>Minority slash</dt>
+                <dd className="font-mono tabular-nums">{pct(d.minoritySlashBps)} of stake</dd>
+                <dt>Non-reveal slash</dt>
+                <dd className="font-mono tabular-nums">{pct(d.nonRevealSlashBps)} of stake</dd>
+              </dl>
             </DetailSection>
           </>
         )}
@@ -212,7 +221,7 @@ type StageState = "done" | "active" | "todo" | "skipped";
 type Stage = { label: string; state: StageState; note?: ReactNode };
 const SR_STATE: Record<StageState, string> = { done: "done", active: "in progress", todo: "not started", skipped: "skipped" };
 
-function Stages({ d }: { d: Dispute }) {
+function Stages({ d, n }: { d: Dispute; n: number }) {
   const now = useNow();
   const resolved = d.status === 3;
   let stages: Stage[];
@@ -231,7 +240,7 @@ function Stages({ d }: { d: Dispute }) {
       { label: "Decided", state: resolved ? "done" : "todo", note: resolved ? fmtTime(d.resolvedAt) : undefined },
     ];
   } else {
-    const rs = roundSeats(d);
+    const rs = roundSeats(d, n);
     const drawn = d.seats.some((s) => !isEmptyAddr(s.juror));
     const anyCommit = d.seats.some((s) => !isZeroHash(s.commitment));
     const anyReveal = d.seats.some((s) => s.revealed);
@@ -243,7 +252,7 @@ function Stages({ d }: { d: Dispute }) {
     stages = [
       { label: "Reported", state: "done", note: fmtTime(d.openedAt) },
       {
-        label: d.round === 2 ? "Jury drawn (round 2)" : "Jury drawn",
+        label: d.round > 1 ? `Jury drawn (round ${d.round})` : "Jury drawn",
         state: d.status === 1 ? "active" : drawn ? "done" : resolved ? "skipped" : "todo",
         note: d.status === 1 ? `Draw by ${fmtTime(d.selectionDeadline)}` : undefined,
       },
@@ -317,23 +326,23 @@ function ClaimCard({ d, p }: { d: Dispute; p: Purchase }) {
   const localOk = local !== null && eqHash(sha256Hex(local), d.evidenceHash);
   const tasks = maskToIndexes(d.taskMask).map((i) => i + 1);
   return (
-    <Card title="The claim" subtitle={`Reported ${fmtTime(d.openedAt)}, inside the buyer’s protection window.`}>
+    <Card title="The claim" subtitle={`Reported ${fmtTime(d.openedAt)}`}>
       <div className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
         <Stat label="Tasks" value={tasks.join(", ") || "—"} hint={`of ${p.taskCount}`} />
-        <Stat label="Refund asked" value={fmtUsdc(d.requested, { symbol: false })} hint={`capped at ${pct(p.refundCapBps)} of the price`} />
-        <Stat label="Buyer’s deposit" value={fmtUsdc(d.bond, { symbol: false })} hint="returned if the buyer wins" />
-        <Stat label="Case fee" value={fmtUsdc(d.caseFee, { symbol: false })} hint="paid by the side that loses" />
+        <Stat label="Refund asked" value={fmtUsdc(d.requested)} hint={`cap ${pct(p.refundCapBps)} of the price`} />
+        <Stat label="Buyer’s deposit" value={fmtUsdc(d.bond)} />
+        <Stat label="Case fee" value={fmtUsdc(d.caseFee)} />
       </div>
       <div className="mt-6 border-t border-line pt-5">
         <h3 className="text-[13px] font-medium text-ink">Evidence</h3>
         {localOk ? (
           <>
-            <p className="mt-1 text-xs text-muted">Your copy, saved in this browser. Seated jurors read it inside the case file the TEE sends them.</p>
+            <p className="mt-1 text-xs text-muted">Your copy, saved in this browser.</p>
             <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-panel-2 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{local}</pre>
           </>
         ) : (
-          <p className="mt-1 text-[13px] text-muted">
-            Private. The buyer uploaded it to the TEE, which shows it only to the seated jurors and the verifier.
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[13px] text-muted">
+            Private. Only its hash is on-chain: <HashValue value={d.evidenceHash} />
           </p>
         )}
       </div>
@@ -343,30 +352,30 @@ function ClaimCard({ d, p }: { d: Dispute; p: Purchase }) {
 
 /* --------------------------------- mechanical --------------------------------- */
 
-function MechanicalCard({ d, events }: { d: Dispute; events: MarketEvent[] }) {
+function MechanicalCard({ d, p, events }: { d: Dispute; p: Purchase; events: MarketEvent[] }) {
   const now = useNow();
   const tx = useTx();
   const res = events.find((e) => e.eventName === "MechanicalResolved");
   const pending = d.status === 2;
+  // no-fault close: no refund, so the seller gets the price less the purchase's snapshotted fee
+  const toSeller = p.price - (p.price * BigInt(p.feeBps)) / 10000n;
   return (
-    <Card
-      title="Review"
-      subtitle={d.ground === 1 ? "The TEE verifier re-checks the files, the key, the build, and how the environment runs." : "The TEE re-runs the preview with the same models and settings and compares the scores."}
-    >
+    <Card title="Review" subtitle={GROUND_LABEL[d.ground]}>
       {pending ? (
         <div className="space-y-4 text-sm">
           <p className="flex items-start gap-2 text-muted">
             <Spinner className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              Under review. The verifier has until {fmtTime(d.verifierDeadline)} (<Countdown to={d.verifierDeadline} doneText="passed" />) to sign a finding.
+              Waiting for the verifier’s signed finding, due {fmtTime(d.verifierDeadline)} (<Countdown to={d.verifierDeadline} doneText="passed" />).
             </span>
           </p>
           {now > d.verifierDeadline && (
             <>
-              <Notice tone="warn" title="The verifier missed its deadline">
-                Anyone can now close the dispute with the agreed no-fault outcome. The buyer gets the deposit back, there is no refund, and the purchase completes normally.
+              <Notice tone="warn" title="No finding by the deadline">
+                Closing it returns the buyer’s <span className="font-mono tabular-nums">{fmtUsdc(d.bond)}</span> deposit with no refund and releases{" "}
+                <span className="font-mono tabular-nums">{fmtUsdc(toSeller)}</span> to the seller.
               </Notice>
-              <RequireWallet why="Anyone can close it. Sign in to send the transaction.">
+              <RequireWallet why="Sign in to send the transaction.">
                 <button className="btn btn-primary" disabled={tx.busy} onClick={() => tx.run("Close with no-fault outcome", { address: deployment!.market, abi: marketAbi, functionName: "timeoutMechanical", args: [d.id] })}>
                   {tx.busy ? "Closing…" : "Close with no-fault outcome"}
                 </button>
@@ -387,7 +396,7 @@ function MechanicalCard({ d, events }: { d: Dispute; events: MarketEvent[] }) {
           </span>
         </div>
       ) : (
-        <p className="text-sm text-muted">{d.fallbackNoQuorum ? "Closed with the no-fault outcome after the verifier missed its deadline." : "No finding recorded."}</p>
+        <p className="text-sm text-muted">{d.fallbackNoQuorum ? "Closed without a finding after the verifier deadline passed." : "No finding recorded."}</p>
       )}
     </Card>
   );
@@ -429,7 +438,7 @@ function FindingsSection({ d }: { d: Dispute }) {
   const f = q.data.findings as Record<string, unknown>;
   const onChain = !isZeroHash(d.findingsHash);
   return (
-    <DetailSection title="Verifier findings" hint={`Published by the TEE (${q.data.source}). Totals only, no audit data.`}>
+    <DetailSection title="Verifier findings" hint={`Source: ${q.data.source}`}>
       <div className="mb-3">
         {onChain ? <Verified ok={eqHash(q.data.computed, d.findingsHash)} okText="sha256 matches the on-chain findingsHash" badText="hash doesn’t match the chain" /> : <Chip>not on-chain yet</Chip>}
       </div>
@@ -482,7 +491,7 @@ function commitmentOf(disputeId: bigint, round: number, verdict: 1 | 2, salt: He
  * (signed challenge), and a manual commit → reveal with the salt kept in this browser. This is an
  * alternative to running the juror agent for that key — don't do both for the same juror.
  */
-function MyJurySeat({ d }: { d: Dispute }) {
+function MyJurySeat({ d, n }: { d: Dispute; n: number }) {
   const { address } = useAccount();
   const now = useNow();
   const commit = useTx();
@@ -491,7 +500,7 @@ function MyJurySeat({ d }: { d: Dispute }) {
   const [choice, setChoice] = useState<1 | 2 | 0>(0);
   const [err, setErr] = useState<string | null>(null);
   const name = useId();
-  const rs = roundSeats(d);
+  const rs = roundSeats(d, n);
   const seat = address ? rs.find((s) => s.juror.toLowerCase() === address.toLowerCase()) : undefined;
   // eslint-disable-next-line react-hooks/set-state-in-effect -- the vote secret lives in localStorage
   useEffect(() => setSecret(address && seat ? loadSecret(d.id, d.round, address) : null), [address, seat, d.id, d.round]);
@@ -561,9 +570,7 @@ function MyJurySeat({ d }: { d: Dispute }) {
               </label>
             ))}
           </div>
-          <p className="text-xs text-muted">
-            Your vote stays hidden until everyone has voted. A random secret is saved in this browser; you need it to reveal, so vote from the browser you’ll reveal from.
-          </p>
+          <p className="text-xs text-muted">A random secret is saved in this browser. You need it to reveal, so reveal from this browser.</p>
           <button className="btn btn-primary" disabled={!choice || commit.busy} onClick={doCommit}>
             {commit.busy ? "Casting vote…" : "Cast hidden vote"}
           </button>
@@ -605,17 +612,13 @@ function MyJurySeat({ d }: { d: Dispute }) {
                 "The reveal window has closed."
               ) : (
                 <>
-                  Reveals open when voting closes (<Countdown to={d.commitDeadline} />) or once all three jurors have voted.
+                  Reveals open when voting closes (<Countdown to={d.commitDeadline} />) or once all {n} jurors have voted.
                 </>
               )}
             </p>
           )}
         </div>
       )}
-
-      <p className="text-xs text-muted">
-        If a juror agent runs with this key, it votes on its own. Vote here only for a key no agent uses: each seat votes once, and only the browser holding the secret can reveal.
-      </p>
     </section>
   );
 }
@@ -698,34 +701,39 @@ function CasePacketView({ disputeId, juror }: { disputeId: bigint; juror: Addres
 
 /* ------------------------------------ jury ------------------------------------ */
 
-function JuryCard({ d, events, primary }: { d: Dispute; events: MarketEvent[]; primary: boolean }) {
+function JuryCard({ d, n, events, primary }: { d: Dispute; n: number; events: MarketEvent[]; primary: boolean }) {
   const now = useNow();
   const block = useBlockNumber();
   const select = useTx();
   const tally = useTx();
   const m = deployment!.market;
   const selections = events.filter((e) => e.eventName === "JurorsSelected");
-  const rounds = Array.from(new Set([1, ...selections.map((e) => Number(e.args.round)), d.round])).filter((r) => r >= 1 && r <= 2).sort();
+  const maxRounds = roundCount(d, n);
+  const rounds = Array.from(new Set([1, ...selections.map((e) => Number(e.args.round)), d.round])).filter((r) => r >= 1 && r <= maxRounds).sort();
   const awaiting = d.status === 1;
   const voting = d.status === 2;
   const cur = block.data;
   const canSelect = awaiting && cur !== undefined && cur > d.selectionBlock;
-  const allRevealed = roundSeats(d).every((s) => s.revealed);
+  const allRevealed = roundSeats(d, n).every((s) => s.revealed);
   const canTally = voting && (now > d.revealDeadline || allRevealed);
+  const prevFailed = events.find((e) => e.eventName === "RoundFailed" && Number(e.args.round) === d.round - 1);
 
   return (
-    <Card title="Jury" subtitle="Three staked AI jurors, drawn at random. The buyer and the seller can’t sit on it.">
+    <Card title="Jury" subtitle={`${n} seats · ${fmtUsdc(d.jurorStake)} stake per seat`}>
       <div className="space-y-6">
         {awaiting && (
           <div className="space-y-3 text-[13px]">
             <p className="text-muted">
-              {d.round === 2 && "Round 1 didn’t reach a majority, so a new jury is drawn without the round 1 jurors. "}
-              The jury is drawn with randomness from a block that didn’t exist when the problem was reported, so nobody can pick the jurors.{" "}
+              {prevFailed && `Round ${String(prevFailed.args.round)} failed with ${String(prevFailed.args.reveals)} of ${n} votes revealed. `}
               {cur !== undefined &&
-                (cur > d.selectionBlock ? "That block is mined, so anyone can draw the jury now." : `${(d.selectionBlock - cur + 1n).toString()} more block${d.selectionBlock - cur + 1n === 1n ? "" : "s"} to go.`)}
+                (cur > d.selectionBlock
+                  ? `Draw block ${d.selectionBlock.toString()} is mined; the jury can be drawn now.`
+                  : `The draw uses block ${d.selectionBlock.toString()}: ${(d.selectionBlock - cur + 1n).toString()} more block${d.selectionBlock - cur + 1n === 1n ? "" : "s"} to go.`)}
             </p>
-            <p className="text-xs text-muted">If three jurors can’t be seated by {fmtTime(d.selectionDeadline)}, this round fails.</p>
-            <RequireWallet why="Anyone can draw the jury. Sign in to send the transaction.">
+            <p className="text-xs text-muted">
+              If {n} jurors can’t be seated by {fmtTime(d.selectionDeadline)}, this round fails.
+            </p>
+            <RequireWallet why="Sign in to send the transaction.">
               <button className={cx("btn", primary && "btn-primary")} disabled={!canSelect || select.busy} onClick={() => select.run("Draw the jury", { address: m, abi: marketAbi, functionName: "selectJurors", args: [d.id] })}>
                 {select.busy ? "Drawing…" : "Draw the jury"}
               </button>
@@ -738,7 +746,7 @@ function JuryCard({ d, events, primary }: { d: Dispute; events: MarketEvent[]; p
 
         {rounds.map((r) => {
           const sel = selections.find((e) => Number(e.args.round) === r);
-          const seats = roundSeats(d, r);
+          const seats = roundSeats(d, n, r);
           if (!sel && seats.every((s) => isEmptyAddr(s.juror))) return null;
           const commitDl = sel ? Number(sel.args.commitDeadline) : d.commitDeadline;
           const revealDl = sel ? Number(sel.args.revealDeadline) : d.revealDeadline;
@@ -763,11 +771,7 @@ function JuryCard({ d, events, primary }: { d: Dispute; events: MarketEvent[]; p
 
         {voting && (
           <div className="space-y-3 border-t border-line pt-5 text-[13px]">
-            <p className="text-muted">
-              Anyone can count the votes after the reveal deadline, or as soon as all three are revealed. A majority of at least two revealed votes decides. Without one, jurors who didn’t reveal lose
-              part of their stake and {d.round === 1 ? "a new jury is drawn" : "the dispute closes with no refund and the buyer’s deposit returned"}.
-            </p>
-            <RequireWallet why="Anyone can count the votes. Sign in to send the transaction.">
+            <RequireWallet why="Sign in to send the transaction.">
               <div className="flex flex-wrap items-center gap-3">
                 <button className={cx("btn", primary && canTally && "btn-primary")} disabled={!canTally || tally.busy} onClick={() => tally.run("Count the votes", { address: m, abi: marketAbi, functionName: "tallyDispute", args: [d.id] })}>
                   {tally.busy ? "Counting…" : "Count the votes"}
@@ -816,13 +820,15 @@ function SeatRow({ i, s }: { i: number; s: Seat }) {
 }
 
 /** Jury randomness and per-seat addresses and transactions, for the Details panel. */
-function JuryDetails({ d, events }: { d: Dispute; events: MarketEvent[] }) {
+function JuryDetails({ d, n, events }: { d: Dispute; n: number; events: MarketEvent[] }) {
   const selections = events.filter((e) => e.eventName === "JurorsSelected");
-  const rounds = [1, 2].filter((r) => selections.some((e) => Number(e.args.round) === r) || roundSeats(d, r).some((s) => !isEmptyAddr(s.juror)));
+  const rounds = Array.from({ length: roundCount(d, n) }, (_, i) => i + 1).filter(
+    (r) => selections.some((e) => Number(e.args.round) === r) || roundSeats(d, n, r).some((s) => !isEmptyAddr(s.juror)),
+  );
   const selUrl = blockUrl(d.selectionBlock);
   return (
     <>
-      <DetailSection title="Jury draw" hint="Seats come from keccak256(blockhash(selectionBlock), prevrandao, disputeId, round). On Base a single sequencer produces blocks and could in principle bias this.">
+      <DetailSection title="Jury draw">
         <dl className="kv">
           <dt>Selection block</dt>
           <dd className="font-mono tabular-nums">
@@ -853,7 +859,7 @@ function JuryDetails({ d, events }: { d: Dispute; events: MarketEvent[] }) {
               </thead>
               <tbody>
                 {rounds.flatMap((r) =>
-                  roundSeats(d, r).map((s, i) => {
+                  roundSeats(d, n, r).map((s, i) => {
                     const lc = s.juror.toLowerCase();
                     const commitEv = events.find((e) => e.eventName === "VoteCommitted" && Number(e.args.round) === r && String(e.args.juror).toLowerCase() === lc);
                     const revealEv = events.find((e) => e.eventName === "VoteRevealed" && Number(e.args.round) === r && String(e.args.juror).toLowerCase() === lc);
@@ -898,22 +904,22 @@ function SelectionRow({ sel }: { sel: MarketEvent }) {
  * one is re-checked here against the chain: hash, chain/market/dispute, seat, revealed vote and the
  * seat's commitment.
  */
-function RationalesSection({ d }: { d: Dispute }) {
+function RationalesSection({ d, n }: { d: Dispute; n: number }) {
   const anyRevealed = d.seats.some((s) => s.revealed);
   const q = useQuery({ queryKey: ["rationales", d.id.toString()], queryFn: () => listRationales(d.id), enabled: anyRevealed, refetchInterval: d.status === 3 ? 30_000 : 10_000, retry: 1 });
   if (!anyRevealed) return null;
   return (
-    <DetailSection title="Juror explanations" hint="Each juror publishes a screened explanation after its own vote is revealed, never before, so it can’t leak a hidden vote.">
+    <DetailSection title="Juror explanations">
       {q.isLoading ? (
         <Skeleton className="h-16" />
       ) : q.error ? (
         <Notice tone="bad">Couldn’t load the explanations: {(q.error as Error).message}</Notice>
       ) : !q.data?.length ? (
-        <p className="text-[13px] text-muted">No explanations published yet. Jurors post theirs shortly after revealing.</p>
+        <p className="text-[13px] text-muted">No explanations published yet.</p>
       ) : (
         <div className="space-y-3">
           {q.data.map((r) => (
-            <RationaleItem key={r.sha256} item={r} d={d} />
+            <RationaleItem key={r.sha256} item={r} d={d} n={n} />
           ))}
         </div>
       )}
@@ -921,10 +927,10 @@ function RationalesSection({ d }: { d: Dispute }) {
   );
 }
 
-function RationaleItem({ item, d }: { item: ListedRationale; d: Dispute }) {
+function RationaleItem({ item, d, n }: { item: ListedRationale; d: Dispute; n: number }) {
   const q = { data: { doc: item.doc, hashOk: item.hashOk, url: item.url } };
   const r: RationaleDoc = q.data.doc;
-  const seats = roundSeats(d, r.round);
+  const seats = roundSeats(d, n, r.round);
   const seat = seats.find((s) => s.juror.toLowerCase() === r.juror.toLowerCase());
   const checks: [string, boolean][] = [
     ["sha256 matches", q.data.hashOk],
@@ -972,39 +978,43 @@ function RationaleItem({ item, d }: { item: ListedRationale; d: Dispute }) {
 
 /* ---------------------------------- outcome ---------------------------------- */
 
-function OutcomeCard({ d, p }: { d: Dispute; p: Purchase }) {
+function OutcomeCard({ d, p, events }: { d: Dispute; p: Purchase; events: MarketEvent[] | undefined }) {
   const upheld = d.verdict === 1;
   const o = outcomeLabel(d);
   const jurorPaid = d.seats.reduce((a, s) => a + s.reward, 0n);
   const jurorSlashed = d.seats.reduce((a, s) => a + s.slashed, 0n);
   const confirmed = maskToIndexes(d.confirmedMask).map((i) => i + 1);
-  const rows: [string, bigint, string][] = [
-    ["Refund to the buyer", d.refund, upheld ? `${confirmed.length} confirmed task${confirmed.length === 1 ? "" : "s"} at the per-task price, within the cap` : "none"],
-    ["Buyer’s deposit", d.bond, upheld || d.fallbackNoQuorum ? "returned in full" : "case fee taken from it, the rest goes to a neutral reserve"],
-    ["Seller receives", p.sellerProceeds, "what the buyer paid, less refund and market fee"],
-    ["Market fee", p.fee, "to the treasury"],
-    ["Seller penalty", p.penalties, "taken from the seller’s collateral into the reserve"],
-    ["Case fee", d.caseFee, upheld ? "paid from the seller’s collateral" : d.fallbackNoQuorum ? "not charged" : "paid from the buyer’s deposit"],
+  // What the buyer got back = their Credited events in the resolving transaction, minus the refund.
+  const resolvedTx = events?.find((e) => e.eventName === "DisputeResolved" && String(e.args.disputeId) === d.id.toString())?.transactionHash;
+  const buyerCredit = resolvedTx
+    ? events!.filter((e) => e.transactionHash === resolvedTx && e.eventName === "Credited" && eqHash(String(e.args.account), p.buyer)).reduce((a, e) => a + BigInt(e.args.amount as bigint), 0n)
+    : undefined;
+  const depositBack = buyerCredit === undefined ? undefined : buyerCredit - d.refund;
+  const rows: [string, bigint | undefined, string?][] = [
+    ["Refund to the buyer", d.refund, upheld ? `${confirmed.length} confirmed task${confirmed.length === 1 ? "" : "s"}` : undefined],
+    ["Deposit returned to the buyer", depositBack, `of ${fmtUsdc(d.bond)}`],
+    ["Seller receives", p.sellerProceeds],
+    ["Market fee", p.fee],
   ];
+  if (p.penalties > 0n) rows.push(["Seller penalty", p.penalties]);
   if (!isMechanical(d.ground)) {
-    rows.push(["Paid to jurors", jurorPaid, "revealing jurors and the majority"]);
-    rows.push(["Taken from jurors", jurorSlashed, "minority votes and jurors who didn’t reveal"]);
+    rows.push(["Paid to jurors", jurorPaid]);
+    rows.push(["Taken from jurors", jurorSlashed]);
   }
   return (
-    <Card title="Outcome" subtitle={`Decided ${fmtTime(d.resolvedAt)}. Each party withdraws its share from its market balance.`}>
+    <Card title="Outcome" subtitle={`Decided ${fmtTime(d.resolvedAt)}`}>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Chip tone={o.tone} dot>
           {o.text}
         </Chip>
         {upheld && confirmed.length > 0 && <span className="text-[13px] text-muted">Confirmed defects: {confirmed.map((i) => `task ${i}`).join(", ")}</span>}
-        {d.fallbackNoQuorum && <span className="text-[13px] text-muted">Closed with the agreed no-fault outcome.</span>}
       </div>
       <dl className="divide-y divide-line text-sm">
         {rows.map(([k, v, hint]) => (
           <div key={k} className="flex items-start justify-between gap-4 py-2.5">
             <dt className="min-w-0">
               <span className="text-ink">{k}</span>
-              <span className="mt-0.5 block text-xs text-muted">{hint}</span>
+              {hint && <span className="mt-0.5 block text-xs text-muted">{hint}</span>}
             </dt>
             <dd className="shrink-0 font-mono tabular-nums text-ink">{fmtUsdc(v)}</dd>
           </div>

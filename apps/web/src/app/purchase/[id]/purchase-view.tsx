@@ -41,7 +41,6 @@ import { useWalletEncKey } from "@/lib/enc-derive";
 import {
   GROUND_HELP,
   GROUND_LABEL,
-  disputeQuote,
   eventsForPurchase,
   useBlockTimes,
   useClaimable,
@@ -52,6 +51,7 @@ import {
   type Purchase,
   type Version,
 } from "@/lib/market";
+import { useDisputeQuote } from "@/lib/reads-purchase";
 import { fetchUrlBytes, getDelivery, putBlob, saveLocalEvidence, uploadEvidence } from "@/lib/tee";
 import type { MarketEvent } from "@/lib/client";
 
@@ -162,7 +162,6 @@ export function ClaimBanner() {
         <div className="font-medium text-ink">
           You have <span className="font-mono tabular-nums">{fmtUsdc(c.data)}</span> to withdraw
         </div>
-        <p className="mt-0.5 text-xs text-muted">Refunds, returned deposits, sale proceeds and juror rewards wait here until you withdraw them.</p>
         <div aria-live="polite">
           <TxStatus state={w.state} />
         </div>
@@ -369,7 +368,7 @@ function DownloadControl({ p, dl, quiet }: { p: Purchase; dl: Download; quiet?: 
   if (!dl.key)
     return (
       <div className="space-y-3">
-        <p className="text-sm text-muted">Unlock the download with the wallet you bought with. It takes one signature and costs nothing.</p>
+        <p className="text-sm text-muted">Unlock the download with the wallet you bought with (one signature, no transaction).</p>
         <button className={btn} disabled={dl.unlocking} onClick={dl.unlock}>
           {dl.unlocking && <Spinner className="h-3.5 w-3.5" />}
           {dl.unlocking ? "Waiting for your signature…" : "Unlock with your wallet"}
@@ -479,7 +478,7 @@ function NextAction({ p, v, isBuyer, dl }: { p: Purchase; v: Version; isBuyer: b
           <p className="flex items-start gap-2 text-sm text-muted" aria-live="polite">
             <Spinner className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
-              It usually arrives within a minute. If it hasn’t arrived in <Countdown to={p.deliveryDeadline} />, the full payment can go back to the buyer.
+              Delivery deadline in <Countdown to={p.deliveryDeadline} />. After that, <span className="font-mono text-ink tabular-nums">{fmtUsdc(p.price)}</span> can be refunded to the buyer.
             </span>
           </p>
         </Panel>
@@ -487,10 +486,9 @@ function NextAction({ p, v, isBuyer, dl }: { p: Purchase; v: Version; isBuyer: b
     return (
       <Panel title="The key never arrived">
         <p className="text-sm text-muted">
-          Nobody delivered the key by {fmtTime(p.deliveryDeadline)}, so the full <span className="font-mono text-ink tabular-nums">{fmtUsdc(p.price)}</span> can go back to the buyer. Anyone can
-          send the refund; you don’t have to be the buyer.
+          No key was delivered by {fmtTime(p.deliveryDeadline)}. <span className="font-mono text-ink tabular-nums">{fmtUsdc(p.price)}</span> can be refunded to the buyer.
         </p>
-        <RequireWallet why="Sign in to send the refund. Any account can do it.">
+        <RequireWallet why="Sign in to send the refund.">
           <button className="btn btn-primary" disabled={refund.busy} onClick={() => refund.run("Refund", { address: m, abi: marketAbi, functionName: "refundUndelivered", args: [p.id] })}>
             {refund.busy ? "Refunding…" : isBuyer ? "Refund my payment" : "Refund the buyer"}
           </button>
@@ -509,10 +507,9 @@ function NextAction({ p, v, isBuyer, dl }: { p: Purchase; v: Version; isBuyer: b
       return (
         <Panel title="Protection window closed">
           <p className="text-sm text-muted">
-            No problem was reported. Anyone can now release <span className="font-mono text-ink tabular-nums">{fmtUsdc(toSeller)}</span> to the seller (the price minus the {pct(p.feeBps)}{" "}
-            marketplace fee).
+            No problem was reported. <span className="font-mono text-ink tabular-nums">{fmtUsdc(toSeller)}</span> can be released to the seller (price minus the {pct(p.feeBps)} marketplace fee).
           </p>
-          <RequireWallet why="Sign in to release the payment. Any account can do it.">
+          <RequireWallet why="Sign in to release the payment.">
             <button className="btn btn-primary" disabled={finalize.busy} onClick={() => finalize.run("Release payment", { address: m, abi: marketAbi, functionName: "finalize", args: [p.id] })}>
               {finalize.busy ? "Releasing…" : "Release payment to the seller"}
             </button>
@@ -532,7 +529,7 @@ function NextAction({ p, v, isBuyer, dl }: { p: Purchase; v: Version; isBuyer: b
       return (
         <Panel title="The buyer is checking the environment">
           <p className="text-sm text-muted">
-            The buyer can report a problem until {fmtTime(p.challengeDeadline)} (<Countdown to={p.challengeDeadline} /> left). If they don’t, the payment can be released to the seller after that.
+            The buyer can report a problem until {fmtTime(p.challengeDeadline)} (<Countdown to={p.challengeDeadline} /> left).
           </p>
         </Panel>
       );
@@ -567,7 +564,7 @@ function NextAction({ p, v, isBuyer, dl }: { p: Purchase; v: Version; isBuyer: b
     return (
       <Panel title="A problem was reported">
         <p className="text-sm text-muted">
-          {dispute.data ? `“${GROUND_LABEL[dispute.data.ground] ?? "Dispute"}”` : "The buyer’s report"} is being reviewed. The payment stays in escrow until there’s a decision.
+          {dispute.data ? `“${GROUND_LABEL[dispute.data.ground] ?? "Dispute"}”` : "The buyer’s report"} is open. No decision yet.
         </p>
         <Link href={`/dispute/${p.disputeId}`} className="btn btn-primary">
           View the report <IconArrowRight className="h-3.5 w-3.5" />
@@ -622,7 +619,7 @@ function SettlementRows({ p }: { p: Purchase }) {
           </div>
         ))}
       </dl>
-      {p.settledAt > 0 && <p className="mt-2 text-xs text-muted">Settled {fmtTime(p.settledAt)}. Each person withdraws their share from their account menu.</p>}
+      {p.settledAt > 0 && <p className="mt-2 text-xs text-muted">Settled {fmtTime(p.settledAt)}.</p>}
     </div>
   );
 }
@@ -646,13 +643,18 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
   const m = deployment!.market;
 
   const selected = popcount(mask);
-  const q = disputeQuote(p.price, p.taskCount, selected, p);
+  // requested refund and bond come from the contract's own quoteDispute view
+  const quote = useDisputeQuote(p.id, mask);
+  const q = quote.data;
+  const perTask = p.taskCount ? p.price / BigInt(p.taskCount) : 0n;
+  const atCap = !!q && selected > 0 && q.requested < BigInt(selected) * perTask;
+  const exampleClaim = claims[0]?.id;
   // For "Description is false" the TEE's case packet picks disputed claims out of the evidence by id
   // (C1, C2, …), so selected claims are written into the text that gets hashed.
   const evidenceText = ground === 2 && claimSel.length ? `Disputed claims: ${claimSel.join(", ")}\n\n${evidence.trim()}` : evidence.trim();
   const evidenceBytes = file ? file.bytes : evidenceText ? utf8(evidenceText) : null;
   const bal = useReadContract({ address: deployment!.token, abi: tokenAbi, functionName: "balanceOf", args: [address!], query: { enabled: !!address, refetchInterval: 8_000 } });
-  const enough = ((bal.data as bigint | undefined) ?? 0n) >= q.bond;
+  const enough = !!q && ((bal.data as bigint | undefined) ?? 0n) >= q.bond;
   const taskIds = tar ? [...new Set(tar.filter((e) => e.path.startsWith("tasks/")).map((e) => e.path.split("/")[1]).filter(Boolean))].sort() : [];
   const ready = ground > 0 && selected > 0 && !!evidenceBytes && (ground !== 2 || claimSel.length > 0 || !!file || /\bC[1-9][0-9]*\b/.test(evidenceText));
   // Inline errors appear after the first failed submit; focus then jumps to the first field that needs attention.
@@ -660,7 +662,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
   const errs = {
     ground: ground === 0 ? "Choose what’s wrong." : null,
     tasks: selected === 0 ? "Pick at least one task." : null,
-    claims: ground === 2 && claims.length > 0 && !claimSel.length && !file && !/\bC[1-9][0-9]*\b/.test(evidenceText) ? "Pick the claim that’s false, or name it (e.g. C3) in your evidence." : null,
+    claims: ground === 2 && claims.length > 0 && !claimSel.length && !file && !/\bC[1-9][0-9]*\b/.test(evidenceText) ? `Pick the claim that’s false, or name it${exampleClaim ? ` (e.g. ${exampleClaim})` : ""} in your evidence.` : null,
     evidence: !evidenceBytes ? "Describe what you found, or attach a file." : null,
   };
   function trySubmit() {
@@ -685,7 +687,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
 
   /** Evidence goes to the TEE first (it returns sha256 of the stored bytes); that hash goes on-chain. */
   async function submit() {
-    if (!evidenceBytes) return;
+    if (!evidenceBytes || !q) return;
     setUploadErr(null);
     setStage("Sending your evidence privately…");
     let hash: Hex;
@@ -712,10 +714,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
 
   return (
     <div id="report-form" className="space-y-6">
-      <p className="text-sm text-muted">
-        Point to a specific problem in specific tasks. If you’re right, those tasks are refunded, up to {pct(p.refundCapBps)} of the price in total. A weak training result on its own doesn’t
-        count.
-      </p>
+      <p className="text-sm text-muted">Refunds are per task, up to {pct(p.refundCapBps)} of the price in total.</p>
 
       <fieldset>
         <legend className="text-sm font-medium text-ink">What’s wrong?</legend>
@@ -742,9 +741,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
       <fieldset>
         <legend className="text-sm font-medium text-ink">Which tasks?</legend>
         {fieldError(errs.tasks)}
-        <p className="mt-1 text-xs text-muted">
-          Each task can be refunded once.{taskIds.length === p.taskCount ? " Names come from the files you downloaded." : ""}
-        </p>
+        {taskIds.length === p.taskCount && <p className="mt-1 text-xs text-muted">Names come from the files you downloaded.</p>}
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {Array.from({ length: p.taskCount }, (_, i) => {
             const bit = 1n << BigInt(i);
@@ -776,7 +773,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
         {fieldError(errs.claims ?? errs.evidence)}
         {ground === 2 && claims.length > 0 && (
           <div className="mt-2">
-            <p className="text-xs text-muted">Which of the seller’s numbered claims are false? Reviewers see exactly these claims.</p>
+            <p className="text-xs text-muted">Which of the seller’s numbered claims are false?</p>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {claims.map((c) => {
                 const on = claimSel.includes(c.id);
@@ -806,9 +803,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
               name="evidence"
               autoComplete="off"
               className="input mt-2 min-h-28 text-sm"
-              placeholder={
-                ground === 2 ? "e.g. C3 says every task runs offline, but task 2’s tests call pypi.org at import time (tests/test_fetch.py)…" : "What you saw, and how someone else can reproduce it…"
-              }
+              placeholder={ground === 2 ? "Which claim is false, what you saw instead, and where (file, task)…" : "What you saw, and how someone else can reproduce it…"}
               value={evidence}
               onChange={(e) => setEvidence(e.target.value)}
             />
@@ -820,15 +815,12 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
             <input
               type="file"
               name="evidenceFile"
-              aria-label="Attach an evidence file, up to 256 KiB"
+              aria-label="Attach an evidence file"
               className="sr-only"
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
-                if (f.size > 256 * 1024) {
-                  setUploadErr("Evidence files can be up to 256 KiB. Attach a smaller file or paste the relevant part as text.");
-                  return;
-                }
+                // size limits are the TEE's; an oversized file is rejected by /evidence-upload with its own message
                 setUploadErr(null);
                 setFile({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) });
               }}
@@ -845,7 +837,6 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
             </>
           )}
         </div>
-        <p className="mt-2 text-xs text-muted">Your evidence goes privately to the reviewers. Only a fingerprint of it is published.</p>
       </fieldset>
 
       <div className="rounded-md bg-panel-2 px-4 py-3">
@@ -854,38 +845,36 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
             <dt className="text-muted">
               Refund if you’re right
               <span className="block text-xs">
-                {selected} task{selected === 1 ? "" : "s"} × {fmtUsdc(q.perTask)}
-                {q.requested === q.cap && selected > 0 ? ", at the cap" : ""}
+                {selected} task{selected === 1 ? "" : "s"} × {fmtUsdc(perTask)}
+                {atCap ? `, capped at ${pct(p.refundCapBps)}` : ""}
               </span>
             </dt>
-            <dd className="font-mono text-ink tabular-nums">{fmtUsdc(q.requested)}</dd>
+            <dd className="font-mono text-ink tabular-nums">{q ? fmtUsdc(q.requested) : "…"}</dd>
           </div>
           <div className="flex items-baseline justify-between gap-4 py-2">
-            <dt className="text-muted">
-              Deposit
-              <span className="block text-xs">You get it back if you’re right</span>
-            </dt>
-            <dd className="font-mono text-ink tabular-nums">{fmtUsdc(q.bond)}</dd>
+            <dt className="text-muted">Deposit</dt>
+            <dd className="font-mono text-ink tabular-nums">{q ? fmtUsdc(q.bond) : "…"}</dd>
           </div>
           <div className="flex items-baseline justify-between gap-4 py-2 last:pb-0">
-            <dt className="text-muted">
-              Review fee
-              <span className="block text-xs">Paid by whoever is wrong</span>
-            </dt>
+            <dt className="text-muted">Review fee</dt>
             <dd className="font-mono text-ink tabular-nums">{fmtUsdc(p.caseFee)}</dd>
           </div>
         </dl>
-        <p className="mt-3 text-xs text-muted">If you’re wrong, the review fee comes out of your deposit and the rest goes to a neutral reserve. The seller never receives it.</p>
+        {quote.error && (
+          <p role="alert" className="mt-3 text-xs text-bad">
+            Couldn’t read the deposit from the contract: {(quote.error as Error).message.split("\n")[0]}
+          </p>
+        )}
       </div>
 
       <div className="space-y-2">
         <button className="btn btn-primary" disabled={!enough || open.busy || !!stage} onClick={trySubmit}>
           {(open.busy || stage) && <Spinner className="h-3.5 w-3.5" />}
-          {open.busy || stage ? busyText : `Submit report${selected > 0 ? ` · ${fmtUsdc(q.bond)} deposit` : ""}`}
+          {open.busy || stage ? busyText : `Submit report${selected > 0 && q ? ` · ${fmtUsdc(q.bond)} deposit` : ""}`}
         </button>
-        {!enough && selected > 0 && (
+        {q && !enough && selected > 0 && (
           <p className="text-xs text-warn">
-            You need {fmtUsdc(q.bond)} for the deposit. Get test {token.symbol} from the bar at the top of the page.
+            You need {fmtUsdc(q.bond)} for the deposit.{token.hasFaucet ? ` Get ${token.symbol} from the bar at the top of the page.` : ""}
           </p>
         )}
         <div aria-live="polite" className="space-y-1">
@@ -937,7 +926,6 @@ function RateBlock({ p, isBuyer }: { p: Purchase; isBuyer: boolean }) {
     <div className="space-y-3 border-t border-line pt-4">
       <div>
         <h3 className="text-sm font-semibold text-ink">How was it?</h3>
-        <p className="mt-0.5 text-xs text-muted">One rating per purchase. It counts toward this environment’s rating and the seller’s score.</p>
       </div>
       <div className="flex items-center gap-1" role="group" aria-label="Rating" onMouseLeave={() => setHover(0)}>
         {[1, 2, 3, 4, 5].map((i) => (
@@ -1014,7 +1002,7 @@ function PurchaseDetails({ p, v, dl, events, eventsLoading }: { p: Purchase; v: 
   return (
     <Details summary={<>Verification details · {summary}</>} status={status} defaultOpen={checksRun && dl.failed}>
       {dl.checks.length > 0 && (
-        <DetailSection title="Checks run in your browser" hint="Your key never leaves this page. The service only hands out the bundle key wrapped for you.">
+        <DetailSection title="Checks run in your browser">
           <ul className="space-y-2">
             {dl.checks.map((c, i) => (
               <li key={i} className="flex items-start gap-2 text-[13px]">
@@ -1032,10 +1020,7 @@ function PurchaseDetails({ p, v, dl, events, eventsLoading }: { p: Purchase; v: 
       )}
 
       {delivered && (
-        <DetailSection
-          title="Delivery receipt"
-          hint="Recorded on-chain by the relay. The contract verified its signature over (purchaseId, buyerEncPubKey, ciphertextHash, wrappedKeyHash, wrapperHash). A receipt shows delivery happened; if the key doesn’t work, report a problem."
-        >
+        <DetailSection title="Delivery receipt">
           <dl className="kv">
             <dt>Relay</dt>
             <dd>
@@ -1093,7 +1078,7 @@ function PurchaseDetails({ p, v, dl, events, eventsLoading }: { p: Purchase; v: 
         </dl>
       </DetailSection>
 
-      <DetailSection title="Terms at purchase" hint="Fixed when the purchase was paid. Later changes to the market never apply to it.">
+      <DetailSection title="Terms at purchase">
         <dl className="kv">
           <dt>Price</dt>
           <dd className="font-mono tabular-nums">
@@ -1122,7 +1107,7 @@ function PurchaseDetails({ p, v, dl, events, eventsLoading }: { p: Purchase; v: 
           <dt>Review fee</dt>
           <dd className="font-mono tabular-nums">{fmtUsdc(p.caseFee)}</dd>
           <dt>Marketplace fee</dt>
-          <dd>{pct(p.feeBps)} of what the seller keeps</dd>
+          <dd>{pct(p.feeBps)}</dd>
           <dt>Seller penalty</dt>
           <dd>
             {pct(p.penaltyBps)} of the price if more than {pct(p.penaltyThresholdBps)} of tasks are confirmed broken
@@ -1140,7 +1125,7 @@ function PurchaseDetails({ p, v, dl, events, eventsLoading }: { p: Purchase; v: 
         </dl>
       </DetailSection>
 
-      <DetailSection title="On-chain history" hint="Every contract event for this purchase, with links to the block explorer.">
+      <DetailSection title="On-chain history">
         {eventsLoading ? <Skeleton className="h-24" /> : <EventList events={[...events].reverse()} compact empty="No events found for this purchase yet." />}
       </DetailSection>
     </Details>

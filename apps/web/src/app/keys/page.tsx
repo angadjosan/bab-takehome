@@ -53,12 +53,10 @@ export default function KeysPage() {
             Generate and download
           </button>
         }
-      >
-        A delivery key is the key your purchases are encrypted to. It is separate from your wallet. The secret half is saved in this browser and nowhere else.
-      </PageHeader>
+      />
 
       <Notice tone="warn" title="Keep a backup of each key file">
-        Clearing site data, switching browsers or using a private window deletes the keys saved here. Anyone with a key file can open the environments delivered to it.
+        Keys are stored only in this browser. Anyone with a key file can open what was delivered to it.
       </Notice>
 
       <section aria-labelledby="keys-title" className="space-y-3">
@@ -66,13 +64,7 @@ export default function KeysPage() {
           Saved in this browser <span className="ml-1 font-mono font-normal text-muted tabular-nums">{keys.length}</span>
         </h2>
         {keys.length === 0 ? (
-          <p className="text-sm text-muted">
-            No keys yet. One is created for you when you buy from any{" "}
-            <Link href="/" className="link">
-              listing
-            </Link>
-            .
-          </p>
+          <p className="text-sm text-muted">No keys saved in this browser.</p>
         ) : (
           <ul className="card divide-y divide-line">
             {keys.map((k) => {
@@ -139,7 +131,7 @@ export default function KeysPage() {
           }}
         >
           <label htmlFor="import-secret" className="block text-xs text-muted">
-            Secret key from a downloaded key file. The public key is worked out in this browser.
+            Secret key from a downloaded key file
           </label>
           <div className="flex flex-col gap-2 sm:flex-row">
             <input

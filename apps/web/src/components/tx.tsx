@@ -6,7 +6,7 @@ import { BaseError, ContractFunctionRevertedError, encodeFunctionData, type Abi,
 import { useAccount, useBalance, useChainId, useConnect, useSwitchChain, useWriteContract } from "wagmi";
 import { BURNER_CONNECTOR_ID } from "@/lib/burner";
 import { publicClient } from "@/lib/client";
-import { CHAIN_ID, CHAIN_NAME, GAS_FAUCET_URL } from "@/lib/config";
+import { chain, CHAIN_ID, CHAIN_NAME, GAS_FAUCET_URL } from "@/lib/config";
 import { SponsorCtx } from "@/lib/sponsor";
 import { BurnerForm, BurnerSwitcher } from "./burner-ui";
 import { PrivyLoginPrompt } from "./privy-login";
@@ -127,20 +127,22 @@ export function RequireWallet({ children, why }: { children: ReactNode; why?: st
     <>
       {noGas && (
         <div className="mb-3 text-xs" role="status">
-          <p className="text-warn">You need a little test ETH for network fees.</p>
+          <p className="text-warn">
+            This wallet has no {CHAIN_NAME} {chain.nativeCurrency.symbol} for network fees.
+          </p>
           <details className="mt-1 text-muted">
             <summary className="cursor-pointer hover:text-ink">Where to get it</summary>
             <p className="mt-1 leading-relaxed">
               {GAS_FAUCET_URL ? (
                 <>
-                  It’s free from a{" "}
+                  Get some from a{" "}
                   <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="link">
                     {CHAIN_NAME} faucet
                   </a>
-                  . Send it to this wallet, then come back.
+                  , send it to this wallet, then come back.
                 </>
               ) : (
-                `Send a little ${CHAIN_NAME} ETH to this wallet, then come back.`
+                `Send some ${CHAIN_NAME} ${chain.nativeCurrency.symbol} to this wallet, then come back.`
               )}
             </p>
           </details>
