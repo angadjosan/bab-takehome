@@ -118,7 +118,7 @@ export type PreviewReport = {
   validator: { model: string; promptVersion: string; promptHash: Hex; explanation: string; screening: { passed: boolean; reasons: string[] } };
   jobs: { jobId: string; startedAt: string; finishedAt: string | null; status: JobStatus }[];
   runtime: { imageDigest: Hex; sandbox: string; network: "none" };
-  attestation: { kind: "eigencompute-tdx" | "none-local-dev"; appId: string | null; signer: Address; quoteDigest: string | null; verifyUrl: string | null };
+  attestation: { kind: "eigencompute-tdx" | "phala-dstack-tdx" | "none-local-dev"; appId: string | null; signer: Address; quoteDigest: string | null; verifyUrl: string | null };
   signer: Address;
   createdAt: string;
   cachedFrom?: { originalRunAt: string; originalVersionId: string; originalChainId: number };
@@ -211,7 +211,7 @@ export function checkReportSchema(r: unknown): string[] {
   else x.jobs.forEach((j, i) => obj(j, `jobs[${i}]`, KEYS.job) && !JOB_STATUSES.includes(j.status) && out.push(`jobs[${i}].status is ${String(j.status)}`));
   if (obj(x.runtime, "runtime", KEYS.runtime) && x.runtime.network !== "none") out.push(`runtime.network is ${String(x.runtime.network)}`);
   if (obj(x.attestation, "attestation", KEYS.attestation)) {
-    if (x.attestation.kind !== "eigencompute-tdx" && x.attestation.kind !== "none-local-dev") out.push(`attestation.kind is ${String(x.attestation.kind)}`);
+    if (!["eigencompute-tdx", "phala-dstack-tdx", "none-local-dev"].includes(x.attestation.kind)) out.push(`attestation.kind is ${String(x.attestation.kind)}`);
     if (!ADDR.test(String(x.attestation.signer))) out.push("attestation.signer is not an address");
   }
   if (!ADDR.test(String(x.signer))) out.push("signer is not an address");

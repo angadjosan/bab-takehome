@@ -6,6 +6,7 @@ import { IS_MAINNET } from "@/lib/config";
 import { isZeroHash, type Version } from "@/lib/market";
 import { fmtTime } from "@/lib/format";
 import type { ModelResult } from "@/lib/tee";
+import { PhalaVerification, phalaTrustUrl, teeBadge } from "./phala-attestation";
 import { AddressLink, Chip, DetailSection, HashValue, IconExternal, Notice, Skeleton, Spinner, TxLink, Verified } from "./ui";
 
 const iso = (s?: string | null) => (s ? fmtTime(Date.parse(s) / 1000) : "—");
@@ -308,15 +309,16 @@ export function ReportDetails({ v }: { v: Version }) {
 function AttestationBlock({ rv }: { rv: ReportVerification }) {
   const live = useAttestation();
   const att = rv.report.attestation;
-  const real = att.kind === "eigencompute-tdx";
-  // EigenCompute's verify dashboard; the testnet deployment runs in the EigenCompute sepolia environment
-  const verifyUrl = att.verifyUrl ?? (real && att.appId ? `https://${IS_MAINNET ? "verify" : "verify-sepolia"}.eigencloud.xyz/app/${att.appId}` : null);
+  const real = att.kind !== "none-local-dev";
+  const phala = att.kind === "phala-dstack-tdx";
+  // Phala Trust Center report, or EigenCompute's verify dashboard (sepolia environment on testnet)
+  const verifyUrl = att.verifyUrl ?? (phala && att.appId ? phalaTrustUrl(att.appId) : real && att.appId ? `https://${IS_MAINNET ? "verify" : "verify-sepolia"}.eigencloud.xyz/app/${att.appId}` : null);
   const signer = rv.recoveredSigner ?? rv.report.signer;
   const roles = live.data?.signerRoles;
   return (
     <DetailSection title="Execution attestation">
       <div className="mb-3">
-        <Chip tone={real ? "ok" : "warn"}>{real ? "EigenCompute · Intel TDX" : "none-local-dev: not a TEE"}</Chip>
+        <Chip tone={real ? "ok" : "warn"}>{teeBadge(att.kind)}</Chip>
         {!real && <p className="mt-2 text-xs text-warn">This report came from the service running in local development mode. The host machine could see everything; no hardware attestation backs it.</p>}
       </div>
       <dl className="kv">
@@ -358,12 +360,20 @@ function AttestationBlock({ rv }: { rv: ReportVerification }) {
         <dd>
           {verifyUrl ? (
             <a href={verifyUrl} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1">
-              EigenCloud verification dashboard <IconExternal />
+              {phala ? "Phala Trust Center report" : "EigenCloud verification dashboard"} <IconExternal />
             </a>
           ) : (
             "—"
           )}
         </dd>
+        {phala && (
+          <>
+            <dt>Quote check</dt>
+            <dd>
+              <PhalaVerification versionId={rv.report.versionId} reportHash={rv.computedHash} />
+            </dd>
+          </>
+        )}
         <dt>Live /attestation</dt>
         <dd className="text-xs">{live.isLoading ? "Loading…" : live.error ? <span className="text-bad">unavailable ({(live.error as Error).message})</span> : live.data ? <LiveAtt data={live.data} /> : "—"}</dd>
       </dl>
@@ -373,7 +383,7 @@ function AttestationBlock({ rv }: { rv: ReportVerification }) {
           <ul className="mt-1 list-disc space-y-0.5 pl-4">
             <li>The report bytes you see hash to the reportHash committed on-chain for this exact version.</li>
             <li>The signing key belongs to an address the market owner authorized as a runner.</li>
-            {real && <li>The attestation binds that key to a specific app image running in an Intel TDX confidential VM on EigenCompute.</li>}
+            {real && <li>The attestation binds that key to a specific app image running in an Intel TDX confidential VM on {phala ? "Phala Cloud (dstack)" : "EigenCompute"}.</li>}
           </ul>
         </div>
         <div>

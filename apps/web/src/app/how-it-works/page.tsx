@@ -67,10 +67,10 @@ export default function HowItWorks() {
 
         <Section id="trust" title="Who you’re trusting" lead="Each of these can hurt a buyer if it misbehaves or fails.">
           <div className="divide-y divide-line border-y border-line">
-            <Trust t="EigenCompute operator and Intel TDX hardware">
-              The preview runner, validator, key-delivery relay and mechanical verifier all run in one app inside an Intel TDX confidential VM on EigenCompute. Its signing key comes from the
-              platform’s KMS, and its attestation binds the key to a specific image digest (each report links to the EigenCloud verification dashboard). You trust the hardware vendor, the
-              platform’s attestation and KMS, and that the published image does what its source says. Hardware attacks such as TEE.fail (memory interposition, extracted attestation keys) exist;
+            <Trust t="Phala Cloud (dstack) operator, its KMS and Intel TDX hardware">
+              The preview runner, validator, key-delivery relay and mechanical verifier all run in one app inside an Intel TDX confidential VM on Phala Cloud (dstack). Its signing key comes from
+              Phala’s KMS for this app, and its TDX quote binds the key to a compose file that pins the image by digest (each report links to the Phala Trust Center, and this site re-checks the
+              quote). You trust the hardware vendor, Phala’s KMS operator, and that the published image does what its source says. The developer can push a new image to the same app. Hardware attacks such as TEE.fail (memory interposition, extracted attestation keys) exist;
               they don’t mean every deployment is compromised.
             </Trust>
             <Trust t="The TEE app as runner, relay and verifier" flag={{ tone: "warn", label: "Single operator" }}>
