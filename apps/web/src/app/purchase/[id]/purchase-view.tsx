@@ -10,7 +10,26 @@ import { EventList } from "@/components/events";
 import { useTokenInfo, useWalletMode } from "@/components/providers";
 import { RequireWallet, TxStatus, useTx } from "@/components/tx";
 import { useApproveAndCall } from "@/components/tx-sequence";
-import { AddressLink, Card, Countdown, Empty, HashValue, Notice, Skeleton, Spinner, Stars, Verified, cx, useNow, IconCheck, IconX, TxLink } from "@/components/ui";
+import {
+  AddressLink,
+  Chip,
+  Countdown,
+  DetailSection,
+  Details,
+  Empty,
+  HashValue,
+  IconArrowRight,
+  IconCheck,
+  IconX,
+  PageHeader,
+  PurchaseStateChip,
+  Skeleton,
+  Spinner,
+  Stars,
+  Verified,
+  cx,
+  useNow,
+} from "@/components/ui";
 import { marketAbi, tokenAbi } from "@/lib/abi";
 import { deployment, CHAIN_ID } from "@/lib/config";
 import { decryptBundle, encKeyFromSecret, eqHash, listTar, sha256Hex, unwrapBundleKeyAsync, utf8, type TarEntry } from "@/lib/crypto";
@@ -50,16 +69,40 @@ export function PurchaseView({ id }: { id: string }) {
 function Inner({ id, raw }: { id: bigint | null; raw: string }) {
   const p = usePurchase(id);
   const v = useVersion(p.data?.versionId ?? null);
-  if (id === null) return <Empty title={`“${raw}” is not a purchase id`} />;
+  const back = (
+    <Link href="/" className="btn btn-sm">
+      Browse environments
+    </Link>
+  );
+  if (id === null)
+    return (
+      <Empty title={`“${raw}” isn’t a purchase number`} action={back}>
+        Purchase numbers are whole numbers, like /purchase/12.
+      </Empty>
+    );
   if (p.isLoading || (p.data && v.isLoading))
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-20" />
-        <Skeleton className="h-64" />
+      <div className="mx-auto max-w-3xl space-y-8" aria-busy="true" aria-label="Loading purchase…">
+        <div className="space-y-3">
+          <Skeleton className="h-3 w-40" />
+          <Skeleton className="h-8 w-80 max-w-full" />
+        </div>
+        <Skeleton className="h-16" />
+        <Skeleton className="h-40" />
       </div>
     );
-  if (p.error || !p.data) return <Empty title={`Purchase #${raw} not found`}>{(p.error as Error)?.message}</Empty>;
-  if (!v.data) return <Empty title="Version not found">{(v.error as Error)?.message}</Empty>;
+  if (p.error || !p.data)
+    return (
+      <Empty title={`Purchase #${raw} not found`} action={back}>
+        {(p.error as Error)?.message?.split("\n")[0] ?? "There’s no purchase with this number on this market."}
+      </Empty>
+    );
+  if (!v.data)
+    return (
+      <Empty title="The environment for this purchase couldn’t be loaded" action={back}>
+        {(v.error as Error)?.message?.split("\n")[0] ?? "Reload the page to try again."}
+      </Empty>
+    );
   return <PurchaseBody p={p.data} v={v.data} />;
 }
 
@@ -71,54 +114,40 @@ function PurchaseBody({ p, v }: { p: Purchase; v: Version }) {
   const d = describe(desc.data?.json);
   const isBuyer = !!address && address.toLowerCase() === p.buyer.toLowerCase();
   const isSeller = !!address && address.toLowerCase() === p.seller.toLowerCase();
-  const [tar, setTar] = useState<TarEntry[] | null>(null);
+  const dl = useDownload(p, v, isBuyer && p.deliveredAt > 0);
+  const title = d.title ?? `Environment #${v.id}`;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <Link href={`/listing/${v.id}`} className="text-xs text-muted hover:text-ink">
-          ← {d.title ?? `Version #${v.id}`}
-        </Link>
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Purchase #{p.id.toString()}</h1>
-          <StateBadge state={p.state} />
-          {isBuyer && <span className="badge badge-accent">you are the buyer</span>}
-          {isSeller && <span className="badge badge-accent">you are the seller</span>}
-        </div>
-        <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted">
-          <span>
-            Buyer <AddressLink address={p.buyer} seller />
-          </span>
-          <span>
-            Seller <AddressLink address={p.seller} seller />
-          </span>
-          <span>Price {fmtUsdc(p.price)}</span>
-        </div>
-      </div>
+    <div className="mx-auto max-w-3xl space-y-8">
+      <PageHeader
+        back={{ href: `/listing/${v.id}`, label: title }}
+        eyebrow={`Purchase #${p.id.toString()}`}
+        title={title}
+        meta={
+          <>
+            <PurchaseStateChip state={p.state} long />
+            {isBuyer && <Chip tone="accent">You bought this</Chip>}
+            {isSeller && <Chip tone="accent">You sold this</Chip>}
+            <span>
+              Price <span className="font-mono text-ink tabular-nums">{fmtUsdc(p.price)}</span>
+            </span>
+          </>
+        }
+      />
 
       <ClaimBanner />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="min-w-0 space-y-6">
-          <Timeline p={p} events={mine} />
-          <NextActions p={p} v={v} isBuyer={isBuyer} tar={tar} />
-          {p.deliveredAt > 0 && <DeliveryCard p={p} v={v} isBuyer={isBuyer} onTar={setTar} />}
-        </div>
-        <aside className="space-y-6">
-          <TermsSnapshot p={p} />
-          {(p.state === "Settled" || p.state === "Refunded") && <SettlementCard p={p} />}
-          <Card title="On-chain history" subtitle="Every event touching this purchase.">
-            {events.isLoading ? <Skeleton className="h-24" /> : <EventList events={[...mine].reverse()} compact />}
-          </Card>
-        </aside>
-      </div>
+      <Tracker p={p} events={mine} />
+
+      <NextAction p={p} v={v} isBuyer={isBuyer} dl={dl} />
+
+      <PurchaseDetails p={p} v={v} dl={dl} events={mine} eventsLoading={events.isLoading} />
     </div>
   );
 }
 
 export function StateBadge({ state }: { state: string }) {
-  const tone = { Funded: "badge-info", Delivered: "badge-accent", Disputed: "badge-warn", Refunded: "badge-neutral", Settled: "badge-ok" }[state] ?? "badge-neutral";
-  return <span className={cx("badge", tone)}>{state}</span>;
+  return <PurchaseStateChip state={state} />;
 }
 
 export function ClaimBanner() {
@@ -127,291 +156,141 @@ export function ClaimBanner() {
   const w = useTx();
   if (!address || !c.data || c.data === 0n || !deployment) return null;
   return (
-    <div className="card flex flex-wrap items-center justify-between gap-3 border-warn/40 bg-warn-soft px-5 py-3">
-      <div className="text-sm">
-        <span className="font-semibold text-warn">{fmtUsdc(c.data)} is waiting for you in the market.</span>{" "}
-        <span className="text-muted">Refunds, returned bonds, seller proceeds and juror rewards are credited here (pull payments) and must be withdrawn.</span>
-        <TxStatus state={w.state} />
+    <div className="card flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 py-3.5 sm:px-5">
+      <div className="min-w-0 text-sm">
+        <div className="font-medium text-ink">
+          You have <span className="font-mono tabular-nums">{fmtUsdc(c.data)}</span> to withdraw
+        </div>
+        <p className="mt-0.5 text-xs text-muted">Refunds, returned deposits, sale proceeds and juror rewards wait here until you withdraw them.</p>
+        <div aria-live="polite">
+          <TxStatus state={w.state} />
+        </div>
       </div>
       <button className="btn btn-primary btn-sm" disabled={w.busy} onClick={() => w.run("Withdraw", { address: deployment!.market, abi: marketAbi, functionName: "withdraw" })}>
-        Withdraw
+        {w.busy ? "Withdrawing…" : "Withdraw"}
       </button>
     </div>
   );
 }
 
-/* --------------------------------- timeline --------------------------------- */
+/* --------------------------------- progress --------------------------------- */
 
-function Timeline({ p, events }: { p: Purchase; events: MarketEvent[] }) {
+type StepState = "done" | "active" | "todo";
+type Step = { key: string; label: string; state: StepState; sub?: ReactNode };
+
+function Tracker({ p, events }: { p: Purchase; events: MarketEvent[] }) {
   const now = useNow();
-  const find = (n: string) => events.find((e) => e.eventName === n);
   const dispute = useDispute(p.disputeId > 0n ? p.disputeId : null);
   const times = useBlockTimes(events.map((e) => e.blockNumber));
-  const disputeEv = find("DisputeOpened");
+  const disputeEv = events.find((e) => e.eventName === "DisputeOpened");
+  const at = (t?: number) => (t ? fmtTime(t) : undefined);
 
-  type S = { key: string; label: string; state: "done" | "active" | "todo" | "skipped"; at?: number; tx?: string; body: ReactNode };
-  const steps: S[] = [
-    {
-      key: "funded",
-      label: "Funded",
-      state: "done",
-      at: p.fundedAt,
-      tx: find("Purchased")?.transactionHash,
-      body: `${fmtUsdc(p.price)} escrowed in the contract; ${fmtUsdc(p.collateral)} of seller collateral reserved for this purchase.`,
-    },
-  ];
+  const steps: Step[] = [{ key: "paid", label: "Paid", state: "done", sub: at(p.fundedAt) }];
   if (p.state === "Refunded" && p.deliveredAt === 0) {
-    steps.push({ key: "undelivered", label: "Not delivered in time", state: "done", at: p.deliveryDeadline, body: "The relay did not record a delivery receipt before the deadline." });
-    steps.push({ key: "refunded", label: "Refunded", state: "done", at: p.settledAt, tx: find("RefundedUndelivered")?.transactionHash, body: `Full price (${fmtUsdc(p.price)}) credited back to the buyer; collateral released.` });
+    steps.push({ key: "undelivered", label: "Not delivered", state: "done", sub: at(p.deliveryDeadline) });
+    steps.push({ key: "refunded", label: "Refunded", state: "done", sub: at(p.settledAt) });
   } else {
     steps.push({
       key: "delivered",
-      label: "Key delivered",
+      label: "Delivered",
       state: p.deliveredAt ? "done" : "active",
-      at: p.deliveredAt || undefined,
-      tx: find("Delivered")?.transactionHash,
-      body: p.deliveredAt ? (
-        "The TEE relay wrapped the bundle key to the buyer’s encryption key and its signed receipt was verified on-chain. The challenge clock started."
+      sub: p.deliveredAt ? (
+        at(p.deliveredAt)
       ) : (
         <>
-          Waiting for the TEE relay to deliver. Deadline {fmtTime(p.deliveryDeadline)} (<Countdown to={p.deliveryDeadline} doneText="passed: full refund available" />
-          ).
+          Due in <Countdown to={p.deliveryDeadline} doneText="overdue" />
         </>
       ),
     });
     if (p.disputeId > 0n) {
-      steps.push({
-        key: "disputed",
-        label: `Disputed (#${p.disputeId})`,
-        state: p.state === "Disputed" ? "active" : "done",
-        at: dispute.data?.openedAt ?? (disputeEv ? times.data?.get(disputeEv.blockNumber) : undefined),
-        tx: disputeEv?.transactionHash,
-        body: (
-          <>
-            {GROUND_LABEL[dispute.data?.ground ?? 0] ?? "Dispute"} filed before the deadline; normal finalization is frozen.{" "}
-            <Link href={`/dispute/${p.disputeId}`} className="link">
-              Open the dispute →
-            </Link>
-          </>
-        ),
-      });
-    } else if (p.deliveredAt) {
-      const open = now <= p.challengeDeadline;
+      const openedAt = dispute.data?.openedAt ?? (disputeEv ? times.data?.get(disputeEv.blockNumber) : undefined);
+      steps.push({ key: "reported", label: "Problem reported", state: p.state === "Disputed" ? "active" : "done", sub: at(openedAt) });
+      steps.push({ key: "decided", label: "Decided", state: p.state === "Settled" ? "done" : "todo", sub: p.state === "Settled" ? at(p.settledAt) : "Under review" });
+    } else {
+      const open = !!p.deliveredAt && now <= p.challengeDeadline;
       steps.push({
         key: "window",
-        label: "Challenge window",
-        state: p.state === "Settled" ? "done" : open ? "active" : "done",
-        at: p.challengeDeadline,
-        body: open ? (
+        label: "Protection window",
+        state: !p.deliveredAt ? "todo" : p.state === "Settled" || !open ? "done" : "active",
+        sub: !p.deliveredAt ? (
+          `${fmtWindow(p.challengeWindow)} after delivery`
+        ) : open ? (
           <>
-            The buyer can dispute specific tasks until {fmtTime(p.challengeDeadline)} (<Countdown to={p.challengeDeadline} /> left).
+            Ends in <Countdown to={p.challengeDeadline} />
           </>
         ) : (
-          "Closed without a dispute."
+          `Ended ${fmtTime(p.challengeDeadline)}`
         ),
       });
+      steps.push({ key: "complete", label: "Complete", state: p.state === "Settled" ? "done" : "todo", sub: p.state === "Settled" ? at(p.settledAt) : undefined });
     }
-    steps.push({
-      key: "settled",
-      label: "Settled",
-      state: p.state === "Settled" ? "done" : "todo",
-      at: p.settledAt || undefined,
-      tx: find("PurchaseSettled")?.transactionHash,
-      body:
-        p.state === "Settled"
-          ? `Seller proceeds ${fmtUsdc(p.sellerProceeds)}, refund ${fmtUsdc(p.refunded)}, marketplace fee ${fmtUsdc(p.fee)}.`
-          : p.state === "Disputed"
-            ? "Settles when the dispute resolves."
-            : "After the challenge window, anyone can call finalize() to pay the seller.",
-    });
   }
 
   return (
-    <Card title="Status">
-      <ol className="relative space-y-5">
-        {steps.map((s, i) => (
-          <li key={s.key} className="relative flex gap-4">
-            {i < steps.length - 1 && <span className="absolute left-[9px] top-6 h-[calc(100%+0.25rem)] w-px bg-line" />}
-            <span
-              className={cx(
-                "relative z-10 mt-0.5 flex h-[19px] w-[19px] shrink-0 items-center justify-center rounded-full border-2",
-                s.state === "done" && "border-ok bg-ok text-white",
-                s.state === "active" && "border-accent bg-panel",
-                s.state === "todo" && "border-line-strong bg-panel",
-              )}
-            >
-              {s.state === "done" ? <IconCheck className="h-3 w-3" /> : s.state === "active" ? <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> : null}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                <span className={cx("text-sm font-semibold", s.state === "todo" && "text-muted")}>{s.label}</span>
-                {s.at ? <span className="text-xs text-muted">{fmtTime(s.at)}</span> : null}
-                {s.tx && <TxLink hash={s.tx} />}
-              </div>
-              <div className="mt-0.5 text-sm text-muted">{s.body}</div>
-            </div>
-          </li>
-        ))}
-      </ol>
-    </Card>
+    <ol aria-label="Purchase progress" className={cx("grid gap-4 sm:gap-3", steps.length === 3 ? "sm:grid-cols-3" : "sm:grid-cols-4")}>
+      {steps.map((s) => (
+        <li
+          key={s.key}
+          aria-current={s.state === "active" ? "step" : undefined}
+          className={cx(
+            "min-w-0 border-l-2 pl-3 sm:border-t-2 sm:border-l-0 sm:pt-3 sm:pl-0",
+            s.state === "done" ? "border-ok" : s.state === "active" ? "border-accent" : "border-line-strong",
+          )}
+        >
+          <div className={cx("flex items-center gap-1.5 text-sm font-medium", s.state === "todo" ? "text-muted" : "text-ink")}>
+            {s.state === "done" && <IconCheck className="h-3.5 w-3.5 shrink-0 text-ok" />}
+            {s.label}
+            <span className="sr-only">{s.state === "done" ? " (done)" : s.state === "active" ? " (in progress)" : " (not yet)"}</span>
+          </div>
+          {s.sub && <div className="mt-0.5 text-xs text-muted tabular-nums">{s.sub}</div>}
+        </li>
+      ))}
+    </ol>
   );
 }
 
-/* ------------------------------- next actions ------------------------------- */
-
-function NextActions({ p, v, isBuyer, tar }: { p: Purchase; v: Version; isBuyer: boolean; tar: TarEntry[] | null }) {
-  const now = useNow();
-  const finalize = useTx();
-  const refund = useTx();
-  const m = deployment!.market;
-
-  if (p.state === "Funded") {
-    const late = now > p.deliveryDeadline;
-    return (
-      <Card title={late ? "Delivery deadline passed" : "Waiting for key delivery"}>
-        {late ? (
-          <>
-            <p className="text-sm text-muted">
-              No delivery receipt was recorded by {fmtTime(p.deliveryDeadline)}. Anyone can now return the full {fmtUsdc(p.price)} to the buyer and release the seller’s collateral.
-            </p>
-            <RequireWallet why="Connect any wallet to trigger the refund. You don’t need to be the buyer.">
-              <button className="btn btn-primary mt-3" disabled={refund.busy} onClick={() => refund.run("Refund", { address: m, abi: marketAbi, functionName: "refundUndelivered", args: [p.id] })}>
-                Refund undelivered purchase
-              </button>
-            </RequireWallet>
-            <TxStatus state={refund.state} />
-          </>
-        ) : (
-          <p className="flex items-center gap-2 text-sm text-muted">
-            <Spinner /> The TEE relay watches for new purchases and records delivery automatically. If it does not deliver within <Countdown to={p.deliveryDeadline} />, a full refund
-            becomes available here.
-          </p>
-        )}
-      </Card>
-    );
-  }
-
-  if (p.state === "Delivered") {
-    const open = now <= p.challengeDeadline;
-    return (
-      <>
-        {!open && (
-          <Card title="Challenge window closed">
-            <p className="text-sm text-muted">
-              No dispute was filed. Contracts don’t act on their own: anyone can now call <code className="font-mono">finalize()</code> to release {fmtUsdc(p.price - (p.price * BigInt(p.feeBps)) / 10000n)} to the seller (price minus the {pct(p.feeBps)} fee) and
-              update reputation.
-            </p>
-            <RequireWallet why="Connect any wallet to finalize. It is permissionless.">
-              <button className="btn btn-primary mt-3" disabled={finalize.busy} onClick={() => finalize.run("Finalize", { address: m, abi: marketAbi, functionName: "finalize", args: [p.id] })}>
-                Release payment to the seller
-              </button>
-            </RequireWallet>
-            <TxStatus state={finalize.state} />
-          </Card>
-        )}
-        {open && (
-          <Card
-            title="Challenge window open"
-            subtitle={
-              <>
-                <Countdown to={p.challengeDeadline} /> left to dispute · closes {fmtTime(p.challengeDeadline)}
-              </>
-            }
-          >
-            {isBuyer ? (
-              <DisputeForm p={p} v={v} tar={tar} />
-            ) : (
-              <p className="text-sm text-muted">Only the buyer can open a dispute. If none is filed, anyone can finalize after the deadline.</p>
-            )}
-          </Card>
-        )}
-      </>
-    );
-  }
-
-  if (p.state === "Settled" && p.deliveredAt > 0) {
-    return <RateCard p={p} isBuyer={isBuyer} />;
-  }
-  return null;
-}
-
-/* ------------------------------ delivery & decrypt ------------------------------ */
+/* ------------------------------ download & decrypt ------------------------------ */
 
 type Check = { label: string; ok: boolean | null; detail?: ReactNode };
-
-function DeliveryCard({ p, v, isBuyer, onTar }: { p: Purchase; v: Version; isBuyer: boolean; onTar: (t: TarEntry[]) => void }) {
-  return (
-    <Card title="Delivery receipt" subtitle="Recorded on-chain by the relay; signature over (purchaseId, buyerEncPubKey, ciphertextHash, wrappedKeyHash, wrapperHash) verified by the contract.">
-      <dl className="kv">
-        <dt>Relay (signer)</dt>
-        <dd>
-          <AddressLink address={p.relay} />
-        </dd>
-        <dt>Delivered at</dt>
-        <dd>{fmtTime(p.deliveredAt)}</dd>
-        <dt>Buyer encryption key</dt>
-        <dd>
-          <HashValue value={p.buyerEncPubKey} />
-        </dd>
-        <dt>ciphertextHash</dt>
-        <dd className="flex flex-wrap items-center gap-2">
-          <HashValue value={p.ciphertextHash} />
-          <Verified ok={eqHash(p.ciphertextHash, v.ciphertextHash)} okText="= version commitment" badText="≠ version" />
-        </dd>
-        <dt>wrappedKeyHash</dt>
-        <dd>
-          <HashValue value={p.wrappedKeyHash} />
-        </dd>
-        <dt>wrapperHash</dt>
-        <dd>
-          <HashValue value={p.wrapperHash} />
-        </dd>
-      </dl>
-      <p className="mt-3 text-xs text-muted">A receipt records that delivery happened; it does not prove the key works. If it doesn’t, dispute under “Doesn’t match hash / broken”.</p>
-      {isBuyer && (
-        <div className="mt-5 border-t border-line pt-5">
-          <Decrypt p={p} v={v} onTar={onTar} />
-        </div>
-      )}
-    </Card>
-  );
-}
+type Download = ReturnType<typeof useDownload>;
 
 /**
  * Delivered purchase → decrypted environment, with no key handling for the buyer: the decryption key
  * is the one derived from the buyer's wallet at purchase time (cached in this browser, or re-derived
- * with one signature). Once it is available, download + verify + decrypt runs automatically and the
- * page offers one "Download environment" button; the individual checks stay available underneath.
+ * with one signature). Once it is available, download + verify + decrypt runs automatically; the page
+ * then offers one "Download environment" button. Lifted to page level so the action panel and the
+ * details panel share the same checks.
  */
-function Decrypt({ p, v, onTar }: { p: Purchase; v: Version; onTar: (t: TarEntry[]) => void }) {
+function useDownload(p: Purchase, v: Version, enabled: boolean) {
   const { find, add } = useEncKeys();
-  const { devTools } = useWalletMode();
   const { derive } = useWalletEncKey();
   const key = find(p.buyerEncPubKey);
   const [checks, setChecks] = useState<Check[]>([]);
   const [running, setRunning] = useState(false);
   const [plain, setPlain] = useState<Uint8Array | null>(null);
   const [entries, setEntries] = useState<TarEntry[] | null>(null);
-  const [imp, setImp] = useState("");
-  const [impErr, setImpErr] = useState<string | null>(null);
   const [unlockErr, setUnlockErr] = useState<string | null>(null);
+  const [unlocking, setUnlocking] = useState(false);
   const autoRan = useRef(false);
 
   useEffect(() => {
-    if (!key || autoRan.current) return;
+    if (!enabled || !key || autoRan.current) return;
     autoRan.current = true;
     void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- decrypt once, when this purchase's key becomes available
-  }, [key]);
+  }, [key, enabled]);
 
   async function unlock() {
     setUnlockErr(null);
+    setUnlocking(true);
     try {
       const k = await derive({ fresh: true });
       if (!eqHash(k.publicKey, p.buyerEncPubKey))
-        setUnlockErr("This wallet’s key doesn’t match the one this purchase was made for. Log in with the wallet that bought it, or open this page in the browser you bought it from.");
+        setUnlockErr("This wallet’s key doesn’t match the one this purchase was made for. Sign in with the wallet that bought it, or open this page in the browser you bought it from.");
     } catch (e) {
       setUnlockErr((e as Error).message.split("\n")[0]);
+    } finally {
+      setUnlocking(false);
     }
   }
 
@@ -428,7 +307,7 @@ function Decrypt({ p, v, onTar }: { p: Purchase; v: Version; onTar: (t: TarEntry
     try {
       const dl = await getDelivery(p.id);
       const wh = sha256Hex(dl.wrapperBytes);
-      push({ label: "Delivery wrapper hash matches on-chain wrapperHash", ok: eqHash(wh, p.wrapperHash), detail: <HashValue value={wh} /> });
+      push({ label: "Delivery wrapper hash matches the on-chain wrapperHash", ok: eqHash(wh, p.wrapperHash), detail: <HashValue value={wh} /> });
       const w = dl.wrapper as Record<string, unknown>;
       const fieldsOk =
         String(w.purchaseId) === p.id.toString() &&
@@ -440,139 +319,312 @@ function Decrypt({ p, v, onTar }: { p: Purchase; v: Version; onTar: (t: TarEntry
         eqHash(String(w.ciphertextHash), v.ciphertextHash);
       push({ label: "Wrapper names this purchase, chain, market, buyer, key and bundle", ok: fieldsOk, detail: <span className="font-mono">{w.type as string} · issued {fmtTime(Number(w.issuedAt))}</span> });
       const kh = sha256Hex(dl.wrappedKey);
-      push({ label: "Wrapped key hash matches on-chain wrappedKeyHash", ok: eqHash(kh, p.wrappedKeyHash), detail: <HashValue value={kh} /> });
+      push({ label: "Wrapped key hash matches the on-chain wrappedKeyHash", ok: eqHash(kh, p.wrappedKeyHash), detail: <HashValue value={kh} /> });
       const ct = await fetchUrlBytes(dl.ciphertextUrl);
       const ch = sha256Hex(ct);
-      push({ label: `Ciphertext (${(ct.length / 1024).toFixed(1)} KiB) hash matches ciphertextHash`, ok: eqHash(ch, v.ciphertextHash), detail: <HashValue value={ch} /> });
+      push({ label: `Encrypted file (${(ct.length / 1024).toFixed(1)} KiB) matches the ciphertextHash`, ok: eqHash(ch, v.ciphertextHash), detail: <HashValue value={ch} /> });
       let bundleKey: Uint8Array;
       try {
         bundleKey = await unwrapBundleKeyAsync(dl.wrappedKey, key.secretKey, p.wrapperHash);
-        push({ label: "Unwrapped bundle key with your X25519 secret key (HPKE, aad = wrapperHash)", ok: true });
+        push({ label: "Unwrapped the bundle key with your X25519 secret key (HPKE, aad = wrapperHash)", ok: true });
       } catch (e) {
-        push({ label: "Unwrap bundle key", ok: false, detail: (e as Error).message });
+        push({ label: "Unwrap the bundle key", ok: false, detail: (e as Error).message });
         return;
       }
       let pt: Uint8Array;
       try {
         pt = decryptBundle(ct, bundleKey);
-        push({ label: "Decrypted bundle (AES-256-GCM, authenticated)", ok: true });
+        push({ label: "Decrypted the bundle (AES-256-GCM, authenticated)", ok: true });
       } catch (e) {
-        push({ label: "Decrypt bundle", ok: false, detail: (e as Error).message });
+        push({ label: "Decrypt the bundle", ok: false, detail: (e as Error).message });
         return;
       }
       const bh = sha256Hex(pt);
-      push({ label: "sha256(plaintext tar) equals the listing’s bundleHash", ok: eqHash(bh, v.bundleHash), detail: <HashValue value={bh} /> });
-      const ents = listTar(pt);
-      setEntries(ents);
-      onTar(ents);
+      push({ label: "sha256 of the decrypted tar equals the listing’s bundleHash", ok: eqHash(bh, v.bundleHash), detail: <HashValue value={bh} /> });
+      setEntries(listTar(pt));
       setPlain(pt);
     } catch (e) {
-      push({ label: "Fetch delivery from the TEE service", ok: false, detail: (e as Error).message });
+      push({ label: "Fetch the delivery from the TEE service", ok: false, detail: (e as Error).message });
     } finally {
       setRunning(false);
     }
   }
 
-  const tasks = entries ? [...new Set(entries.filter((e) => e.path.startsWith("tasks/")).map((e) => e.path.split("/")[1]).filter(Boolean))] : [];
-  const hasAudit = entries?.some((e) => /audit/i.test(e.path));
-
+  const save = () => plain && downloadBytes(plain, `envmarket-purchase-${p.id}-${v.bundleHash.slice(2, 10)}.tar`, "application/x-tar");
   const failed = checks.some((c) => !c.ok);
   const passed = checks.filter((c) => c.ok).length;
+  return { key, add, checks, running, plain, entries, unlockErr, unlocking, unlock, run, save, failed, passed };
+}
+
+function DownloadControl({ p, dl, quiet }: { p: Purchase; dl: Download; quiet?: boolean }) {
+  const { devTools } = useWalletMode();
+  const [imp, setImp] = useState("");
+  const [impErr, setImpErr] = useState<string | null>(null);
+  const files = dl.entries?.filter((e) => e.type === "file").length ?? 0;
+  const hasAudit = dl.entries?.some((e) => /audit/i.test(e.path));
+  const btn = cx("btn", !quiet && "btn-primary");
+
+  if (!dl.key)
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-muted">Unlock the download with the wallet you bought with. It takes one signature and costs nothing.</p>
+        <button className={btn} disabled={dl.unlocking} onClick={dl.unlock}>
+          {dl.unlocking && <Spinner className="h-3.5 w-3.5" />}
+          {dl.unlocking ? "Waiting for your signature…" : "Unlock with your wallet"}
+        </button>
+        {dl.unlockErr && (
+          <p role="alert" className="text-xs text-bad">
+            {dl.unlockErr}
+          </p>
+        )}
+        {devTools && (
+          <details className="rounded-md border border-dashed border-line px-3 py-2 text-xs">
+            <summary className="cursor-pointer text-muted">Dev tools: import a secret key</summary>
+            <form
+              className="mt-2 flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                try {
+                  const k = encKeyFromSecret(imp);
+                  if (!eqHash(k.publicKey, p.buyerEncPubKey)) throw new Error("That secret key belongs to a different purchase.");
+                  dl.add(k);
+                  setImpErr(null);
+                } catch (err) {
+                  setImpErr((err as Error).message);
+                }
+              }}
+            >
+              <input
+                aria-label="Secret key"
+                name="secretKey"
+                autoComplete="off"
+                spellCheck={false}
+                className="input font-mono text-xs"
+                placeholder="0x…"
+                value={imp}
+                onChange={(e) => setImp(e.target.value)}
+              />
+              <button type="submit" className="btn btn-sm shrink-0" disabled={!imp}>
+                Import
+              </button>
+            </form>
+            {impErr && <p className="mt-1 text-bad">{impErr}</p>}
+          </details>
+        )}
+      </div>
+    );
 
   return (
-    <div>
-      <h3 className="text-sm font-semibold">Your environment</h3>
-      {!key ? (
-        <div className="mt-3 space-y-2">
-          <p className="text-sm text-muted">Unlock the download with the wallet you bought with. It takes one signature; nothing is sent on-chain.</p>
-          <button className="btn btn-primary btn-sm" onClick={unlock}>
-            Unlock with your wallet
-          </button>
-          {unlockErr && <p className="text-xs text-bad">{unlockErr}</p>}
-          {devTools && (
-            <details className="rounded-lg border border-dashed border-line px-3 py-2 text-xs">
-              <summary className="cursor-pointer text-muted">Dev tools: import a secret key</summary>
-              <div className="mt-2 flex gap-2">
-                <input className="input font-mono text-xs" placeholder="0x… secretKey" value={imp} onChange={(e) => setImp(e.target.value)} />
-                <button
-                  className="btn btn-sm"
-                  onClick={() => {
-                    try {
-                      const k = encKeyFromSecret(imp);
-                      if (!eqHash(k.publicKey, p.buyerEncPubKey)) throw new Error("That secret key does not match this purchase’s public key.");
-                      add(k);
-                      setImpErr(null);
-                    } catch (e) {
-                      setImpErr((e as Error).message);
-                    }
-                  }}
-                >
-                  Import
-                </button>
-              </div>
-              {impErr && <p className="mt-1 text-bad">{impErr}</p>}
-            </details>
-          )}
-        </div>
-      ) : running ? (
-        <p className="mt-3 flex items-center gap-2 text-sm text-muted">
-          <Spinner className="h-3.5 w-3.5" /> Fetching and decrypting in your browser…
+    <div className="space-y-2" aria-live="polite">
+      {dl.running ? (
+        <p className="flex items-center gap-2 text-sm text-muted">
+          <Spinner className="h-4 w-4" /> Preparing your download…
         </p>
-      ) : failed ? (
-        <div className="mt-3 space-y-2">
-          <Notice tone="bad" title="The download could not be completed or verified">
-            See the failed check below. If the delivered file doesn’t match what was committed, you can dispute under “Doesn’t match hash / broken”.
-          </Notice>
-          <button className="btn btn-sm" onClick={run}>
+      ) : dl.failed ? (
+        <div className="space-y-2">
+          <p className="flex items-start gap-1.5 text-[13px] text-bad">
+            <IconX className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>The download didn’t pass its checks. The failing step is listed under Verification details below; if the file doesn’t match the listing, report a problem.</span>
+          </p>
+          <button className="btn btn-sm" onClick={dl.run}>
             Try again
           </button>
         </div>
-      ) : plain && entries ? (
-        <div className="mt-3 space-y-2">
-          <button className="btn btn-primary" onClick={() => downloadBytes(plain, `envmarket-purchase-${p.id}-${v.bundleHash.slice(2, 10)}.tar`, "application/x-tar")}>
+      ) : dl.plain ? (
+        <>
+          <button className={btn} onClick={dl.save}>
             Download environment
           </button>
-          <p className="text-xs text-muted">
-            {entries.filter((e) => e.type === "file").length} files · {(plain.length / 1024).toFixed(1)} KiB · {tasks.length} tasks
-            {hasAudit ? " · contains audit paths!" : ""}. Decrypted in your browser and matched to the listing’s on-chain commitments.
+          <p className="flex items-center gap-1.5 text-xs text-muted">
+            <IconCheck className="h-3.5 w-3.5 shrink-0 text-ok" />
+            <span>
+              <span className="tabular-nums">{files}</span> files · <span className="tabular-nums">{((dl.plain?.length ?? 0) / 1024).toFixed(1)}</span> KiB · matches the listing
+              {hasAudit ? <span className="text-warn"> · contains audit paths</span> : null}
+            </span>
           </p>
-          <details>
-            <summary className="cursor-pointer text-xs text-accent">Show file list</summary>
-            <ul className="mt-2 max-h-64 overflow-auto font-mono text-[11px] text-muted">
-              {entries.map((e) => (
-                <li key={e.path}>
-                  {e.path} {e.type === "file" ? <span className="text-faint">({e.size} B)</span> : null}
-                </li>
-              ))}
-            </ul>
-          </details>
-        </div>
+        </>
       ) : null}
-      {checks.length > 0 && (
-        <details className="mt-3" open={failed}>
-          <summary className="cursor-pointer text-xs text-accent">
-            Verification: {passed}/{checks.length} checks passed
-          </summary>
-          <ul className="mt-2 space-y-2">
-            {checks.map((c, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm">
-                <span className={cx("mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full", c.ok ? "bg-ok text-white" : "bg-bad text-white")}>
-                  {c.ok ? <IconCheck className="h-3 w-3" /> : <IconX className="h-3 w-3" />}
-                </span>
-                <div className="min-w-0">
-                  <div>{c.label}</div>
-                  {c.detail && <div className="text-xs text-muted">{c.detail}</div>}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
     </div>
   );
 }
 
-/* ---------------------------------- dispute ---------------------------------- */
+/* ------------------------------- the one action ------------------------------- */
+
+function Panel({ title, children }: { title: ReactNode; children: ReactNode }) {
+  return (
+    <section className="card card-pad space-y-4" aria-labelledby="next-action-title">
+      <h2 id="next-action-title" className="text-base font-semibold text-ink">
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+function NextAction({ p, v, isBuyer, dl }: { p: Purchase; v: Version; isBuyer: boolean; dl: Download }) {
+  const now = useNow();
+  const finalize = useTx();
+  const refund = useTx();
+  const [reporting, setReporting] = useState(false);
+  const dispute = useDispute(p.disputeId > 0n ? p.disputeId : null);
+  const m = deployment!.market;
+
+  if (p.state === "Funded") {
+    if (now <= p.deliveryDeadline)
+      return (
+        <Panel title="Waiting for the seller’s key">
+          <p className="flex items-start gap-2 text-sm text-muted" aria-live="polite">
+            <Spinner className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              It usually arrives within a minute. If it hasn’t arrived in <Countdown to={p.deliveryDeadline} />, the full payment can go back to the buyer.
+            </span>
+          </p>
+        </Panel>
+      );
+    return (
+      <Panel title="The key never arrived">
+        <p className="text-sm text-muted">
+          Nobody delivered the key by {fmtTime(p.deliveryDeadline)}, so the full <span className="font-mono text-ink tabular-nums">{fmtUsdc(p.price)}</span> can go back to the buyer. Anyone can
+          send the refund; you don’t have to be the buyer.
+        </p>
+        <RequireWallet why="Sign in to send the refund. Any account can do it.">
+          <button className="btn btn-primary" disabled={refund.busy} onClick={() => refund.run("Refund", { address: m, abi: marketAbi, functionName: "refundUndelivered", args: [p.id] })}>
+            {refund.busy ? "Refunding…" : isBuyer ? "Refund my payment" : "Refund the buyer"}
+          </button>
+        </RequireWallet>
+        <div aria-live="polite">
+          <TxStatus state={refund.state} />
+        </div>
+      </Panel>
+    );
+  }
+
+  if (p.state === "Delivered") {
+    const open = now <= p.challengeDeadline;
+    if (!open) {
+      const toSeller = p.price - (p.price * BigInt(p.feeBps)) / 10000n;
+      return (
+        <Panel title="Protection window closed">
+          <p className="text-sm text-muted">
+            No problem was reported. Anyone can now release <span className="font-mono text-ink tabular-nums">{fmtUsdc(toSeller)}</span> to the seller (the price minus the {pct(p.feeBps)}{" "}
+            marketplace fee).
+          </p>
+          <RequireWallet why="Sign in to release the payment. Any account can do it.">
+            <button className="btn btn-primary" disabled={finalize.busy} onClick={() => finalize.run("Release payment", { address: m, abi: marketAbi, functionName: "finalize", args: [p.id] })}>
+              {finalize.busy ? "Releasing…" : "Release payment to the seller"}
+            </button>
+          </RequireWallet>
+          <div aria-live="polite">
+            <TxStatus state={finalize.state} />
+          </div>
+          {isBuyer && (
+            <div className="border-t border-line pt-4">
+              <DownloadControl p={p} dl={dl} quiet />
+            </div>
+          )}
+        </Panel>
+      );
+    }
+    if (!isBuyer)
+      return (
+        <Panel title="The buyer is checking the environment">
+          <p className="text-sm text-muted">
+            The buyer can report a problem until {fmtTime(p.challengeDeadline)} (<Countdown to={p.challengeDeadline} /> left). If they don’t, the payment can be released to the seller after that.
+          </p>
+        </Panel>
+      );
+    return (
+      <Panel title="Your environment is ready">
+        <p className="text-sm text-muted">
+          Download it and check the tasks and tests. You have <Countdown to={p.challengeDeadline} /> to report a problem.
+        </p>
+        <DownloadControl p={p} dl={dl} />
+        <div className="border-t border-line pt-4">
+          {!reporting ? (
+            <button className="btn btn-sm btn-ghost -ml-2.5" aria-expanded={false} aria-controls="report-problem" onClick={() => setReporting(true)}>
+              Report a problem
+            </button>
+          ) : (
+            <div id="report-problem" className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-ink">Report a problem</h3>
+                <button className="btn btn-sm btn-ghost" aria-expanded aria-controls="report-problem" onClick={() => setReporting(false)}>
+                  Cancel
+                </button>
+              </div>
+              <DisputeForm p={p} v={v} tar={dl.entries} />
+            </div>
+          )}
+        </div>
+      </Panel>
+    );
+  }
+
+  if (p.state === "Disputed")
+    return (
+      <Panel title="A problem was reported">
+        <p className="text-sm text-muted">
+          {dispute.data ? `“${GROUND_LABEL[dispute.data.ground] ?? "Dispute"}”` : "The buyer’s report"} is being reviewed. The payment stays in escrow until there’s a decision.
+        </p>
+        <Link href={`/dispute/${p.disputeId}`} className="btn btn-primary">
+          View the report <IconArrowRight className="h-3.5 w-3.5" />
+        </Link>
+        {isBuyer && (
+          <div className="border-t border-line pt-4">
+            <DownloadControl p={p} dl={dl} quiet />
+          </div>
+        )}
+      </Panel>
+    );
+
+  if (p.state === "Refunded")
+    return (
+      <Panel title="Refunded">
+        <SettlementRows p={p} />
+      </Panel>
+    );
+
+  if (p.state === "Settled")
+    return (
+      <Panel title="Complete">
+        <SettlementRows p={p} />
+        {p.deliveredAt > 0 && <RateBlock p={p} isBuyer={isBuyer} />}
+        {isBuyer && p.deliveredAt > 0 && (
+          <div className="border-t border-line pt-4">
+            <DownloadControl p={p} dl={dl} quiet />
+          </div>
+        )}
+      </Panel>
+    );
+  return null;
+}
+
+function SettlementRows({ p }: { p: Purchase }) {
+  const rows: [string, bigint][] =
+    p.state === "Refunded"
+      ? [["Returned to the buyer", p.refunded]]
+      : [
+          ["Refunded to the buyer", p.refunded],
+          ["Paid to the seller", p.sellerProceeds],
+          ["Marketplace fee", p.fee],
+          ...(p.penalties > 0n ? ([["Seller penalty", p.penalties]] as [string, bigint][]) : []),
+        ];
+  return (
+    <div>
+      <dl className="divide-y divide-line text-sm">
+        {rows.map(([k, val]) => (
+          <div key={k} className="flex items-baseline justify-between gap-4 py-2 first:pt-0">
+            <dt className="text-muted">{k}</dt>
+            <dd className="font-mono text-ink tabular-nums">{fmtUsdc(val)}</dd>
+          </div>
+        ))}
+      </dl>
+      {p.settledAt > 0 && <p className="mt-2 text-xs text-muted">Settled {fmtTime(p.settledAt)}. Each person withdraws their share from their account menu.</p>}
+    </div>
+  );
+}
+
+/* ---------------------------------- report a problem ---------------------------------- */
 
 function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] | null }) {
   const router = useRouter();
@@ -596,7 +648,6 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
   // (C1, C2, …), so selected claims are written into the text that gets hashed.
   const evidenceText = ground === 2 && claimSel.length ? `Disputed claims: ${claimSel.join(", ")}\n\n${evidence.trim()}` : evidence.trim();
   const evidenceBytes = file ? file.bytes : evidenceText ? utf8(evidenceText) : null;
-  const evidenceHash = evidenceBytes ? sha256Hex(evidenceBytes) : (`0x${"0".repeat(64)}` as Hex);
   const bal = useReadContract({ address: deployment!.token, abi: tokenAbi, functionName: "balanceOf", args: [address!], query: { enabled: !!address, refetchInterval: 8_000 } });
   const enough = ((bal.data as bigint | undefined) ?? 0n) >= q.bond;
   const taskIds = tar ? [...new Set(tar.filter((e) => e.path.startsWith("tasks/")).map((e) => e.path.split("/")[1]).filter(Boolean))].sort() : [];
@@ -606,17 +657,17 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
   async function submit() {
     if (!evidenceBytes) return;
     setUploadErr(null);
-    setStage("Uploading evidence privately to the TEE…");
+    setStage("Sending your evidence privately…");
     let hash: Hex;
     try {
       hash = (await uploadEvidence(file ? { bytes: file.bytes } : { text: evidenceText })).evidenceHash;
     } catch (e) {
       setStage(null);
-      setUploadErr(`Evidence upload failed, dispute not opened: ${(e as Error).message}`);
+      setUploadErr(`Your evidence didn’t upload, so nothing was submitted. Try again. (${(e as Error).message})`);
       return;
     }
-    setStage(`The TEE stored your evidence (sha256 ${hash.slice(0, 14)}…). Opening the dispute on-chain…`);
-    const r = await open.run("Open dispute", q.bond, { address: m, abi: marketAbi, functionName: "openDispute", args: [p.id, ground, mask, hash] });
+    setStage("Evidence stored. Submitting your report…");
+    const r = await open.run("Report a problem", q.bond, { address: m, abi: marketAbi, functionName: "openDispute", args: [p.id, ground, mask, hash] });
     setStage(null);
     if (!r) return;
     const logs = parseEventLogs({ abi: marketAbi, logs: r.logs, eventName: "DisputeOpened" as never });
@@ -626,21 +677,29 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
     router.push(`/dispute/${did}`);
   }
 
+  const busyText = stage ? "Submitting…" : open.step === "1/2" ? "Allowing the deposit… (1 of 2)" : open.step === "2/2" ? "Submitting… (2 of 2)" : "Submitting…";
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <p className="text-sm text-muted">
-        File a specific, bonded claim. Only three grounds qualify; poor training results alone do not, and reward hacking is out of scope. Each task can be remedied once, and total post-delivery refunds are capped at{" "}
-        {pct(p.refundCapBps)} of the price.
+        Point to a specific problem in specific tasks. If you’re right, those tasks are refunded, up to {pct(p.refundCapBps)} of the price in total. A weak training result on its own doesn’t
+        count.
       </p>
 
       <fieldset>
-        <legend className="section-title">1 · Ground</legend>
+        <legend className="text-sm font-medium text-ink">What’s wrong?</legend>
         <div className="mt-2 space-y-2">
           {[1, 2, 3].map((g) => (
-            <label key={g} className={cx("flex cursor-pointer gap-3 rounded-lg border p-3 text-sm", ground === g ? "border-accent bg-accent-soft" : "border-line hover:border-line-strong")}>
-              <input type="radio" name="ground" className="mt-1" checked={ground === g} onChange={() => setGround(g)} />
-              <span>
-                <span className="font-medium">{GROUND_LABEL[g]}</span>
+            <label
+              key={g}
+              className={cx(
+                "flex cursor-pointer gap-3 rounded-md border p-3 text-sm transition-colors duration-150",
+                ground === g ? "border-accent bg-accent-soft" : "border-line hover:border-line-strong",
+              )}
+            >
+              <input type="radio" name="ground" className="mt-1 accent-[var(--accent-fill)]" checked={ground === g} onChange={() => setGround(g)} />
+              <span className="min-w-0">
+                <span className="font-medium text-ink">{GROUND_LABEL[g]}</span>
                 <span className="mt-0.5 block text-xs text-muted">{GROUND_HELP[g]}</span>
               </span>
             </label>
@@ -649,20 +708,29 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
       </fieldset>
 
       <fieldset>
-        <legend className="section-title">2 · Affected tasks</legend>
-        <p className="mt-1 text-xs text-muted">Task i is bit i of the on-chain task mask. {taskIds.length === p.taskCount ? "Folder names come from your decrypted bundle (sorted)." : ""}</p>
+        <legend className="text-sm font-medium text-ink">Which tasks?</legend>
+        <p className="mt-1 text-xs text-muted">
+          Each task can be refunded once.{taskIds.length === p.taskCount ? " Names come from the files you downloaded." : ""}
+        </p>
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {Array.from({ length: p.taskCount }, (_, i) => {
             const bit = 1n << BigInt(i);
             const on = (mask & bit) !== 0n;
             const remedied = (p.remediedMask & bit) !== 0n;
             return (
-              <label key={i} className={cx("flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm", on ? "border-accent bg-accent-soft" : "border-line")}>
-                <input type="checkbox" checked={on} disabled={remedied} onChange={() => setMask((x) => x ^ bit)} />
+              <label
+                key={i}
+                className={cx(
+                  "flex min-w-0 cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors duration-150",
+                  on ? "border-accent bg-accent-soft" : "border-line hover:border-line-strong",
+                  remedied && "cursor-not-allowed opacity-60",
+                )}
+              >
+                <input type="checkbox" className="accent-[var(--accent-fill)]" checked={on} disabled={remedied} onChange={() => setMask((x) => x ^ bit)} />
                 <span className="min-w-0">
-                  <span className="font-medium">Task {i + 1}</span>
+                  <span className="font-medium text-ink">Task {i + 1}</span>
                   {taskIds.length === p.taskCount && <span className="block truncate font-mono text-[11px] text-muted">{taskIds[i]}</span>}
-                  {remedied && <span className="block text-[11px] text-muted">already remedied</span>}
+                  {remedied && <span className="block text-[11px] text-muted">already refunded</span>}
                 </span>
               </label>
             );
@@ -671,10 +739,10 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
       </fieldset>
 
       <fieldset>
-        <legend className="section-title">3 · Evidence</legend>
+        <legend className="text-sm font-medium text-ink">What did you find?</legend>
         {ground === 2 && claims.length > 0 && (
           <div className="mt-2">
-            <p className="text-xs text-muted">Which numbered claim(s) are false? Jurors receive exactly these claims from the frozen description.</p>
+            <p className="text-xs text-muted">Which of the seller’s numbered claims are false? Reviewers see exactly these claims.</p>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {claims.map((c) => {
                 const on = claimSel.includes(c.id);
@@ -683,7 +751,8 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
                     key={c.id}
                     type="button"
                     title={c.text}
-                    className={cx("badge cursor-pointer", on ? "badge-accent" : "badge-neutral")}
+                    aria-pressed={on}
+                    className={cx("badge h-7 cursor-pointer px-2 font-mono", on ? "badge-accent" : "badge-neutral hover:text-ink")}
                     onClick={() => setClaimSel((s) => (on ? s.filter((x) => x !== c.id) : [...s, c.id]))}
                   >
                     {c.id}
@@ -694,24 +763,36 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
           </div>
         )}
         {!file && (
-          <textarea
-            className="input mt-2 min-h-28 font-mono text-xs"
-            placeholder={ground === 2 ? "e.g. C3 says every task runs offline, but task 2’s tests call pypi.org at import time (see tests/test_fetch.py)." : "Describe what you observed and how to reproduce it."}
-            value={evidence}
-            onChange={(e) => setEvidence(e.target.value)}
-          />
+          <>
+            <label htmlFor="dispute-evidence" className="sr-only">
+              Describe the problem
+            </label>
+            <textarea
+              id="dispute-evidence"
+              name="evidence"
+              autoComplete="off"
+              className="input mt-2 min-h-28 text-sm"
+              placeholder={
+                ground === 2 ? "e.g. C3 says every task runs offline, but task 2’s tests call pypi.org at import time (tests/test_fetch.py)…" : "What you saw, and how someone else can reproduce it…"
+              }
+              value={evidence}
+              onChange={(e) => setEvidence(e.target.value)}
+            />
+          </>
         )}
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-          <label className="btn btn-sm cursor-pointer">
-            {file ? "Replace file" : "…or attach a file instead"}
+          <label className="btn btn-sm cursor-pointer focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--ring)]">
+            {file ? "Replace file" : "Attach a file instead"}
             <input
               type="file"
-              className="hidden"
+              name="evidenceFile"
+              aria-label="Attach an evidence file, up to 256 KiB"
+              className="sr-only"
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
                 if (f.size > 256 * 1024) {
-                  setUploadErr("Evidence files are limited to 256 KiB by the TEE.");
+                  setUploadErr("Evidence files can be up to 256 KiB. Attach a smaller file or paste the relevant part as text.");
                   return;
                 }
                 setUploadErr(null);
@@ -721,102 +802,144 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
           </label>
           {file && (
             <>
-              <span className="font-mono">
+              <span className="min-w-0 truncate font-mono text-muted">
                 {file.name} ({(file.bytes.length / 1024).toFixed(1)} KiB)
               </span>
-              <button type="button" className="text-muted hover:text-bad" onClick={() => setFile(null)}>
-                remove
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setFile(null)}>
+                Remove
               </button>
             </>
           )}
         </div>
-        <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-          <span>
-            evidenceHash = sha256({file ? "file bytes" : "text"}): <HashValue value={evidenceHash} />
-          </span>
-          <span>Before the dispute opens, the evidence is stored privately by the TEE (for the reviewers’ case packet); only its hash goes on-chain. Text evidence is also kept in this browser.</span>
-        </div>
+        <p className="mt-2 text-xs text-muted">Your evidence goes privately to the reviewers. Only a fingerprint of it is published.</p>
       </fieldset>
 
-      <div className="rounded-lg bg-panel-2 p-4 text-sm">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <MiniVal label="Tasks selected" value={`${selected} × ${fmtUsdc(q.perTask, { symbol: false })}`} />
-          <MiniVal label="Requested refund" value={fmtUsdc(q.requested)} hint={q.requested === q.cap && selected > 0 ? "at the refund cap" : undefined} />
-          <MiniVal label="Your bond" value={fmtUsdc(q.bond)} hint={`clamped to ${fmtUsdc(p.bondFloor, { symbol: false })}–${fmtUsdc(p.bondCap, { symbol: false })}`} />
-          <MiniVal label="Case fee (loser pays)" value={fmtUsdc(p.caseFee)} />
-        </div>
-        <p className="mt-3 text-xs text-muted">
-          If you win, you get the refund plus your full bond back and the seller’s collateral pays the case fee. If you lose, the case fee comes out of your bond and the rest goes to a neutral reserve (never to the seller).
-        </p>
+      <div className="rounded-md bg-panel-2 px-4 py-3">
+        <dl className="divide-y divide-line text-sm">
+          <div className="flex items-baseline justify-between gap-4 py-2 first:pt-0">
+            <dt className="text-muted">
+              Refund if you’re right
+              <span className="block text-xs">
+                {selected} task{selected === 1 ? "" : "s"} × {fmtUsdc(q.perTask)}
+                {q.requested === q.cap && selected > 0 ? ", at the cap" : ""}
+              </span>
+            </dt>
+            <dd className="font-mono text-ink tabular-nums">{fmtUsdc(q.requested)}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-4 py-2">
+            <dt className="text-muted">
+              Deposit
+              <span className="block text-xs">You get it back if you’re right</span>
+            </dt>
+            <dd className="font-mono text-ink tabular-nums">{fmtUsdc(q.bond)}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-4 py-2 last:pb-0">
+            <dt className="text-muted">
+              Review fee
+              <span className="block text-xs">Paid by whoever is wrong</span>
+            </dt>
+            <dd className="font-mono text-ink tabular-nums">{fmtUsdc(p.caseFee)}</dd>
+          </div>
+        </dl>
+        <p className="mt-3 text-xs text-muted">If you’re wrong, the review fee comes out of your deposit and the rest goes to a neutral reserve. The seller never receives it.</p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <button className="btn btn-primary" disabled={!ready || !enough || open.busy} onClick={submit}>
-          Report a problem{selected > 0 ? ` · ${fmtUsdc(q.bond)} bond` : ""}
+      <div className="space-y-2">
+        <button className="btn btn-primary" disabled={!ready || !enough || open.busy || !!stage} onClick={submit}>
+          {(open.busy || stage) && <Spinner className="h-3.5 w-3.5" />}
+          {open.busy || stage ? busyText : `Submit report${selected > 0 ? ` · ${fmtUsdc(q.bond)} deposit` : ""}`}
         </button>
-        {!enough && selected > 0 && <span className="text-xs text-warn">You need {fmtUsdc(q.bond)} {token.symbol} for the bond.</span>}
+        {!enough && selected > 0 && (
+          <p className="text-xs text-warn">
+            You need {fmtUsdc(q.bond)} for the deposit. Get test {token.symbol} from the bar at the top of the page.
+          </p>
+        )}
+        <div aria-live="polite" className="space-y-1">
+          <TxStatus state={open.state} />
+          {stage && <p className="text-xs text-muted">{stage}</p>}
+          {uploadErr && (
+            <p role="alert" className="text-xs text-bad [overflow-wrap:anywhere]">
+              {uploadErr}
+            </p>
+          )}
+        </div>
       </div>
-      <TxStatus state={open.state} />
-      {stage && (
-        <p className="flex items-center gap-2 text-xs text-muted">
-          <Spinner className="h-3.5 w-3.5" /> {stage}
-        </p>
-      )}
-      {uploadErr && <p className="break-words text-xs text-bad">{uploadErr}</p>}
-    </div>
-  );
-}
-
-function MiniVal({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
-  return (
-    <div>
-      <div className="section-title">{label}</div>
-      <div className="mt-0.5 font-semibold tabular-nums">{value}</div>
-      {hint && <div className="text-[11px] text-muted">{hint}</div>}
     </div>
   );
 }
 
 /* ---------------------------------- rating ---------------------------------- */
 
-function RateCard({ p, isBuyer }: { p: Purchase; isBuyer: boolean }) {
+function StarGlyph({ on }: { on: boolean }) {
+  return (
+    <svg viewBox="0 0 20 20" className="h-6 w-6" aria-hidden>
+      <path
+        d="M10 1.8l2.5 5.2 5.7.8-4.1 4 1 5.6L10 14.8l-5.1 2.6 1-5.6-4.1-4 5.7-.8L10 1.8z"
+        fill={on ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function RateBlock({ p, isBuyer }: { p: Purchase; isBuyer: boolean }) {
   const [stars, setStars] = useState(0);
   const [hover, setHover] = useState(0);
   const [comment, setComment] = useState("");
   const tx = useTx();
   if (p.rated)
     return (
-      <Card title="Buyer rating">
-        <div className="flex items-center gap-2">
-          <Stars value={p.stars} />
-          <span className="text-sm text-muted">{p.stars}/5 · counted once in this version’s rating and, weighted by the {fmtUsdc(p.price - p.refunded)} the seller retained, in the seller’s score.</span>
-        </div>
-      </Card>
+      <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4 text-sm">
+        <span className="text-muted">{isBuyer ? "You rated this" : "The buyer rated this"}</span>
+        <Stars value={p.stars} />
+        <span className="font-mono text-ink tabular-nums">{p.stars}/5</span>
+      </div>
     );
-  if (!isBuyer)
-    return (
-      <Card title="Buyer rating">
-        <p className="text-sm text-muted">Not rated yet. Only the buyer of a delivered, settled purchase can rate, once.</p>
-      </Card>
-    );
+  if (!isBuyer) return <p className="border-t border-line pt-4 text-sm text-muted">The buyer hasn’t rated this yet.</p>;
   const commentHash = comment.trim() ? sha256Hex(comment) : (`0x${"0".repeat(64)}` as Hex);
   return (
-    <Card title="Rate this environment" subtitle="One rating per purchase. It feeds this version’s average and the seller’s money-weighted score.">
-      <div className="flex items-center gap-1" onMouseLeave={() => setHover(0)}>
+    <div className="space-y-3 border-t border-line pt-4">
+      <div>
+        <h3 className="text-sm font-semibold text-ink">How was it?</h3>
+        <p className="mt-0.5 text-xs text-muted">One rating per purchase. It counts toward this environment’s rating and the seller’s score.</p>
+      </div>
+      <div className="flex items-center gap-1" role="group" aria-label="Rating" onMouseLeave={() => setHover(0)}>
         {[1, 2, 3, 4, 5].map((i) => (
-          <button key={i} className={cx("text-2xl leading-none", (hover || stars) >= i ? "text-warn" : "text-line-strong")} onMouseEnter={() => setHover(i)} onClick={() => setStars(i)} aria-label={`${i} stars`}>
-            ★
+          <button
+            key={i}
+            type="button"
+            className={cx("cursor-pointer rounded p-0.5 transition-colors duration-150", (hover || stars) >= i ? "text-accent" : "text-line-strong hover:text-muted")}
+            onMouseEnter={() => setHover(i)}
+            onFocus={() => setHover(i)}
+            onBlur={() => setHover(0)}
+            onClick={() => setStars(i)}
+            aria-label={`${i} star${i === 1 ? "" : "s"}`}
+            aria-pressed={stars === i}
+          >
+            <StarGlyph on={(hover || stars) >= i} />
           </button>
         ))}
-        <span className="ml-2 text-sm text-muted">{stars ? `${stars}/5` : "choose"}</span>
+        <span className="ml-2 font-mono text-sm text-muted tabular-nums">{stars ? `${stars}/5` : ""}</span>
       </div>
-      <textarea className="input mt-3 min-h-20 text-sm" placeholder="Optional comment (published by hash)" value={comment} onChange={(e) => setComment(e.target.value)} />
-      <div className="mt-1 text-xs text-muted">
-        commentHash: <HashValue value={commentHash} />
+      <div>
+        <label htmlFor="rating-comment" className="mb-1 block text-xs text-muted">
+          Comment (optional)
+        </label>
+        <textarea
+          id="rating-comment"
+          name="comment"
+          autoComplete="off"
+          className="input min-h-20 text-sm"
+          placeholder="What worked, what didn’t…"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+        />
       </div>
       <RequireWallet>
         <button
-          className="btn btn-primary mt-3"
+          className="btn btn-primary"
           disabled={!stars || tx.busy}
           onClick={async () => {
             // publish the comment text by hash (best effort; the rating stands without it)
@@ -824,88 +947,168 @@ function RateCard({ p, isBuyer }: { p: Purchase; isBuyer: boolean }) {
             await tx.run("Rate", { address: deployment!.market, abi: marketAbi, functionName: "rate", args: [p.id, stars, commentHash] });
           }}
         >
-          Submit rating
+          {tx.busy ? "Submitting…" : "Submit rating"}
         </button>
       </RequireWallet>
-      <TxStatus state={tx.state} />
-    </Card>
+      <div aria-live="polite">
+        <TxStatus state={tx.state} />
+      </div>
+    </div>
   );
 }
 
-/* ------------------------------ side cards ------------------------------ */
+/* ---------------------------------- details ---------------------------------- */
 
-function TermsSnapshot({ p }: { p: Purchase }) {
-  return (
-    <Card title="Frozen terms" subtitle="Snapshotted when the purchase was funded.">
-      <dl className="kv text-[13px]">
-        <dt>Price</dt>
-        <dd>{fmtUsdc(p.price)}</dd>
-        <dt>Per task</dt>
-        <dd>
-          {fmtUsdc(p.taskCount ? p.price / BigInt(p.taskCount) : 0n)} × {p.taskCount}
-        </dd>
-        <dt>Collateral</dt>
-        <dd>{fmtUsdc(p.collateral)}</dd>
-        <dt>Challenge window</dt>
-        <dd>{fmtWindow(p.challengeWindow)}</dd>
-        <dt>Delivery deadline</dt>
-        <dd>{fmtTime(p.deliveryDeadline)}</dd>
-        {p.challengeDeadline > 0 && (
-          <>
-            <dt>Challenge deadline</dt>
-            <dd>{fmtTime(p.challengeDeadline)}</dd>
-          </>
-        )}
-        <dt>Refund cap</dt>
-        <dd>
-          {pct(p.refundCapBps)} ({fmtUsdc((p.price * BigInt(p.refundCapBps)) / 10000n)})
-        </dd>
-        <dt>Bond</dt>
-        <dd>
-          {fmtUsdc(p.bondFloor, { symbol: false })}–{fmtUsdc(p.bondCap)}
-        </dd>
-        <dt>Case fee</dt>
-        <dd>{fmtUsdc(p.caseFee)}</dd>
-        <dt>Fee</dt>
-        <dd>{pct(p.feeBps)} of retained</dd>
-        <dt>Penalty</dt>
-        <dd>
-          {pct(p.penaltyBps)} of price if &gt; {pct(p.penaltyThresholdBps)} of tasks confirmed defective
-        </dd>
-        {p.remediedMask > 0n && (
-          <>
-            <dt>Remedied tasks</dt>
-            <dd>{maskToIndexes(p.remediedMask).map((i) => i + 1).join(", ")}</dd>
-          </>
-        )}
-      </dl>
-    </Card>
-  );
-}
+function PurchaseDetails({ p, v, dl, events, eventsLoading }: { p: Purchase; v: Version; dl: Download; events: MarketEvent[]; eventsLoading: boolean }) {
+  const delivered = p.deliveredAt > 0;
+  const ctOk = eqHash(p.ciphertextHash, v.ciphertextHash);
+  const checksRun = dl.checks.length > 0 && !dl.running;
+  const status = dl.running ? "pending" : checksRun ? (dl.failed ? "bad" : "ok") : delivered ? (ctOk ? "ok" : "bad") : "neutral";
+  const summary = dl.running
+    ? "Verifying in your browser…"
+    : checksRun
+      ? dl.failed
+        ? `${dl.passed} of ${dl.checks.length} checks passed`
+        : `Verified in your browser · ${dl.checks.length} checks passed`
+      : delivered
+        ? ctOk
+          ? "Delivery recorded on-chain · receipt signed by the relay"
+          : "The delivery receipt doesn’t match the listing"
+        : "Purchase recorded on-chain";
+  const tasks = dl.entries ? [...new Set(dl.entries.filter((e) => e.path.startsWith("tasks/")).map((e) => e.path.split("/")[1]).filter(Boolean))] : [];
 
-function SettlementCard({ p }: { p: Purchase }) {
-  const rows: [string, bigint, string][] =
-    p.state === "Refunded"
-      ? [["Refunded to buyer", p.refunded, "full price, pre-delivery timeout"]]
-      : [
-          ["Refund to buyer", p.refunded, "confirmed defective tasks × per-task price, capped"],
-          ["Seller proceeds", p.sellerProceeds, "retained − fee"],
-          ["Marketplace fee", p.fee, "to treasury"],
-          ["Penalties", p.penalties, "slashed from collateral → neutral reserve"],
-        ];
   return (
-    <Card title="Settlement" subtitle={`Settled ${fmtTime(p.settledAt)}. Amounts are credited as claimable and withdrawn by each party.`}>
-      <dl className="space-y-2 text-sm">
-        {rows.map(([k, val, hint]) => (
-          <div key={k} className="flex items-start justify-between gap-3">
-            <dt>
-              {k}
-              <div className="text-[11px] text-muted">{hint}</div>
-            </dt>
-            <dd className="font-semibold tabular-nums">{fmtUsdc(val)}</dd>
-          </div>
-        ))}
-      </dl>
-    </Card>
+    <Details summary={<>Verification details · {summary}</>} status={status} defaultOpen={checksRun && dl.failed}>
+      {dl.checks.length > 0 && (
+        <DetailSection title="Checks run in your browser" hint="Your key never leaves this page. The service only hands out the bundle key wrapped for you.">
+          <ul className="space-y-2">
+            {dl.checks.map((c, i) => (
+              <li key={i} className="flex items-start gap-2 text-[13px]">
+                <span className={cx("mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full", c.ok ? "bg-ok-soft text-ok" : "bg-bad-soft text-bad")}>
+                  {c.ok ? <IconCheck className="h-3 w-3" /> : <IconX className="h-3 w-3" />}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-ink">{c.label}</div>
+                  {c.detail && <div className="text-xs text-muted [overflow-wrap:anywhere]">{c.detail}</div>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </DetailSection>
+      )}
+
+      {delivered && (
+        <DetailSection
+          title="Delivery receipt"
+          hint="Recorded on-chain by the relay. The contract verified its signature over (purchaseId, buyerEncPubKey, ciphertextHash, wrappedKeyHash, wrapperHash). A receipt shows delivery happened; if the key doesn’t work, report a problem."
+        >
+          <dl className="kv">
+            <dt>Relay</dt>
+            <dd>
+              <AddressLink address={p.relay} />
+            </dd>
+            <dt>Delivered</dt>
+            <dd>{fmtTime(p.deliveredAt)}</dd>
+            <dt>Buyer encryption key</dt>
+            <dd>
+              <HashValue value={p.buyerEncPubKey} />
+            </dd>
+            <dt>ciphertextHash</dt>
+            <dd className="flex flex-wrap items-center gap-2">
+              <HashValue value={p.ciphertextHash} />
+              <Verified ok={ctOk} okText="matches listing" badText="differs from listing" />
+            </dd>
+            <dt>wrappedKeyHash</dt>
+            <dd>
+              <HashValue value={p.wrappedKeyHash} />
+            </dd>
+            <dt>wrapperHash</dt>
+            <dd>
+              <HashValue value={p.wrapperHash} />
+            </dd>
+          </dl>
+        </DetailSection>
+      )}
+
+      {dl.entries && dl.plain && (
+        <DetailSection title="Bundle contents">
+          <p className="text-[13px] text-muted">
+            <span className="tabular-nums">{dl.entries.filter((e) => e.type === "file").length}</span> files · <span className="tabular-nums">{(dl.plain.length / 1024).toFixed(1)}</span> KiB ·{" "}
+            <span className="tabular-nums">{tasks.length}</span> task folders
+          </p>
+          <ul className="mt-2 max-h-64 overflow-auto rounded-md bg-panel-2 px-3 py-2 font-mono text-[11px] text-muted">
+            {dl.entries.map((e) => (
+              <li key={e.path} className="[overflow-wrap:anywhere]">
+                {e.path} {e.type === "file" ? <span className="text-faint">({e.size} B)</span> : null}
+              </li>
+            ))}
+          </ul>
+        </DetailSection>
+      )}
+
+      <DetailSection title="Parties">
+        <dl className="kv">
+          <dt>Buyer</dt>
+          <dd>
+            <AddressLink address={p.buyer} seller />
+          </dd>
+          <dt>Seller</dt>
+          <dd>
+            <AddressLink address={p.seller} seller />
+          </dd>
+        </dl>
+      </DetailSection>
+
+      <DetailSection title="Terms at purchase" hint="Fixed when the purchase was paid. Later changes to the market never apply to it.">
+        <dl className="kv">
+          <dt>Price</dt>
+          <dd className="font-mono tabular-nums">
+            {fmtUsdc(p.price)} ({fmtUsdc(p.taskCount ? p.price / BigInt(p.taskCount) : 0n)} × {p.taskCount} tasks)
+          </dd>
+          <dt>Seller collateral</dt>
+          <dd className="font-mono tabular-nums">{fmtUsdc(p.collateral)}</dd>
+          <dt>Protection window</dt>
+          <dd>{fmtWindow(p.challengeWindow)} after delivery</dd>
+          <dt>Delivery deadline</dt>
+          <dd>{fmtTime(p.deliveryDeadline)}</dd>
+          {p.challengeDeadline > 0 && (
+            <>
+              <dt>Protection ends</dt>
+              <dd>{fmtTime(p.challengeDeadline)}</dd>
+            </>
+          )}
+          <dt>Refund cap</dt>
+          <dd className="font-mono tabular-nums">
+            {pct(p.refundCapBps)} ({fmtUsdc((p.price * BigInt(p.refundCapBps)) / 10000n)})
+          </dd>
+          <dt>Deposit to report</dt>
+          <dd className="font-mono tabular-nums">
+            {fmtUsdc(p.bondFloor, { symbol: false })}–{fmtUsdc(p.bondCap)}
+          </dd>
+          <dt>Review fee</dt>
+          <dd className="font-mono tabular-nums">{fmtUsdc(p.caseFee)}</dd>
+          <dt>Marketplace fee</dt>
+          <dd>{pct(p.feeBps)} of what the seller keeps</dd>
+          <dt>Seller penalty</dt>
+          <dd>
+            {pct(p.penaltyBps)} of the price if more than {pct(p.penaltyThresholdBps)} of tasks are confirmed broken
+          </dd>
+          {p.remediedMask > 0n && (
+            <>
+              <dt>Refunded tasks</dt>
+              <dd>
+                {maskToIndexes(p.remediedMask)
+                  .map((i) => i + 1)
+                  .join(", ")}
+              </dd>
+            </>
+          )}
+        </dl>
+      </DetailSection>
+
+      <DetailSection title="On-chain history" hint="Every contract event for this purchase, with links to the block explorer.">
+        {eventsLoading ? <Skeleton className="h-24" /> : <EventList events={[...events].reverse()} compact empty="No events found for this purchase yet." />}
+      </DetailSection>
+    </Details>
   );
 }

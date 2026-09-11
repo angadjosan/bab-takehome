@@ -119,7 +119,7 @@ export function Dot({ tone = "neutral", className }: { tone?: Tone; className?: 
 }
 
 export const PURCHASE_TONE: Record<string, Tone> = { Funded: "info", Delivered: "accent", Disputed: "warn", Refunded: "neutral", Settled: "ok" };
-const PURCHASE_LABEL: Record<string, string> = { Funded: "Funded · awaiting key", Delivered: "Delivered · in challenge", Disputed: "Disputed", Refunded: "Refunded", Settled: "Settled" };
+const PURCHASE_LABEL: Record<string, string> = { Funded: "Paid · waiting for key", Delivered: "Delivered · protection window", Disputed: "Problem reported", Refunded: "Refunded", Settled: "Complete" };
 
 /** Purchase lifecycle state as a chip (Funded → Delivered → [Disputed] → Settled, or Refunded). */
 export function PurchaseStateChip({ state, long }: { state: string; long?: boolean }) {

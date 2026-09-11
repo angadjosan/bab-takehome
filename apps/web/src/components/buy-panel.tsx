@@ -7,7 +7,7 @@ import { useAccount, useReadContract } from "wagmi";
 import { marketAbi, tokenAbi } from "@/lib/abi";
 import { deployment } from "@/lib/config";
 import { useWalletEncKey } from "@/lib/enc-derive";
-import { fmtUsdc, fmtWindow } from "@/lib/format";
+import { fmtUsdc } from "@/lib/format";
 import { useEncKeys } from "@/lib/keys";
 import { isZeroHash, useSellerStake, type Version } from "@/lib/market";
 import { useTokenInfo, useWalletMode } from "./providers";
@@ -15,37 +15,36 @@ import { friendlyError, RequireWallet, TxStatus, useTx } from "./tx";
 import { useApproveAndCall } from "./tx-sequence";
 import { Mono, Notice, Spinner } from "./ui";
 
+/** Lives inside the listing page's price box, which already shows the price and refund terms. */
 export function BuyPanel({ v }: { v: Version }) {
   const { address } = useAccount();
   const stake = useSellerStake(v.seller);
   const blockers: string[] = [];
-  if (!v.active) blockers.push("The seller has deactivated this version.");
-  if (isZeroHash(v.reportHash)) blockers.push("No signed preview report is attached yet.");
+  if (!v.active) blockers.push("The seller has paused sales of this version.");
+  if (isZeroHash(v.reportHash)) blockers.push("The preview is still running. You can buy once its signed results are attached.");
   if (stake.data && stake.data.available < v.collateral)
-    blockers.push(`The seller’s available collateral (${fmtUsdc(stake.data.available)}) is below the ${fmtUsdc(v.collateral)} each sale must reserve.`);
-  if (address && address.toLowerCase() === v.seller.toLowerCase()) blockers.push("You are the seller of this version.");
+    blockers.push(`The seller’s free deposit (${fmtUsdc(stake.data.available)}) doesn’t cover the ${fmtUsdc(v.collateral)} each sale holds back for refunds.`);
+  if (address && address.toLowerCase() === v.seller.toLowerCase()) blockers.push("This is your own listing.");
+
+  if (blockers.length)
+    return (
+      <Notice tone="neutral" title="Not for sale right now">
+        {blockers.length === 1 ? (
+          blockers[0]
+        ) : (
+          <ul className="list-disc space-y-1 pl-4">
+            {blockers.map((b) => (
+              <li key={b}>{b}</li>
+            ))}
+          </ul>
+        )}
+      </Notice>
+    );
 
   return (
-    <div>
-      <h3 className="text-sm font-semibold">Buy this environment</h3>
-      {blockers.length ? (
-        <div className="mt-3">
-          <Notice tone="warn" title="Not purchasable right now">
-            <ul className="list-disc pl-4">
-              {blockers.map((b) => (
-                <li key={b}>{b}</li>
-              ))}
-            </ul>
-          </Notice>
-        </div>
-      ) : (
-        <div className="mt-3">
-          <RequireWallet why="Log in to buy.">
-            <BuyAction v={v} />
-          </RequireWallet>
-        </div>
-      )}
-    </div>
+    <RequireWallet why="Sign in to buy. Email, Google or a wallet all work.">
+      <BuyAction v={v} />
+    </RequireWallet>
   );
 }
 
@@ -80,7 +79,7 @@ function BuyAction({ v }: { v: Version }) {
     try {
       if (devTools && override) pub = override as Hex;
       else {
-        if (!walletKey) setPhase("Setting up your decryption key: approve the signature request in your wallet…");
+        if (!walletKey) setPhase("Setting up your download key. Approve the signature request in your wallet…");
         pub = (await derive()).publicKey;
       }
     } catch (e) {
@@ -96,52 +95,68 @@ function BuyAction({ v }: { v: Version }) {
     if (pid !== undefined) router.push(`/purchase/${pid}?new=1`);
   }
 
+  const buttonText = phase
+    ? "Waiting for your signature…"
+    : seq.step === "1/2"
+      ? "Allowing the payment… (1 of 2)"
+      : seq.step === "2/2"
+        ? "Paying… (2 of 2)"
+        : seq.busy
+          ? "Paying…"
+          : `Buy for ${fmtUsdc(v.price)}`;
+
   return (
-    <div className="space-y-3 text-sm">
-      <p className="text-xs text-muted">
-        Balance {balance === undefined ? "…" : fmtUsdc(balance)}
-        {!enoughFunds && balance !== undefined && ` · you need ${fmtUsdc(v.price)}`}
-      </p>
+    <div className="space-y-4 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[13px]">
+        <span className="text-muted">Your balance</span>
+        <span className={enoughFunds || balance === undefined ? "font-mono text-ink tabular-nums" : "font-mono text-warn tabular-nums"}>{balance === undefined ? "…" : fmtUsdc(balance)}</span>
+      </div>
       {!enoughFunds && balance !== undefined && (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs" aria-live="polite">
+          <span className="text-muted">
+            You need <span className="font-mono tabular-nums">{fmtUsdc(v.price - balance)}</span> more.
+          </span>
           {token.hasFaucet ? (
             <button className="btn btn-sm" disabled={faucet.busy} onClick={() => faucet.run("Faucet", { address: deployment!.token, abi: tokenAbi, functionName: "faucet" })}>
-              Get test {token.symbol}
+              {faucet.busy ? "Sending test tokens…" : `Get test ${token.symbol}`}
             </button>
           ) : (
             <span className="text-warn">Add {token.symbol} to your wallet to continue.</span>
           )}
-          <TxStatus state={faucet.state} />
+          <div className="w-full">
+            <TxStatus state={faucet.state} />
+          </div>
         </div>
       )}
 
-      <div className="rounded-lg border border-line p-3 text-xs text-muted">
-        <ul className="list-disc space-y-1 pl-4">
-          <li>Your {fmtUsdc(v.price)} is held by the contract, not the seller.</li>
-          <li>If the environment isn’t delivered within {fmtWindow(v.deliveryWindow)}, you get a full refund.</li>
-          <li>After delivery you have {fmtWindow(v.challengeWindow)} to dispute specific tasks. Poor training results alone don’t qualify.</li>
-        </ul>
-        <label className="mt-2 flex items-start gap-2 text-ink">
-          <input type="checkbox" className="mt-0.5" checked={termsAck} onChange={(e) => setTermsAck(e.target.checked)} />
-          <span>I understand the preview is not a guarantee of training value and refunds after delivery are capped.</span>
-        </label>
+      <label className="flex cursor-pointer items-start gap-2.5 text-[13px] leading-relaxed text-muted">
+        <input type="checkbox" name="terms" className="mt-1 shrink-0 accent-[var(--accent-fill)]" checked={termsAck} onChange={(e) => setTermsAck(e.target.checked)} />
+        <span>I understand the preview doesn’t guarantee training value, and refunds after delivery are capped.</span>
+      </label>
+
+      <button className="btn btn-primary h-10 w-full" disabled={!enoughFunds || !termsAck || busy} onClick={doBuy}>
+        {busy && <Spinner className="h-3.5 w-3.5" />}
+        {buttonText}
+      </button>
+
+      <div aria-live="polite" className="space-y-1 text-xs">
+        {phase && <p className="text-muted">{phase}</p>}
+        <TxStatus state={seq.state} />
+        {err && (
+          <p role="alert" className="text-bad [overflow-wrap:anywhere]">
+            {err}
+          </p>
+        )}
       </div>
 
-      <button className="btn btn-primary w-full" disabled={!enoughFunds || !termsAck || busy} onClick={doBuy}>
-        {busy ? <Spinner className="h-3.5 w-3.5" /> : null} Buy for {fmtUsdc(v.price)}
-      </button>
-      {phase && <p className="text-xs text-muted">{phase}</p>}
-      <TxStatus state={seq.state} />
-      {err && <p className="break-words text-xs text-bad">{err}</p>}
-
       {devTools && (
-        <details className="rounded-lg border border-dashed border-line px-3 py-2 text-xs">
+        <details className="rounded-md border border-dashed border-line px-3 py-2 text-xs">
           <summary className="cursor-pointer text-muted">Dev tools: encryption key</summary>
           <p className="mt-2 text-muted">Default: derived from this wallet{walletKey ? "" : " on first purchase"}.</p>
-          {walletKey && <Mono className="block break-all">{walletKey.publicKey}</Mono>}
+          {walletKey && <Mono className="block [overflow-wrap:anywhere]">{walletKey.publicKey}</Mono>}
           {keys.length > 0 && (
-            <select className="input mt-2 font-mono text-xs" value={override} onChange={(e) => setOverride(e.target.value)}>
-              <option value="">use the wallet-derived key</option>
+            <select aria-label="Encryption key for this purchase" name="encKey" className="input mt-2 font-mono text-xs" value={override} onChange={(e) => setOverride(e.target.value)}>
+              <option value="">Use the wallet-derived key</option>
               {keys.map((k) => (
                 <option key={k.publicKey} value={k.publicKey}>
                   {k.publicKey.slice(0, 18)}… {k.label ?? ""}
