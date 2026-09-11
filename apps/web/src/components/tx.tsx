@@ -100,7 +100,7 @@ export function TxStatus({ state }: { state: TxState }) {
   );
 }
 
-/** Renders children only when a wallet is connected to the right chain; otherwise a login/connect prompt. */
+/** Renders children only when a wallet is connected to the right chain; otherwise a Privy sign-in prompt (the anvil dev build shows wallet connectors instead). */
 export function RequireWallet({ children, why }: { children: ReactNode; why?: string }) {
   const { mode } = useWalletMode();
   const { isConnected, address } = useAccount();
@@ -151,9 +151,8 @@ export function RequireWallet({ children, why }: { children: ReactNode; why?: st
   );
 }
 
-/** wagmi mode (dev tools, or Privy not configured): browser wallets, plus burner keys with dev tools on. */
+/** wagmi mode (local anvil only): browser wallets plus burner keys. */
 function ConnectPrompt({ why }: { why?: string }) {
-  const { devTools } = useWalletMode();
   const { connectors, connect, isPending } = useConnect();
   const [burnerOpen, setBurnerOpen] = useState(false);
   const uniq = connectors.filter((c, i, arr) => c.id !== BURNER_CONNECTOR_ID && arr.findIndex((x) => x.name === c.name) === i);
@@ -166,13 +165,11 @@ function ConnectPrompt({ why }: { why?: string }) {
             {isPending ? "Connecting…" : c.name === "Injected" ? "Browser wallet" : c.name}
           </button>
         ))}
-        {devTools && (
-          <button className="btn btn-sm btn-ghost" aria-expanded={burnerOpen} onClick={() => setBurnerOpen((x) => !x)}>
-            Burner key (dev)
-          </button>
-        )}
+        <button className="btn btn-sm btn-ghost" aria-expanded={burnerOpen} onClick={() => setBurnerOpen((x) => !x)}>
+          Burner key (dev)
+        </button>
       </div>
-      {devTools && burnerOpen && (
+      {burnerOpen && (
         <div className="mt-3 space-y-3">
           <BurnerSwitcher />
           <BurnerForm />

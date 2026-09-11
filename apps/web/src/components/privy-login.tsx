@@ -5,12 +5,29 @@ import { useMemo, type ReactNode } from "react";
 import type { Address } from "viem";
 import { CHAIN_ID } from "@/lib/config";
 import { SponsorCtx, type Sponsor } from "@/lib/sponsor";
-import { PRIVY_SPONSOR_GAS } from "@/lib/wallet-mode";
+import { PRIVY_APP_ID, PRIVY_SPONSOR_GAS } from "@/lib/wallet-mode";
 import { Spinner } from "./ui";
 
-/** Shown where an action needs a wallet and nobody is logged in (Privy mode). */
+/** Header "Sign in" for a build with no Privy app id: shown, but it can't open anything. */
+export function SignInDisabledButton() {
+  return (
+    <button className="btn btn-sm" disabled title="Sign-in isn't set up for this deployment">
+      Sign in
+    </button>
+  );
+}
+
+/** Shown where an action needs a wallet and nobody is logged in (Privy mode). Disabled without a Privy app id. */
 export function PrivyLoginPrompt({ why }: { why?: string }) {
+  return PRIVY_APP_ID ? <LivePrivyLoginPrompt why={why} /> : <LoginPromptBody why={why} ready={false} authenticated={false} />;
+}
+
+function LivePrivyLoginPrompt({ why }: { why?: string }) {
   const { ready, authenticated, login } = usePrivy();
+  return <LoginPromptBody why={why} ready={ready} authenticated={authenticated} onLogin={() => login()} />;
+}
+
+function LoginPromptBody({ why, ready, authenticated, onLogin }: { why?: string; ready: boolean; authenticated: boolean; onLogin?: () => void }) {
   return (
     <div className="space-y-3 text-sm">
       <p className="text-muted">{why ?? "Sign in to continue."}</p>
@@ -19,7 +36,7 @@ export function PrivyLoginPrompt({ why }: { why?: string }) {
           <Spinner className="h-3.5 w-3.5" /> Setting up your account…
         </p>
       ) : (
-        <button className="btn btn-primary w-full" disabled={!ready} onClick={() => login()}>
+        <button className="btn btn-primary w-full" disabled={!ready || !onLogin} onClick={onLogin}>
           Sign in
         </button>
       )}

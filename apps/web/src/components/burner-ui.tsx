@@ -3,7 +3,7 @@
 import { useId, useState } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { addBurner, BURNER_CONNECTOR_ID, forgetAllBurners, removeBurner, setActiveBurner, useBurners, type Burner } from "@/lib/burner";
-import { CHAIN_ID, IS_MAINNET } from "@/lib/config";
+import { CHAIN_ID } from "@/lib/config";
 import { shortAddr } from "@/lib/format";
 import { cx, IconAlert, IconX } from "./ui";
 
@@ -36,7 +36,7 @@ export function BurnerForm({ onDone }: { onDone?: () => void }) {
         <IconAlert className="mt-px h-4 w-4 shrink-0 text-warn" />
         <p className="leading-relaxed text-ink/85">
           <span className="font-semibold text-warn">Throwaway wallets with tiny balances only.</span> The key is pasted into this page, kept in this tab’s sessionStorage until the tab closes, and signs
-          transactions without asking.{IS_MAINNET && " This is Base mainnet: real funds."}
+          transactions without asking.
         </p>
       </div>
       <label htmlFor={`${id}-pk`} className="sr-only">

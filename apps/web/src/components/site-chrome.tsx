@@ -28,7 +28,7 @@ const TRUST_MODEL_URL = "https://github.com/angadjosan/bab-takehome#readme";
 
 export function SiteHeader() {
   const path = usePathname();
-  const { mode, devTools, privyConfigured } = useWalletMode();
+  const { mode, devTools } = useWalletMode();
   const isActive = (href: string) => (href === "/" ? path === "/" || path.startsWith("/listing") : path.startsWith(href));
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-bg">
@@ -65,13 +65,6 @@ export function SiteHeader() {
         ))}
       </nav>
       {!IS_MAINNET && <TestnetBanner />}
-      {!privyConfigured && !devTools && (
-        <div className="border-t border-line">
-          <div className="mx-auto max-w-6xl px-4 py-1.5 text-xs text-muted sm:px-6">
-            Email sign-in is off for this deployment (set <code className="font-mono text-ink">NEXT_PUBLIC_PRIVY_APP_ID</code>). Browser wallets still work.
-          </div>
-        </div>
-      )}
     </header>
   );
 }
@@ -154,10 +147,9 @@ function Logo() {
   );
 }
 
-/** wagmi mode: browser wallets; with dev tools also burner keys and a per-session account switcher. */
+/** wagmi mode (local anvil only): browser wallets, burner keys and a per-session account switcher. */
 function WagmiWalletButton() {
   const { address, isConnected, connector } = useAccount();
-  const { devTools } = useWalletMode();
   const chainId = useChainId();
   const { connectors, connect, isPending, error } = useConnect();
   const { disconnect } = useDisconnect();
@@ -254,13 +246,11 @@ function WagmiWalletButton() {
                 </button>
               ))}
               {error && <p className="px-2 pt-1 text-xs text-bad">{error.message.split("\n")[0]}</p>}
-              {devTools && (
-                <div className="mt-2 space-y-2 border-t border-line px-2 pt-2 pb-1">
-                  <div className="section-title">Burner key · dev tool</div>
-                  <BurnerSwitcher onSwitch={() => setOpen(false)} />
-                  <BurnerForm onDone={() => setOpen(false)} />
-                </div>
-              )}
+              <div className="mt-2 space-y-2 border-t border-line px-2 pt-2 pb-1">
+                <div className="section-title">Burner key · dev tool</div>
+                <BurnerSwitcher onSwitch={() => setOpen(false)} />
+                <BurnerForm onDone={() => setOpen(false)} />
+              </div>
             </>
           ) : (
             <div className="space-y-2 p-1 text-sm">
@@ -270,17 +260,13 @@ function WagmiWalletButton() {
                   {address}
                 </div>
               </div>
-              {devTools && (
-                <>
-                  <BurnerSwitcher />
-                  <details className="rounded border border-line px-2 py-1.5 text-xs">
-                    <summary className="cursor-pointer text-muted">Add a burner key (switch perspective)</summary>
-                    <div className="mt-2">
-                      <BurnerForm />
-                    </div>
-                  </details>
-                </>
-              )}
+              <BurnerSwitcher />
+              <details className="rounded border border-line px-2 py-1.5 text-xs">
+                <summary className="cursor-pointer text-muted">Add a burner key (switch perspective)</summary>
+                <div className="mt-2">
+                  <BurnerForm />
+                </div>
+              </details>
               <AccountPanel onClose={() => setOpen(false)} />
               <div className="border-t border-line pt-1">
                 <button

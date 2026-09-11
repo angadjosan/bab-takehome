@@ -8,8 +8,8 @@ import { RPC_URL } from "./config";
 
 /**
  * "Burner key" wallet: the user pastes a private key of a throwaway wallet, and transactions are
- * signed in this tab with a viem local account. It is a real wallet on whatever chain the app runs
- * on — the user's own key, nothing simulated — but the key sits in sessionStorage (this tab only,
+ * signed in this tab with a viem local account. It is offered only on the local anvil chain (dev
+ * tools). The user's own key, nothing simulated, but the key sits in sessionStorage (this tab only,
  * gone when the tab closes), so it is only for wallets holding tiny balances. Several keys can be
  * added and switched between, which lets one browser act as buyer, seller, juror and observer.
  */

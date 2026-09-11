@@ -7,18 +7,23 @@ import { createContext, Fragment, useContext, useEffect, useState, type ReactNod
 import { parseAbi, zeroAddress } from "viem";
 import { createConfig, http, WagmiProvider } from "wagmi";
 import { coinbaseWallet, injected } from "wagmi/connectors";
-import { chain, deployment, RPC_URL } from "@/lib/config";
+import { chain, CHAIN_ID, deployment, RPC_URL } from "@/lib/config";
 import { publicClient } from "@/lib/client";
 import { burner } from "@/lib/burner";
 import { setTokenMeta, tokenMeta } from "@/lib/token";
-import { PRIVY_APP_ID, PRIVY_CLIENT_ID, useDevTools } from "@/lib/wallet-mode";
+import { DEV_TOOLS, PRIVY_APP_ID, PRIVY_CLIENT_ID } from "@/lib/wallet-mode";
 import { PrivySponsorBridge } from "./privy-login";
 
 /* ------------------------------------ wallet mode ------------------------------------ */
 
 export type WalletMode = { mode: "privy" | "wagmi"; devTools: boolean; privyConfigured: boolean };
-const ModeCtx = createContext<WalletMode>({ mode: "wagmi", devTools: false, privyConfigured: false });
-/** "privy": Privy login + embedded wallet (default). "wagmi": dev tools (burner keys) or Privy not configured. */
+const MODE: WalletMode = { mode: DEV_TOOLS ? "wagmi" : "privy", devTools: DEV_TOOLS, privyConfigured: !!PRIVY_APP_ID };
+const ModeCtx = createContext<WalletMode>(MODE);
+/**
+ * "privy": every chain except local anvil (Privy login + embedded wallet). With `privyConfigured` false
+ * no Privy provider is mounted and sign-in renders disabled. "wagmi": local anvil only (browser wallets
+ * plus burner keys, `devTools` true).
+ */
 export const useWalletMode = () => useContext(ModeCtx);
 
 /* ------------------------------------ token meta ------------------------------------ */
@@ -123,12 +128,16 @@ function PrivyTree({ qc, children }: { qc: QueryClient; children: ReactNode }) {
   );
 }
 
-/** Plain wagmi: browser wallets, plus the burner-key connector when dev tools are on. */
-function WagmiTree({ qc, devTools, children }: { qc: QueryClient; devTools: boolean; children: ReactNode }) {
+/**
+ * Plain wagmi. On local anvil (`dev`): browser wallets plus the burner-key connector. On a hosted build
+ * without a Privy app id: no connectors at all (reads still work, nobody can sign in).
+ */
+function WagmiTree({ qc, dev, children }: { qc: QueryClient; dev: boolean; children: ReactNode }) {
   const [config] = useState(() =>
     createConfig({
       chains: [chain],
-      connectors: [injected({ shimDisconnect: true }), coinbaseWallet({ appName: "RL Environment Market" }), ...(devTools ? [burner()] : [])],
+      connectors: dev ? [injected({ shimDisconnect: true }), coinbaseWallet({ appName: "RL Environment Market" }), burner()] : [],
+      multiInjectedProviderDiscovery: dev,
       transports,
       ssr: true,
     }),
@@ -141,22 +150,24 @@ function WagmiTree({ qc, devTools, children }: { qc: QueryClient; devTools: bool
 }
 
 export function Providers({ children }: { children: ReactNode }) {
-  const devTools = useDevTools();
+  useEffect(() => {
+    if (MODE.mode === "privy" && !MODE.privyConfigured) {
+      console.error(`NEXT_PUBLIC_PRIVY_APP_ID is not set for this build (chain ${CHAIN_ID}), so sign-in is disabled. Set it in the deployment environment and rebuild.`);
+    }
+  }, []);
   const [qc] = useState(
     () =>
       new QueryClient({
         defaultOptions: { queries: { staleTime: 10_000, refetchOnWindowFocus: false, retry: 1 } },
       }),
   );
-  const mode: WalletMode["mode"] = PRIVY_APP_ID && !devTools ? "privy" : "wagmi";
   const inner = <TokenMeta>{children}</TokenMeta>;
   return (
-    <ModeCtx.Provider value={{ mode, devTools, privyConfigured: !!PRIVY_APP_ID }}>
-      {mode === "privy" ? (
+    <ModeCtx.Provider value={MODE}>
+      {MODE.mode === "privy" && MODE.privyConfigured ? (
         <PrivyTree qc={qc}>{inner}</PrivyTree>
       ) : (
-        // keyed so turning dev tools on (?dev=1) rebuilds the wagmi config with the burner connector
-        <WagmiTree key={devTools ? "dev" : "std"} qc={qc} devTools={devTools}>
+        <WagmiTree qc={qc} dev={MODE.devTools}>
           {inner}
         </WagmiTree>
       )}

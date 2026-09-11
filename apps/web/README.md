@@ -40,7 +40,7 @@ when the report carries no `verifyUrl` of its own.
 ## Wallets and payments (Privy)
 
 All wallet and payment UX goes through [Privy](https://docs.privy.io) (`@privy-io/react-auth` +
-`@privy-io/wagmi`): log in with email, Google or an external wallet; users without a wallet get an
+`@privy-io/wagmi`): log in with email or an external wallet; users without a wallet get an
 embedded EVM wallet on Base Sepolia at login. Every contract write (faucet, approve, buy,
 requestPreview, openDispute, commit/reveal, finalize, tally, rate, withdraw, collateral/stake
 deposits) is a wagmi call on the active Privy wallet. The wallet menu shows the active wallet, the
@@ -49,7 +49,7 @@ never this app's), token / ETH / claimable balances, the faucet and withdraw.
 
 | Variable | Meaning |
 |---|---|
-| `NEXT_PUBLIC_PRIVY_APP_ID` | Privy app id (Dashboard → App settings). Unset: the app builds and runs with browser wallets only and shows a setup notice. |
+| `NEXT_PUBLIC_PRIVY_APP_ID` | Privy app id (Dashboard → App settings). Required on every chain except local anvil. Unset: the app still builds and browses, but **Sign in** is disabled and the browser console logs an error naming this variable. There is no browser-wallet fallback. |
 | `NEXT_PUBLIC_PRIVY_CLIENT_ID` | Optional app client id (Dashboard → App settings → Clients), for per-environment settings. |
 | `NEXT_PUBLIC_PRIVY_SPONSOR_GAS` | `1` sends writes from the **embedded** wallet through Privy's native gas sponsorship (`useSendTransaction(…, {sponsor: true})`), so a first-time reviewer needs no ETH. External wallets always pay their own gas. |
 
@@ -57,7 +57,8 @@ Privy dashboard settings (https://dashboard.privy.io):
 
 1. **App settings → Domains / allowed origins:** `http://localhost:3000` (and `http://localhost:3100` for
    `scripts/local-stack.sh`) plus the Vercel production and preview domains.
-2. **User management → Authentication → Login methods:** Email, Google, External wallets (EVM).
+2. **User management → Authentication → Login methods:** Email and External wallets (EVM). The code asks
+   for only these two (`loginMethods: ["email", "wallet"]`).
 3. **Wallet infrastructure → Embedded wallets:** EVM enabled, create on login for users without wallets
    (the code also sets `createOnLogin: "users-without-wallets"`).
 4. **Chains:** the app passes Base Sepolia (84532) as `defaultChain`/`supportedChains`; nothing to add in
@@ -84,8 +85,9 @@ re-derived key doesn't match the purchase. Verified end to end on anvil: burner 
 
 ### Burner keys (dev tool only)
 
-On the local anvil chain, or with `?dev=1` in the URL (remembered for the tab, `?dev=0` turns it off),
-the app switches to plain wagmi with browser wallets plus a **burner key** connector: paste the private
+Only on the local anvil chain (31337), the app uses plain wagmi instead of Privy: browser wallets plus
+a **burner key** connector. Hosted builds (any other chain) always sign in with Privy, and no URL flag
+changes that. With the burner connector you paste the private
 key of a throwaway wallet and it signs in the page with a viem local account. The key sits in this tab's
 sessionStorage and signs without a prompt, so use it only for wallets with tiny balances. Several keys
 can be added and switched between, which lets one browser act as buyer, second buyer, seller, juror

@@ -8,12 +8,18 @@ import { tokenAbi } from "@/lib/abi";
 import { deployment } from "@/lib/config";
 import { fmtUsdc, shortAddr } from "@/lib/format";
 import { useClaimable } from "@/lib/market";
-import { PRIVY_SPONSOR_GAS } from "@/lib/wallet-mode";
+import { PRIVY_APP_ID, PRIVY_SPONSOR_GAS } from "@/lib/wallet-mode";
+import { SignInDisabledButton } from "./privy-login";
 import { AccountPanel } from "./wallet-panel";
 import { Chip, cx } from "./ui";
 
-/** Header account control in Privy mode: sign in, balance, wallets, export, sign out. */
+/** Header account control in Privy mode. Without a Privy app id there is no Privy provider, so sign-in shows disabled. */
 export function PrivyWalletButton() {
+  return PRIVY_APP_ID ? <PrivyAccountButton /> : <SignInDisabledButton />;
+}
+
+/** Sign in, balance, wallets, export, sign out. */
+function PrivyAccountButton() {
   const { ready, authenticated, login, logout, user } = usePrivy();
   const { wallets } = useWallets();
   const { exportWallet } = useExportWallet();
