@@ -41,6 +41,18 @@
         {"type": "submit"}
       ]
     },
+    "action.jsonSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "Machine-readable form of `action`: one JSON Schema per action, discriminated by `type`. A harness generates one tool per branch (tool name = the `type` const, arguments = the other properties). x-terminal marks the action that ends the episode; x-countsAgainstBudget says whether it uses one of resources.actionBudget.",
+      "discriminator": {"propertyName": "type"},
+      "oneOf": [
+        {"title": "list_files", "description": "List files in the workspace, or in one subdirectory of it.", "type": "object", "properties": {"type": {"const": "list_files"}, "path": {"type": "string", "description": "workspace-relative directory; default '.'"}}, "required": ["type"], "additionalProperties": false, "x-terminal": false, "x-countsAgainstBudget": true},
+        {"title": "read_file", "description": "Read one workspace file (the first 64 KiB).", "type": "object", "properties": {"type": {"const": "read_file"}, "path": {"type": "string", "description": "workspace-relative file path"}}, "required": ["type", "path"], "additionalProperties": false, "x-terminal": false, "x-countsAgainstBudget": true},
+        {"title": "write_file", "description": "Replace the full content of an editable workspace file (hefix/*.py) with the complete new file text (at most 256 KiB UTF-8).", "type": "object", "properties": {"type": {"const": "write_file"}, "path": {"type": "string", "description": "workspace-relative path matching an editable pattern"}, "content": {"type": "string", "description": "complete new file content"}}, "required": ["type", "path", "content"], "additionalProperties": false, "x-terminal": false, "x-countsAgainstBudget": true},
+        {"title": "run_visible_tests", "description": "Run the visible test suite and return the tail of its output.", "type": "object", "properties": {"type": {"const": "run_visible_tests"}}, "required": ["type"], "additionalProperties": false, "x-terminal": false, "x-countsAgainstBudget": true},
+        {"title": "submit", "description": "Submit the workspace for hidden-test grading.", "type": "object", "properties": {"type": {"const": "submit"}}, "required": ["type"], "additionalProperties": false, "x-terminal": true, "x-countsAgainstBudget": false}
+      ]
+    },
     "observation.step": {
       "type": "string", "ok": "bool", "error": "string?", "errorCode": "string?",
       "list_files": {"files": "string[]"},

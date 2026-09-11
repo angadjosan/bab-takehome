@@ -1,0 +1,16 @@
+[project]
+name = "envmarket-coding"
+version = "0.1.0"
+description = "EnvMarket reference harness for coding environments, built on Prime Intellect's verifiers library"
+requires-python = "==3.12.*"
+license = { text = "MIT" }
+dependencies = [
+    # The rollout harness: environment + multi-turn tool loop + rubric (the classic `vf.*` API,
+    # the one `vf-eval`, `vf.load_environment` and prime-rl's orchestrator consume).
+    "verifiers==0.3.1",
+]
+
+[tool.uv]
+# Not built or installed: the harness runs from source (PYTHONPATH=harness/envmarket_coding or cwd),
+# so the only dependencies are the hash-pinned ones in uv.lock / requirements.lock.
+package = false
