@@ -106,8 +106,35 @@ export class TeeClient {
     return this.req('GET', `/preview/quote/${versionId}`);
   }
 
-  preview(versionId: bigint): Promise<any> {
-    return this.req('POST', `/preview/${versionId}`);
+  /**
+   * Run (or fetch the cached) preview. A real run takes minutes, longer than undici's 300 s headers
+   * timeout and typical gateway limits, so this starts it with `?async=1` (202 while running; a cached
+   * report comes back directly) and polls `GET /reports/:versionId` (202 running, 500 failed, 200 done).
+   * TEE_PREVIEW_TIMEOUT_MS bounds the wait (default 45 min); TEE_PREVIEW_POLL_MS sets the interval.
+   */
+  async preview(versionId: bigint): Promise<any> {
+    const started = await this.req('POST', `/preview/${versionId}?async=1`);
+    if (!(started && typeof started === 'object' && started.status === 'running')) return started;
+    const deadline = Date.now() + Number(process.env.TEE_PREVIEW_TIMEOUT_MS ?? 45 * 60_000);
+    const pollMs = Number(process.env.TEE_PREVIEW_POLL_MS ?? 10_000);
+    let notFound = 0;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      let r: any;
+      try {
+        r = await this.report(versionId);
+      } catch (e) {
+        // failed → 500 with {status:'failed', error}; a brief 404 before the job registers is tolerated
+        if (e instanceof TeeHttpError && e.status === 404 && ++notFound <= 3) continue;
+        if (e instanceof TeeHttpError && e.status === 0 && Date.now() < deadline) continue; // transient network error
+        throw e;
+      }
+      if (r && typeof r === 'object' && r.status === 'running') {
+        if (Date.now() > deadline) throw new TeeHttpError(`TEE preview for version ${versionId} still running after the wait limit`, 202, r);
+        continue;
+      }
+      return r;
+    }
   }
 
   report(versionId: bigint): Promise<any> {
