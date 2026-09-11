@@ -15,8 +15,8 @@ const SORTS = {
   tasks: "Most tasks",
   rating: "Highest rated",
   sold: "Most sold",
-  topPassDesc: "Top pass@1 ↓",
-  topPassAsc: "Top pass@1 ↑",
+  topPassDesc: "Reference score ↓",
+  topPassAsc: "Reference score ↑",
 } as const;
 type SortKey = keyof typeof SORTS;
 
