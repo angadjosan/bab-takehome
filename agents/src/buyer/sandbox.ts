@@ -61,8 +61,9 @@ export function prepareSandbox(envDir: string, cacheRoot: string): Sandbox {
 export function runInSandbox(
   sb: Sandbox,
   args: string[],
-  opts: { timeoutSec?: number; env?: Record<string, string>; shell?: boolean; networkNone?: boolean } = {},
+  opts: { timeoutSec?: number; env?: Record<string, string>; shell?: boolean; networkNone?: boolean; mounts?: Array<{ host: string; container: string }> } = {},
 ): Promise<RunOut> {
+  const extraMounts = (opts.mounts ?? []).flatMap((m) => ['-v', `${path.resolve(m.host)}:${m.container}:ro`]);
   const env = { PYTHONDONTWRITEBYTECODE: '1', PYTHONHASHSEED: '0', TZ: 'UTC', LC_ALL: 'C.UTF-8', HOME: '/tmp', TMPDIR: '/tmp', PATH: '/venv/bin:/usr/local/bin:/usr/bin:/bin', ...(opts.env ?? {}) };
   const name = `envm-buyer-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
   const argv = [
@@ -71,7 +72,7 @@ export function runInSandbox(
     '--read-only', '--tmpfs', '/tmp:rw,exec,size=256m',
     '--cpus', '1', '--memory', '512m', '--pids-limit', '128',
     '--security-opt', 'no-new-privileges', '--cap-drop', 'ALL', '--user', '65534:65534',
-    '-v', `${sb.envDir}:/env:ro`, '-v', `${sb.venv}:/venv:ro`, '-w', '/env',
+    '-v', `${sb.envDir}:/env:ro`, '-v', `${sb.venv}:/venv:ro`, ...extraMounts, '-w', '/env',
     ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
     sb.image,
     ...(opts.shell ? ['sh', '-c', args.join(' ')] : ['/venv/bin/python', ...args]),

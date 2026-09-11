@@ -7,7 +7,7 @@
  * recorded in every finding. No canned answers: if no provider is reachable, semantic checks
  * report status "unverified" with the error.
  */
-import { LlmClient, llmConfigFromEnv } from '@envmarket/shared';
+import { LlmClient, llmConfigFromEnv, loadEnv } from '@envmarket/shared';
 
 export const FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
 export const DEFAULT_FIREWORKS_MODEL = 'accounts/fireworks/models/gpt-oss-120b';
@@ -20,7 +20,9 @@ export interface AgentLlm {
   baseURL: string;
 }
 
-export function agentLlm(role = 'buyer', env: Record<string, string | undefined> = process.env): AgentLlm {
+export function agentLlm(role = 'buyer', envIn?: Record<string, string | undefined>): AgentLlm {
+  // repo-root .env (FIREWORKS_API_KEY etc.) merged under process.env
+  const env: Record<string, string | undefined> = envIn ?? { ...loadEnv({ requireDeployment: false }).env, ...process.env };
   const R = role.toUpperCase();
   const explicitBase = env[`LLM_BASE_URL_${R}`] || env.LLM_BASE_URL;
   if (explicitBase) {
