@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {EnvMarketStorage} from "./EnvMarketStorage.sol";
 
 /// @title EnvMarket — escrowed marketplace for RL environments with signed previews,
@@ -269,7 +270,7 @@ contract EnvMarket is EnvMarketStorage, EIP712, Ownable {
     // ============================================================= COLLATERAL
     function depositCollateral(uint256 amount) external {
         if (amount == 0) revert ZeroValue();
-        _stakes[msg.sender].total += uint128(amount);
+        _stakes[msg.sender].total += SafeCast.toUint128(amount);
         totalCollateral += amount;
         token.safeTransferFrom(msg.sender, address(this), amount);
         emit CollateralDeposited(msg.sender, amount);
@@ -474,7 +475,8 @@ contract EnvMarket is EnvMarketStorage, EIP712, Ownable {
         JurorInfo storage j = _jurors[msg.sender];
         if (!j.approved) revert JurorNotApproved();
         if (amount == 0) revert ZeroValue();
-        j.total += uint128(amount);
+        j.total += SafeCast.toUint128(amount);
+        j.stakeBlock = uint64(block.number);
         totalJurorStake += amount;
         token.safeTransferFrom(msg.sender, address(this), amount);
         emit JurorStakeChanged(msg.sender, j.total, j.locked);
@@ -498,23 +500,40 @@ contract EnvMarket is EnvMarketStorage, EIP712, Ownable {
         if (block.number <= d.selectionBlock) revert TooEarly();
         bytes32 bh = blockhash(d.selectionBlock);
         if (bh == 0) {
-            // selection block older than 256 blocks: re-arm with a fresh future block
-            _armSelection(disputeId, d);
+            // selection block older than 256 blocks: re-arm with a fresh future block. The grace
+            // deadline is NOT moved, so an unfillable panel still fails over (no permanent lock).
+            d.selectionBlock = uint64(block.number + 2);
+            emit SelectionArmed(disputeId, d.round, d.selectionBlock);
             return;
         }
         bytes32 seed = keccak256(abi.encode(bh, block.prevrandao, disputeId, d.round));
 
+        // Each eligible juror draws r = keccak256(seed, juror); the 3 lowest draws are seated. A juror's
+        // seat depends only on their own draw, so toggling one's own eligibility cannot re-roll others.
         Purchase storage p = _purchases[d.purchaseId];
         Seat[6] storage seats = _seats[disputeId];
         uint256 n = _jurorList.length;
-        address[] memory pool = new address[](n);
+        address[3] memory chosen;
+        uint256[3] memory best = [type(uint256).max, type(uint256).max, type(uint256).max];
         uint256 count;
         for (uint256 i; i < n; ++i) {
             address a = _jurorList[i];
             JurorInfo storage j = _jurors[a];
             if (!j.approved || j.total - j.locked < d.jurorStake || a == p.buyer || a == p.seller) continue;
+            // stake added once blockhash(selectionBlock) could be known does not count for this draw
+            if (j.stakeBlock > d.selectionBlock) continue;
             if (d.round == 2 && (a == seats[0].juror || a == seats[1].juror || a == seats[2].juror)) continue;
-            pool[count++] = a;
+            count++;
+            uint256 r = uint256(keccak256(abi.encode(seed, a)));
+            if (r >= best[2]) continue;
+            uint256 k = 2;
+            while (k > 0 && r < best[k - 1]) {
+                best[k] = best[k - 1];
+                chosen[k] = chosen[k - 1];
+                --k;
+            }
+            best[k] = r;
+            chosen[k] = a;
         }
         if (count < SEATS) {
             if (block.timestamp <= d.selectionDeadline) revert NotEnoughJurors();
@@ -525,12 +544,8 @@ contract EnvMarket is EnvMarketStorage, EIP712, Ownable {
         }
 
         uint256 base = (uint256(d.round) - 1) * SEATS;
-        address[3] memory chosen;
         for (uint256 k; k < SEATS; ++k) {
-            uint256 r = k + uint256(keccak256(abi.encode(seed, k))) % (count - k);
-            (pool[k], pool[r]) = (pool[r], pool[k]);
-            address a = pool[k];
-            chosen[k] = a;
+            address a = chosen[k];
             seats[base + k].juror = a;
             JurorInfo storage j = _jurors[a];
             j.locked += d.jurorStake;

@@ -67,16 +67,16 @@ contract ForkUSDCTest is Test {
         v.bundleHash = BUNDLE;
         v.ciphertextHash = CIPHER;
         v.taskCount = 5;
-        v.price = 2e6; // 2 USDC
-        v.collateral = 2e6;
+        v.price = 500_000; // 0.5 USDC (5 USDC demo budget)
+        v.collateral = 500_000; // >= caseFee 0.10 + 10% of price
         vm.startPrank(seller);
-        market.depositCollateral(2e6);
+        market.depositCollateral(500_000);
         uint256 vid = market.createListing(v);
         vm.stopPrank();
         bytes32 rh = keccak256("report");
         market.attachReport(vid, rh, _sig(market.previewReportDigest(vid, BUNDLE, rh)));
         vm.prank(buyer);
-        pid = market.buy(vid, ENC, 2e6);
+        pid = market.buy(vid, ENC, 500_000);
         bytes32 wk = keccak256("wk");
         market.recordDelivery(pid, CIPHER, wk, wk, _sig(market.deliveryReceiptDigest(pid, ENC, CIPHER, wk, wk)));
     }
@@ -98,10 +98,10 @@ contract ForkUSDCTest is Test {
         uint256 pid = _listBuyDeliver();
         vm.warp(V.getPurchase(pid).challengeDeadline + 1);
         market.finalize(pid);
-        assertEq(market.claimable(seller), 1_960_000); // 2 - 2%
+        assertEq(market.claimable(seller), 490_000); // 0.5 - 2%
         vm.prank(seller);
         market.withdraw();
-        assertEq(usdc.balanceOf(seller), 10e6 - 2e6 + 1_960_000);
+        assertEq(usdc.balanceOf(seller), 10e6 - 500_000 + 490_000);
         _conserved();
     }
 
@@ -110,20 +110,20 @@ contract ForkUSDCTest is Test {
         vm.prank(buyer);
         uint256 did = market.openDispute(pid, S.Ground.BrokenOrHashMismatch, 1, keccak256("ev"));
         (S.Dispute memory d,) = V.getDispute(did);
-        assertEq(d.requested, 400_000); // 2 / 5 tasks
-        assertEq(d.bond, 400_000); // clamp(0.4, 0.25, 2)
+        assertEq(d.requested, 100_000); // 0.5 / 5 tasks
+        assertEq(d.bond, 100_000); // clamp(0.1, 0.05, 0.5)
         bytes32 fh = keccak256("f");
         market.resolveMechanical(did, true, 1, fh, _sig(market.mechanicalFindingDigest(did, true, 1, fh)));
-        assertEq(market.claimable(buyer), 800_000); // refund 0.4 + bond 0.4
-        assertEq(market.claimable(seller), 1_568_000); // 1.6 retained - 2%
-        assertEq(market.treasury(), 32_000 + 300_000); // fee + case fee
-        assertEq(market.reserve(), 200_000); // 10% penalty
+        assertEq(market.claimable(buyer), 200_000); // refund 0.1 + bond 0.1
+        assertEq(market.claimable(seller), 392_000); // 0.4 retained - 2%
+        assertEq(market.treasury(), 8_000 + 100_000); // fee + case fee
+        assertEq(market.reserve(), 50_000); // 10% penalty
         (uint256 tot,,) = V.sellerStake(seller);
-        assertEq(tot, 2e6 - 300_000 - 200_000);
+        assertEq(tot, 500_000 - 100_000 - 50_000);
         _conserved();
         vm.prank(buyer);
         market.withdraw();
-        assertEq(usdc.balanceOf(buyer), 10e6 - 2e6 - 400_000 + 800_000);
+        assertEq(usdc.balanceOf(buyer), 10e6 - 500_000 - 100_000 + 200_000);
         _conserved();
     }
 
@@ -140,7 +140,7 @@ contract ForkUSDCTest is Test {
         vm.prank(seller);
         vm.expectRevert();
         market.withdraw();
-        assertEq(market.claimable(seller), 1_960_000); // still owed
+        assertEq(market.claimable(seller), 490_000); // still owed
         _conserved();
     }
 }

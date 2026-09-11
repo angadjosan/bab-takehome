@@ -16,14 +16,15 @@ library MarketParams {
         p.jurorStake = 20e6; // 20
     }
 
-    /// Base mainnet (8453) with real USDC — "Mainnet params" in docs/BUILD_SPEC.md.
+    /// Base mainnet (8453) with real USDC — "Mainnet params" in docs/BUILD_SPEC.md (5 USDC demo budget;
+    /// listings priced 0.5 USDC with 0.5 collateral ≥ caseFee + 10% of price = 0.15).
     function mainnet() internal pure returns (EnvMarketStorage.Params memory p) {
         p = _common();
-        p.bondFloor = 250_000; // 0.25 USDC
-        p.bondCap = 2e6; // 2 USDC
-        p.caseFee = 300_000; // 0.30 USDC
-        p.participationFee = 50_000; // 0.05 USDC
-        p.jurorStake = 1e6; // 1 USDC
+        p.bondFloor = 50_000; // 0.05 USDC
+        p.bondCap = 500_000; // 0.50 USDC
+        p.caseFee = 100_000; // 0.10 USDC
+        p.participationFee = 20_000; // 0.02 USDC
+        p.jurorStake = 250_000; // 0.25 USDC
     }
 
     function _common() private pure returns (EnvMarketStorage.Params memory p) {

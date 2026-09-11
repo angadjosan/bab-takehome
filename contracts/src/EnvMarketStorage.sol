@@ -156,6 +156,7 @@ abstract contract EnvMarketStorage {
         bool listed;
         uint128 total;
         uint128 locked;
+        uint64 stakeBlock; // block of the last depositJurorStake (stake added later than a draw's selectionBlock is not eligible for it)
     }
 
     struct Stake {
