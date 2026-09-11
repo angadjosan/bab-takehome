@@ -11,8 +11,8 @@ the founder cancelled the demo run (next purchase id and next dispute id are bot
 
 | Listing | Environment | Live version | Status | Web |
 |---|---|---|---|---|
-| 1 | py-repair-kit@1.0.0 (5 tasks + 2 audit) | **3** | active; preview paid (2.28 tUSDC), report pending | https://rl-env-market.vercel.app/listing/1 |
-| 2 | humanevalfix-8@1.0.0 (8 tasks + 2 audit) | **4** | active; preview paid (3.22 tUSDC), report pending | https://rl-env-market.vercel.app/listing/2 |
+| 1 | py-repair-kit@1.0.0 (5 tasks + 2 audit) | **5** | active; verified preview attached (3 was retired: its preview deadline passed before the TEE fix) | https://rl-env-market.vercel.app/listing/5 |
+| 2 | humanevalfix-8@1.0.0 (8 tasks + 2 audit) | **6** | active; verified preview attached (4 was retired: its preview deadline passed before the TEE fix) | https://rl-env-market.vercel.app/listing/6 |
 
 Terms for every version: price 100 tUSDC, collateral 100 tUSDC per sale, challenge window 300 s,
 delivery window 600 s. The seller (`0x1D4E…B883`) has 250 tUSDC collateral staked (none reserved).

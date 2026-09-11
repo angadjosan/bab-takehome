@@ -9,7 +9,7 @@ The first vertical is **coding-repair environments with hidden unit tests**. The
 | What | Where |
 |---|---|
 | App | https://rl-env-market.vercel.app |
-| Live listings | [py-repair-kit](https://rl-env-market.vercel.app/listing/1) (version 5) · [humanevalfix-8](https://rl-env-market.vercel.app/listing/2) (version 6), both with TEE-signed preview reports attached on-chain |
+| Live listings | [py-repair-kit](https://rl-env-market.vercel.app/listing/5) (version 5) · [humanevalfix-8](https://rl-env-market.vercel.app/listing/6) (version 6), both with TEE-signed preview reports attached on-chain |
 | AI jurors (Vercel Functions + Workflow) | https://rl-env-market-jurors.vercel.app/api/health · record in [deployments/jurors.json](deployments/jurors.json) |
 | Video (≤ 5 min) | **TBD** |
 | EnvMarket (Base Sepolia, 84532) | `0x2fd644342296df7de57929fa87bd65c05fb415f8` · [basescan](https://sepolia.basescan.org/address/0x2fd644342296df7de57929fa87bd65c05fb415f8) · [blockscout](https://base-sepolia.blockscout.com/address/0x2fd644342296df7de57929fa87bd65c05fb415f8) |
