@@ -1,0 +1,14 @@
+{
+  "name": "@envmarket/dstack",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dependency island for @phala/dstack-sdk 0.5.8: its hard imports need @noble/hashes 1.x / @noble/curves 1.x (declared as peers), while services/tee uses @noble 2.x. Installing them here nests the 1.x copies next to the SDK.",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "dependencies": {
+    "@noble/curves": "1.9.7",
+    "@noble/hashes": "1.8.0",
+    "@phala/dstack-sdk": "0.5.8"
+  }
+}

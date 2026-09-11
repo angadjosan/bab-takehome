@@ -76,8 +76,10 @@ export function buildApp(ctx: Ctx, watcher: Watcher | null): Hono {
       chainId: ctx.chain?.chainId ?? ctx.cfg.chainId,
       market: ctx.chain?.market ?? null,
       attestation: {
+        vendor: ctx.attestor.state.vendor,
         kind: ctx.attestor.state.kind,
         appId: ctx.attestor.state.appId,
+        composeHash: ctx.attestor.state.composeHash,
         imageDigest: ctx.attestor.state.imageDigest,
         verifyUrl: ctx.attestor.state.verifyUrl,
         quoteDigest: ctx.attestor.state.quoteDigest,
@@ -98,7 +100,7 @@ export function buildApp(ctx: Ctx, watcher: Watcher | null): Hono {
   );
 
   app.get('/attestation', async (c) => {
-    if (c.req.query('refresh') === '1' || (ctx.attestor.state.kind === 'eigencompute-tdx' && !ctx.attestor.state.token)) await ctx.attestor.refresh();
+    if (c.req.query('refresh') === '1' || (ctx.attestor.state.kind !== 'none-local-dev' && !ctx.attestor.state.token)) await ctx.attestor.refresh();
     return c.json({ ...ctx.attestor.state, signerRoles: ctx.chain ? await roles(ctx) : null });
   });
 

@@ -3,8 +3,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildDeliveryWrapper, generateX25519KeyPair, randomKey, sha256Hex, unwrapKeyAsync, wrapKeyAsync, bytesToHex } from '@envmarket/shared';
-import { Attestor } from '../src/attestation.ts';
-import { keysFromMnemonic, keysFromPrivateKey } from '../src/keys.ts';
+import { createHash } from 'node:crypto';
+import { Attestor, composeImageDigest, EigenAttestor, makeAttestor, PhalaAttestor, quoteReportData } from '../src/attestation.ts';
+import { DSTACK_KEY_PATH, DSTACK_KEY_PURPOSE, keysFromDstack, keysFromMnemonic, keysFromPrivateKey, loadServiceKeysFor, teeVendor } from '../src/keys.ts';
 import { rederiveWrappedKey, type DeliveryRecord } from '../src/relay.ts';
 import { BlobStore, PrivateStore } from '../src/store.ts';
 import { mapLimit, RateLimiter } from '../src/util.ts';
@@ -181,5 +182,80 @@ describe('attestation', () => {
     expect(s.quoteDigest).toBeNull();
     expect(a.reportBlock().kind).toBe('none-local-dev');
     expect(await a.tokenFor('payload')).toBeNull();
+  });
+  it('Phala attestor without a dstack socket stays none-local-dev and never fakes a quote', async () => {
+    const keys = keysFromPrivateKey('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80');
+    const a = makeAttestor('phala', { DSTACK_SOCKET: '/nonexistent/dstack.sock' }, keys, 84532, '0x2fd644342296df7de57929fa87bd65c05fb415f8');
+    expect(a).toBeInstanceOf(PhalaAttestor);
+    const s = await a.refresh();
+    expect(s.vendor).toBe('phala');
+    expect(s.kind).toBe('none-local-dev');
+    expect(s.error).toMatch(/does not exist/);
+    expect(s.quote).toBeNull();
+    expect(await a.tokenFor('payload')).toBeNull();
+    // the Phala binding is domain-separated from the EigenCompute one
+    expect(JSON.parse(s.binding)).toMatchObject({ type: 'envmarket.tee.binding.v1', vendor: 'phala', chainId: 84532 });
+    expect(makeAttestor('local', {}, keys, 31337, null)).toBeInstanceOf(EigenAttestor);
+  });
+  it('parses the pinned image digest out of app-compose', () => {
+    const d = 'a'.repeat(64);
+    expect(composeImageDigest(JSON.stringify({ docker_compose_file: `services:\n  tee:\n    image: docker.io/x/envmarket-tee@sha256:${d}\n` }))).toBe(`sha256:${d}`);
+    expect(composeImageDigest(JSON.stringify({ docker_compose_file: 'services:\n  tee:\n    image: x:latest\n' }))).toBeNull();
+    expect(composeImageDigest('not json')).toBeNull();
+  });
+});
+
+describe('TEE vendor selection', () => {
+  const none = () => false;
+  it('TEE_VENDOR wins, else MNEMONIC → eigencompute, dstack socket → phala, else local', () => {
+    expect(teeVendor({ TEE_VENDOR: 'phala' }, none)).toBe('phala');
+    expect(teeVendor({ TEE_VENDOR: 'EigenCompute', MNEMONIC: TEST_MNEMONIC }, none)).toBe('eigencompute');
+    expect(teeVendor({ TEE_VENDOR: 'local', MNEMONIC: TEST_MNEMONIC }, () => true)).toBe('local');
+    expect(teeVendor({ MNEMONIC: TEST_MNEMONIC }, () => true)).toBe('eigencompute');
+    expect(teeVendor({}, (p) => p === '/var/run/dstack.sock')).toBe('phala');
+    expect(teeVendor({ RUNNER_PK: '0x01' }, none)).toBe('local');
+    expect(() => teeVendor({ TEE_VENDOR: 'marlin' }, none)).toThrow(/TEE_VENDOR/);
+  });
+  it('an explicit vendor without its key source fails at startup (no silent fallback)', async () => {
+    await expect(loadServiceKeysFor('phala', { DSTACK_SOCKET: '/nonexistent/dstack.sock', RUNNER_PK: '0x01' })).rejects.toThrow(/not mounted/);
+    await expect(loadServiceKeysFor('eigencompute', { RUNNER_PK: '0x01' })).rejects.toThrow(/MNEMONIC/);
+    await expect(loadServiceKeysFor('local', {})).rejects.toThrow(/RUNNER_PK/);
+    expect((await loadServiceKeysFor('eigencompute', { MNEMONIC: TEST_MNEMONIC })).source).toBe('kms-mnemonic');
+  });
+});
+
+// Real dstack guest-agent API served by the open-source dstack simulator (Dstack-TEE/dstack releases,
+// `phala simulator start` or the dstack-simulator binary). Run with DSTACK_SIMULATOR_ENDPOINT=http://127.0.0.1:8090.
+const SIM = process.env.DSTACK_SIMULATOR_ENDPOINT;
+describe.skipIf(!SIM)('dstack (simulator)', () => {
+  it('GetKey → a deterministic secp256k1 signer with a KMS signature chain; X25519/storage via HKDF', async () => {
+    const a = await keysFromDstack(SIM!, true);
+    const b = await loadServiceKeysFor('phala', { TEE_VENDOR: 'phala', DSTACK_SIMULATOR_ENDPOINT: SIM });
+    expect(a.source).toBe('dstack-simulator');
+    expect(b.account.address).toBe(a.account.address);
+    expect(b.encPublicKey).toBe(a.encPublicKey);
+    expect(bytesToHex(a.storageKey)).not.toBe(bytesToHex(a.encSecretKey));
+    expect(a.dstack).toMatchObject({ path: DSTACK_KEY_PATH, purpose: DSTACK_KEY_PURPOSE });
+    expect(a.dstack!.signatureChain.length).toBeGreaterThanOrEqual(1);
+  });
+  it('GetQuote over sha512(binding): report_data matches, quote/event log/compose served, simulator never claims a TEE', async () => {
+    const keys = await keysFromDstack(SIM!, true);
+    const a = new PhalaAttestor({ endpoint: SIM!, simulated: true }, keys, 84532, '0x2fd644342296df7de57929fa87bd65c05fb415f8');
+    const s = await a.refresh();
+    expect(s.error).toBeNull();
+    expect(s.kind).toBe('none-local-dev'); // simulated
+    expect(s.appId).toMatch(/^[0-9a-f]{40}$/);
+    expect(JSON.parse(s.binding)).toMatchObject({ vendor: 'phala', appId: s.appId, signer: keys.account.address.toLowerCase(), encPubKey: keys.encPublicKey });
+    const rd = createHash('sha512').update(s.binding).digest('hex');
+    expect(s.reportData).toBe(`0x${rd}`);
+    expect(quoteReportData(s.quote!)).toBe(rd);
+    expect(s.token).toBe(s.quote);
+    expect(s.quoteDigest).toBe(sha256Hex(new Uint8Array(Buffer.from(s.quote!, 'hex'))));
+    expect(Array.isArray(s.eventLog)).toBe(true);
+    const composeEvent = (s.eventLog as Array<{ imr: number; event: string; event_payload: string }>).find((e) => e.imr === 3 && e.event === 'compose-hash');
+    expect(composeEvent?.event_payload).toBe(s.composeHash);
+    expect(typeof s.appCompose).toBe('string');
+    expect(s.verifyUrl).toBeNull();
+    expect(await a.tokenFor('report')).toBeNull(); // no per-report quote unless really attested
   });
 });

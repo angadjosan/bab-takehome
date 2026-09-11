@@ -2,9 +2,11 @@
   "name": "@envmarket/tee",
   "version": "0.1.0",
   "private": true,
-  "description": "Trusted service for the RL Environment Market (EigenCompute TEE): upload, preview runner, validator, key-delivery relay, mechanical verifier, evidence server",
+  "description": "Trusted service for the RL Environment Market (Phala Cloud dstack TDX; EigenCompute supported): upload, preview runner, validator, key-delivery relay, mechanical verifier, evidence server",
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "tsx src/main.ts",
     "dev": "TEE_MODE=local-dev tsx src/main.ts",
@@ -13,6 +15,7 @@
     "e2e": "tsx scripts/local-e2e.ts"
   },
   "dependencies": {
+    "@envmarket/dstack": "file:./dstack",
     "@envmarket/shared": "file:../../packages/shared",
     "@hono/node-server": "^1.14.4",
     "@noble/ciphers": "^2.4.0",

@@ -3,11 +3,11 @@ import * as path from 'node:path';
 import { serve } from '@hono/node-server';
 import { importCacheDir } from './cache.ts';
 import { loadHarness, type HarnessInfo } from './harnessRunner.ts';
-import { Attestor } from './attestation.ts';
+import { makeAttestor } from './attestation.ts';
 import { Chain_, marketAbi } from './chain.ts';
 import { loadConfig } from './config.ts';
 import { ensureDirs, type Ctx } from './context.ts';
-import { loadServiceKeys } from './keys.ts';
+import { loadServiceKeysFor } from './keys.ts';
 import { errMsg, logger } from './log.ts';
 import { detectSandbox, unavailableSandbox } from './sandbox.ts';
 import { buildApp } from './server.ts';
@@ -16,7 +16,7 @@ import { Watcher } from './watcher.ts';
 
 export async function startService(overrides: Partial<Record<string, string>> = {}): Promise<{ ctx: Ctx; close: () => Promise<void>; port: number }> {
   const cfg = loadConfig(overrides);
-  const keys = loadServiceKeys(process.env);
+  const keys = await loadServiceKeysFor(cfg.vendor, process.env);
   // The mnemonic has been consumed; drop it from this process's env so no child ever inherits it.
   delete process.env.MNEMONIC;
   const { workRoot, cacheRoot } = ensureDirs(cfg.dataDir);
@@ -30,7 +30,7 @@ export async function startService(overrides: Partial<Record<string, string>> = 
     sandbox = unavailableSandbox(errMsg(e));
   }
   const chain = cfg.market ? new Chain_(cfg.chainId, cfg.rpcUrl, cfg.market, keys.account, marketAbi(cfg.repoRoot)) : null;
-  const attestor = new Attestor(process.env, keys.account.address, keys.encPublicKey, keys.source, cfg.chainId, cfg.market);
+  const attestor = makeAttestor(cfg.vendor, process.env, keys, cfg.chainId, cfg.market);
   await attestor.refresh();
   let harness: HarnessInfo | null = null;
   try {
@@ -47,9 +47,11 @@ export async function startService(overrides: Partial<Record<string, string>> = 
   }
 
   logger.info('service starting', {
+    vendor: cfg.vendor,
     signer: keys.account.address,
     keySource: keys.source,
     attestation: attestor.state.kind,
+    appId: attestor.state.appId,
     chainId: cfg.chainId,
     market: cfg.market,
     sandbox: sandbox.description,

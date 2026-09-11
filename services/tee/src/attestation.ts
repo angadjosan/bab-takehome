@@ -1,4 +1,9 @@
 /**
+ * Runtime attestation, one implementation per TEE_VENDOR behind `TeeAttestor`:
+ *   - `PhalaAttestor` (Phala Cloud dstack, Intel TDX): a raw DCAP quote with report_data =
+ *     sha512(binding), plus the event log and app-compose (see the class comment below);
+ *   - `EigenAttestor` (EigenCompute, and the local-dev fallback), documented here.
+ *
  * EigenCompute runtime attestation.
  *
  * Inside an EigenCompute app (GCP Confidential Space, Intel TDX) the launcher exposes
@@ -18,6 +23,7 @@ import http from 'node:http';
 import { compactDecrypt } from 'jose';
 import { canonicalJson, sha256Hex } from '@envmarket/shared';
 import type { Address, Hex } from 'viem';
+import { dstackEndpoint, type ServiceKeys, type TeeVendor } from './keys.ts';
 import { errMsg, logger } from './log.ts';
 
 const DEFAULT_SOCKET_PATH = '/run/container_launcher/teeserver.sock';
@@ -109,11 +115,15 @@ export function eigenEnvironment(name: string | undefined): { name: EigenEnviron
   return { name: n, ...EIGEN_ENVIRONMENTS[n] };
 }
 
+export type AttestationKind = 'eigencompute-tdx' | 'phala-dstack-tdx' | 'none-local-dev';
+
 export interface AttestationState {
-  kind: 'eigencompute-tdx' | 'none-local-dev';
-  eigenEnvironment: EigenEnvironment;
-  appController: string;
-  appControllerChainId: number;
+  vendor: TeeVendor;
+  kind: AttestationKind;
+  /** EigenCompute only (null on Phala). */
+  eigenEnvironment: EigenEnvironment | null;
+  appController: string | null;
+  appControllerChainId: number | null;
   appId: string | null;
   imageDigest: string | null;
   signer: Address;
@@ -129,7 +139,54 @@ export interface AttestationState {
   obtainedAt: string | null;
   error: string | null;
   note: string;
+  // ---- Phala dstack only (null for EigenCompute / local) ----
+  /** Raw Intel TDX DCAP quote (hex, no 0x). Same value as `token`. */
+  quote: string | null;
+  /** 0x + sha512(binding): the quote's 64-byte report_data (TD report offset 568 in the quote). */
+  reportData: Hex | null;
+  /** dstack event log (RTMR0-3 replay; RTMR3 carries app-id, compose-hash, instance-id, key-provider). */
+  eventLog: unknown[] | null;
+  /** sha256 of `appCompose`; also the RTMR3 `compose-hash` event. */
+  composeHash: string | null;
+  /** The app-compose.json the CVM booted (its docker_compose_file pins the image by digest). */
+  appCompose: string | null;
+  instanceId: string | null;
+  osImageHash: string | null;
+  /** GetKey inputs and the KMS signature chain over the signer key. */
+  keyDerivation: { path: string; purpose: string; signatureChain: Hex[] } | null;
+  /** Public quote verification endpoint (POST {hex}). */
+  verifyApi: string | null;
 }
+
+/** Block embedded in report.json, findings and case packets. */
+export interface ReportAttestation {
+  kind: AttestationKind;
+  appId: string | null;
+  signer: Address;
+  quoteDigest: string | null;
+  verifyUrl: string | null;
+}
+
+export interface TeeAttestor {
+  state: AttestationState;
+  /** Try to obtain the binding attestation. Only real TEE evidence upgrades `kind`. */
+  refresh(): Promise<AttestationState>;
+  /** Attestation over sha512(payload) (e.g. a report hash). Null outside a TEE. */
+  tokenFor(payload: string): Promise<string | null>;
+  reportBlock(): ReportAttestation;
+}
+
+const NO_DSTACK = {
+  quote: null,
+  reportData: null,
+  eventLog: null,
+  composeHash: null,
+  appCompose: null,
+  instanceId: null,
+  osImageHash: null,
+  keyDerivation: null,
+  verifyApi: null,
+} as const;
 
 function decodeClaims(jwt: string): Record<string, unknown> | null {
   try {
@@ -151,7 +208,8 @@ export interface AttestationEnv {
   ATTEST_SOCKET_PATH?: string;
 }
 
-export class Attestor {
+/** EigenCompute (and the local-dev fallback, which never obtains a token). Unchanged binding format. */
+export class EigenAttestor implements TeeAttestor {
   state: AttestationState;
   #cfg: AttestConfig | null;
   constructor(
@@ -161,6 +219,7 @@ export class Attestor {
     keySource: string,
     chainId: number,
     market: Address | null,
+    vendor: 'eigencompute' | 'local' = 'eigencompute',
   ) {
     const appId = env.EIGEN_APP_ID || env.EIGEN_APP_ID_PUBLIC || null;
     const eigenEnv = eigenEnvironment(env.EIGEN_ENVIRONMENT || env.EIGEN_ENVIRONMENT_PUBLIC);
@@ -178,6 +237,7 @@ export class Attestor {
         ? { kmsServerURL: env.KMS_SERVER_URL, kmsPublicKey: env.KMS_PUBLIC_KEY.replace(/\\n/g, '\n'), audience: ATTEST_AUDIENCE, socketPath: env.ATTEST_SOCKET_PATH }
         : null;
     this.state = {
+      vendor,
       kind: 'none-local-dev',
       eigenEnvironment: eigenEnv.name,
       appController: eigenEnv.appController,
@@ -196,6 +256,7 @@ export class Attestor {
       obtainedAt: null,
       error: null,
       note: 'Local development: no TEE attestation. The host operator can read plaintext. Never the demo path.',
+      ...NO_DSTACK,
     };
   }
 
@@ -240,7 +301,165 @@ export class Attestor {
     }
   }
 
-  reportBlock(): { kind: AttestationState['kind']; appId: string | null; signer: Address; quoteDigest: string | null; verifyUrl: string | null } {
+  reportBlock(): ReportAttestation {
     return { kind: this.state.kind, appId: this.state.appId, signer: this.state.signer, quoteDigest: this.state.quoteDigest, verifyUrl: this.state.verifyUrl };
   }
+}
+
+/** Backwards-compatible name for the EigenCompute attestor. */
+export { EigenAttestor as Attestor };
+
+// ------------------------------------------------------------------------------ Phala Cloud (dstack)
+
+export const PHALA_VERIFY_API = 'https://cloud-api.phala.com/api/v1/attestations/verify';
+export const PHALA_TRUST_CENTER = 'https://trust.phala.com/app';
+/** TDX quote v4: 48-byte header, then the TD report; report_data is its last 64 bytes (offset 568). */
+export const TDX_REPORT_DATA_OFFSET = 568;
+
+/** The Phala binding. `vendor: "phala"` keeps its bytes distinct from the EigenCompute binding. */
+export function phalaBinding(signer: Address, encPubKey: Hex, chainId: number, market: Address | null, appId: string | null): string {
+  return canonicalJson({
+    type: 'envmarket.tee.binding.v1',
+    vendor: 'phala',
+    signer: signer.toLowerCase(),
+    encPubKey,
+    chainId,
+    market: market ? market.toLowerCase() : null,
+    appId,
+  });
+}
+
+/** `sha256:<hex>` of the first digest-pinned image in app-compose's docker_compose_file, or null. */
+export function composeImageDigest(appCompose: string | null): string | null {
+  if (!appCompose) return null;
+  try {
+    const c = JSON.parse(appCompose) as { docker_compose_file?: string };
+    const m = String(c.docker_compose_file ?? '').match(/@sha256:([0-9a-f]{64})/);
+    return m ? `sha256:${m[1]}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 64 bytes of report_data from a hex TDX quote (v4 layout). */
+export function quoteReportData(quoteHex: string): string {
+  const h = quoteHex.replace(/^0x/, '');
+  return h.slice(TDX_REPORT_DATA_OFFSET * 2, TDX_REPORT_DATA_OFFSET * 2 + 128);
+}
+
+interface DstackLike {
+  info(): Promise<{ app_id: string; instance_id: string; compose_hash: string; os_image_hash?: string; tcb_info: { app_compose?: string; os_image_hash?: string } }>;
+  getQuote(reportData: Uint8Array): Promise<{ quote: string; event_log: string }>;
+}
+
+/**
+ * Phala Cloud dstack CVM (Intel TDX). refresh(): Info → binding (with app_id) → GetQuote(sha512(binding)).
+ * `kind = "phala-dstack-tdx"` only when a quote came from the real guest-agent socket; a dstack
+ * simulator run fills the same fields for testing but stays `none-local-dev`.
+ */
+export class PhalaAttestor implements TeeAttestor {
+  state: AttestationState;
+  #client: DstackLike | null = null;
+  constructor(
+    private readonly dstack: { endpoint: string; simulated: boolean },
+    keys: Pick<ServiceKeys, 'account' | 'encPublicKey' | 'source' | 'dstack'>,
+    private readonly chainId: number,
+    private readonly market: Address | null,
+  ) {
+    this.state = {
+      vendor: 'phala',
+      kind: 'none-local-dev',
+      eigenEnvironment: null,
+      appController: null,
+      appControllerChainId: null,
+      appId: null,
+      imageDigest: null,
+      signer: keys.account.address,
+      encPubKey: keys.encPublicKey,
+      keySource: keys.source,
+      verifyUrl: null,
+      binding: phalaBinding(keys.account.address, keys.encPublicKey, chainId, market, null),
+      token: null,
+      tokenClaims: null,
+      quoteDigest: null,
+      kmsPublicKey: null,
+      obtainedAt: null,
+      error: null,
+      note: dstack.simulated
+        ? 'dstack SIMULATOR: the quote is not from TDX hardware. Not a TEE; the host can read plaintext.'
+        : 'No dstack quote obtained yet: not attested.',
+      ...NO_DSTACK,
+      keyDerivation: keys.dstack ?? null,
+      verifyApi: PHALA_VERIFY_API,
+    };
+  }
+
+  async #dstack(): Promise<DstackLike> {
+    if (!this.#client) {
+      const { DstackClient } = await import('@envmarket/dstack');
+      this.#client = new DstackClient(this.dstack.endpoint) as unknown as DstackLike;
+    }
+    return this.#client;
+  }
+
+  async refresh(): Promise<AttestationState> {
+    try {
+      const c = await this.#dstack();
+      const info = await c.info();
+      const binding = phalaBinding(this.state.signer, this.state.encPubKey, this.chainId, this.market, info.app_id);
+      const rd = sha512(binding);
+      const q = await c.getQuote(rd);
+      const quote = q.quote.replace(/^0x/, '').toLowerCase();
+      if (quoteReportData(quote) !== rd.toString('hex')) throw new Error('dstack quote report_data != sha512(binding)');
+      const appCompose = info.tcb_info?.app_compose ?? null;
+      const real = !this.dstack.simulated;
+      this.state = {
+        ...this.state,
+        kind: real ? 'phala-dstack-tdx' : 'none-local-dev',
+        appId: info.app_id,
+        instanceId: info.instance_id,
+        binding,
+        token: quote,
+        quote,
+        quoteDigest: sha256Hex(Buffer.from(quote, 'hex')),
+        reportData: `0x${rd.toString('hex')}`,
+        eventLog: JSON.parse(q.event_log) as unknown[],
+        composeHash: info.compose_hash,
+        appCompose,
+        imageDigest: composeImageDigest(appCompose),
+        osImageHash: info.os_image_hash ?? info.tcb_info?.os_image_hash ?? null,
+        verifyUrl: real ? `${PHALA_TRUST_CENTER}/${info.app_id}` : null,
+        obtainedAt: new Date().toISOString(),
+        error: null,
+        note: real
+          ? 'Intel TDX DCAP quote from the Phala Cloud dstack guest agent. report_data = sha512(binding). Verify: POST {hex: quote} to verifyApi (quote.verified), check report_data, check sha256(appCompose) = composeHash = the RTMR3 compose-hash event and that appCompose pins the published image digest, and that binding.signer holds the EnvMarket roles. The signer key comes from the dstack KMS for this app id (keyDerivation.signatureChain).'
+          : 'dstack SIMULATOR: the quote is not from TDX hardware. Not a TEE; the host can read plaintext.',
+      };
+      logger.info('dstack attestation quote obtained', { appId: info.app_id, quoteDigest: this.state.quoteDigest, simulated: this.dstack.simulated });
+    } catch (e) {
+      this.state.error = errMsg(e);
+      logger.warn('dstack attestation failed', { error: this.state.error });
+    }
+    return this.state;
+  }
+
+  async tokenFor(payload: string): Promise<string | null> {
+    if (this.state.kind !== 'phala-dstack-tdx') return null;
+    try {
+      const q = await (await this.#dstack()).getQuote(sha512(payload));
+      return q.quote.replace(/^0x/, '').toLowerCase();
+    } catch (e) {
+      logger.warn('per-payload dstack quote failed', { error: errMsg(e) });
+      return null;
+    }
+  }
+
+  reportBlock(): ReportAttestation {
+    return { kind: this.state.kind, appId: this.state.appId, signer: this.state.signer, quoteDigest: this.state.quoteDigest, verifyUrl: this.state.verifyUrl };
+  }
+}
+
+export function makeAttestor(vendor: TeeVendor, env: Record<string, string | undefined>, keys: ServiceKeys, chainId: number, market: Address | null): TeeAttestor {
+  if (vendor === 'phala') return new PhalaAttestor(dstackEndpoint(env), keys, chainId, market);
+  return new EigenAttestor(env, keys.account.address, keys.encPublicKey, keys.source, chainId, market, vendor);
 }

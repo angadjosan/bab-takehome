@@ -1,4 +1,5 @@
-# EnvMarket TEE service image for EigenCompute (linux/amd64, runs as root as EigenCompute requires).
+# EnvMarket TEE service image (linux/amd64, runs as root). The same image runs on Phala Cloud
+# (dstack CVM, services/tee/phala/docker-compose.yml) and on EigenCompute; TEE_VENDOR selects.
 #
 # Build from the REPO ROOT (the service depends on packages/shared):
 #   docker buildx build --platform linux/amd64 -f services/tee/Dockerfile -t <registry>/envmarket-tee:<tag> --push .
@@ -41,6 +42,8 @@ WORKDIR /app
 COPY packages/shared/package.json packages/shared/package-lock.json packages/shared/
 RUN cd packages/shared && npm ci --omit=dev --no-audit --no-fund
 COPY services/tee/package.json services/tee/package-lock.json services/tee/
+# @envmarket/dstack: dependency island for @phala/dstack-sdk 0.5.8 (needs @noble 1.x next to it)
+COPY services/tee/dstack/package.json services/tee/dstack/index.js services/tee/dstack/index.d.ts services/tee/dstack/
 RUN cd services/tee && npm ci --omit=dev --no-audit --no-fund
 COPY packages/shared/src packages/shared/src
 COPY services/tee/tsconfig.json services/tee/

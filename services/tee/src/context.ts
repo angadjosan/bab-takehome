@@ -2,7 +2,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { envMarketDomain, type EnvMarketDomain } from '@envmarket/shared';
-import type { Attestor } from './attestation.ts';
+import type { TeeAttestor } from './attestation.ts';
 import type { Chain_ } from './chain.ts';
 import type { ServiceConfig } from './config.ts';
 import type { HarnessInfo } from './harnessRunner.ts';
@@ -17,7 +17,7 @@ export interface Ctx {
   priv: PrivateStore;
   sandbox: SandboxInfo;
   chain: Chain_ | null;
-  attestor: Attestor;
+  attestor: TeeAttestor;
   /** reference harness (harness/envmarket_coding); null = previews and repro checks unavailable */
   harness: HarnessInfo | null;
   workRoot: string;

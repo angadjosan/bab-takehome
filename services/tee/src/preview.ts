@@ -166,7 +166,9 @@ export function disclosures(ctx: Ctx, provider: string): string[] {
   return [
     ctx.attestor.state.kind === 'none-local-dev'
       ? 'LOCAL DEVELOPMENT RUN: not inside a TEE; the host operator can read plaintext. attestation.kind = none-local-dev.'
-      : 'Runner, relay and verifier execute inside an EigenCompute TEE (Intel TDX); the signer is bound to the attested app by the runtime attestation token.',
+      : ctx.attestor.state.kind === 'phala-dstack-tdx'
+        ? `Runner, relay and verifier execute inside a Phala Cloud dstack CVM (Intel TDX); the signer is the dstack KMS app key for app ${ctx.attestor.state.appId}, bound to the attested compose by the quote's report_data. The app developer can push a new compose/image and the Phala KMS operator is trusted.`
+        : 'Runner, relay and verifier execute inside an EigenCompute TEE (Intel TDX); the signer is bound to the attested app by the runtime attestation token.',
     provider === 'ollama'
       ? 'Inference ran on a local Ollama endpoint (harness check only); the GLM 5.3 / Kimi K3 / Qwen 3.8 panel was NOT run and is reported as unavailable.'
       : `The inference provider (${provider}) receives task statements and workspace file contents during preview episodes and receives the environment files when the validator runs; the TEE protects keys, hidden tests, grading and signing, not model inference.`,
@@ -364,7 +366,7 @@ function reportFromEntry(ctx: Ctx, e: PreviewCacheEntry, terms: VersionTerms, ve
     jobs: e.report.jobs,
     runtime: e.report.runtime,
     // reuse never upgrades trust: an unattested original run keeps the report unattested
-    attestation: { ...att, kind: e.original.attestationKind === 'eigencompute-tdx' ? att.kind : 'none-local-dev' },
+    attestation: { ...att, kind: e.original.attestationKind === 'none-local-dev' ? 'none-local-dev' : att.kind },
     signer: ctx.keys.account.address,
     createdAt: nowIso(),
     cachedFrom: { originalRunAt: e.original.runAt, originalVersionId: e.original.versionId, originalChainId: e.original.chainId },

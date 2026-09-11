@@ -2,7 +2,9 @@
  * Service configuration (env vars; repo-root .env is read in local dev via @envmarket/shared).
  *
  * Chain:      CHAIN_ID, RPC_URL | BASE_RPC | ANVIL_RPC, MARKET_ADDRESS, START_BLOCK (or deployments/<chainId>.json)
- * Keys:       MNEMONIC (EigenCompute KMS) | RUNNER_PK (local dev only)
+ * Vendor:     TEE_VENDOR = eigencompute | phala | local (auto: MNEMONIC → eigencompute;
+ *             /var/run/dstack.sock → phala; else local). DSTACK_SIMULATOR_ENDPOINT for tests.
+ * Keys:       MNEMONIC (EigenCompute KMS) | dstack GetKey (Phala) | RUNNER_PK (local dev only)
  * HTTP:       PORT (default 8080), HOST (0.0.0.0), PUBLIC_URL (base URL advertised in listings)
  * Storage:    DATA_DIR (default ./.data)
  * Inference:  FIREWORKS_API_KEY (provider "fireworks", https://api.fireworks.ai/inference/v1)
@@ -18,6 +20,7 @@
 import * as path from 'node:path';
 import { loadEnv, type EnvConfig } from '@envmarket/shared';
 import type { Address } from 'viem';
+import { teeVendor, type TeeVendor } from './keys.ts';
 
 export type LlmProviderName = 'fireworks' | 'ollama' | 'openai-compatible';
 
@@ -32,7 +35,8 @@ export interface LlmConfig {
 }
 
 export interface ServiceConfig {
-  keyMode: 'eigencompute' | 'local-dev';
+  vendor: TeeVendor;
+  keyMode: 'eigencompute' | 'phala' | 'local-dev';
   env: EnvConfig;
   rawEnv: Record<string, string>;
   chainId: number;
@@ -69,14 +73,18 @@ export function loadConfig(overrides: Partial<Record<string, string>> = {}): Ser
   for (const [k, v] of Object.entries(overrides)) if (v !== undefined) process.env[k] = v;
   const env = loadEnv({});
   const e = env.env;
-  const keyMode = e.MNEMONIC ? 'eigencompute' : 'local-dev';
-  // local dev default 8787 (agents' TEE_URL default); the Docker image sets PORT=8080 for EigenCompute
+  const vendor = teeVendor(e);
+  const keyMode = vendor === 'local' ? 'local-dev' : vendor;
+  // local dev default 8787 (agents' TEE_URL default); the Docker image sets PORT=8080 (Phala / EigenCompute)
   const port = Number(e.PORT ?? 8787);
   const provider = (e.LLM_PROVIDER as LlmProviderName | undefined) ?? (e.FIREWORKS_API_KEY ? 'fireworks' : 'fireworks');
-  if (keyMode === 'eigencompute' && provider === 'ollama') throw new Error('LLM_PROVIDER=ollama is a local-dev harness check only');
+  if (keyMode !== 'local-dev' && provider === 'ollama') throw new Error('LLM_PROVIDER=ollama is a local-dev harness check only');
+  // Phala gateway URL (https://<app_id>-<port>.<gateway domain>) when the CVM exposes both values
+  const phalaUrl = vendor === 'phala' && e.DSTACK_APP_ID && e.DSTACK_GATEWAY_DOMAIN ? `https://${e.DSTACK_APP_ID}-${port}.${e.DSTACK_GATEWAY_DOMAIN}` : null;
   const baseUrl =
     e.LLM_BASE_URL ?? (provider === 'fireworks' ? FIREWORKS_BASE_URL : provider === 'ollama' ? (e.OLLAMA_BASE_URL ?? 'http://localhost:11434/v1') : '');
   return {
+    vendor,
     keyMode,
     env,
     rawEnv: e,
@@ -86,7 +94,7 @@ export function loadConfig(overrides: Partial<Record<string, string>> = {}): Ser
     startBlock: env.startBlock,
     port,
     host: e.HOST ?? '0.0.0.0',
-    publicUrl: (e.PUBLIC_URL ?? `http://localhost:${port}`).replace(/\/+$/, ''),
+    publicUrl: (e.PUBLIC_URL ?? phalaUrl ?? `http://localhost:${port}`).replace(/\/+$/, ''),
     dataDir: path.resolve(e.DATA_DIR ?? '.data'),
     repoRoot: env.repoRoot,
     submitTxs: truthy(e.SUBMIT_TXS, true),

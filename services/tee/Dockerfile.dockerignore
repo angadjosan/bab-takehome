@@ -5,6 +5,9 @@
 !packages/shared/src
 !services/tee/package.json
 !services/tee/package-lock.json
+!services/tee/dstack/package.json
+!services/tee/dstack/index.js
+!services/tee/dstack/index.d.ts
 !services/tee/tsconfig.json
 !services/tee/src
 !services/tee/runtime
