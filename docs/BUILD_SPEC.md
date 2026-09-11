@@ -12,6 +12,18 @@ settlement. A local dev mode is allowed (e.g. running the TEE service on a lapto
 it must be labeled truthfully in reports (`attestation.kind = "none-local-dev"`) and is never the
 demo path.
 
+## Deployment target — FINAL (founder decision, 2026-09-11): ALL TESTNET
+
+Supersedes the mainnet section below (kept for history). TAKEHOME.md requires a public testnet.
+- **Contracts: Base Sepolia (84532)**, explorer https://sepolia.basescan.org, RPC `BASE_SEPOLIA_RPC=https://sepolia.base.org`.
+  Token = our `TestUSDC` ("Test USDC (no value)", 6 decimals) with the public rate-limited `faucet()` so
+  reviewers can try every flow from the web app. Params = the demo table (price 100 tUSDC etc.) unless noted.
+- **TEE: EigenCompute `sepolia` environment** (`ecloud ... --environment sepolia`; AppController on Ethereum
+  Sepolia; same real Intel TDX confidential VMs + KMS + attestation; verify dashboard verify-sepolia.eigencloud.xyz).
+  Billing credits are wallet-wide (already active). Deploy gas from the eigen wallet's Sepolia ETH.
+- **Inference: Fireworks** — unchanged, real models (glm-5p3, kimi-k3, qwen3p8-max; validator deepseek-v4-pro-0813).
+- Web default `NEXT_PUBLIC_CHAIN_ID=84532` with faucet button. Mainnet code paths stay supported but unused.
+
 ## Deployment target (founder decision, 2026-09-10 — supersedes "Base Sepolia"/"TestUSDC" below)
 
 - **Contracts: Base mainnet (chainId 8453)**, explorer https://basescan.org. Payment token = **real
