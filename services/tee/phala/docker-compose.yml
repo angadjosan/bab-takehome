@@ -9,7 +9,7 @@
 # CVM's KMS key and decrypted only inside the TDX guest. Never put secrets in plain values here.
 services:
   tee:
-    image: docker.io/angadsinghjosan/envmarket-tee@sha256:584b5490c43ddb7e8ed38b3fabf57fe0aaab8b137019392fad997e06bc8c0ff8
+    image: docker.io/angadsinghjosan/envmarket-tee@sha256:fed0481563ed6dca0aefbee9fbc9d7080e6b707fe21b8d89045c00494f908ed6
     restart: unless-stopped
     ports:
       - "8080:8080"
