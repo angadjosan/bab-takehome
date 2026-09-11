@@ -17,6 +17,9 @@ ROOT="$(dirname "$AGENTS")"
 export PATH="$HOME/.foundry/bin:$PATH"
 PORT_RPC="${ANVIL_PORT:-8545}"
 PORT_TEE="${TEE_PORT:-8080}"
+# TEE_DIR: which services/tee checkout to run (default: the working tree; e.g. a snapshot of HEAD
+# when another builder is mid-edit there).
+TEE_DIR="${TEE_DIR:-$ROOT/services/tee}"
 RUN="$AGENTS/.data/local-run/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$RUN"
 
@@ -49,7 +52,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-for d in "$AGENTS" "$ROOT/services/tee" "$ROOT/services/jurors"; do
+for d in "$AGENTS" "$TEE_DIR" "$ROOT/services/jurors"; do
   [ -d "$d/node_modules" ] || (echo "==> npm install in $d" && cd "$d" && npm install --no-audit --no-fund >/dev/null)
 done
 
@@ -93,7 +96,8 @@ if curl -s -m 2 "$TEE_URL/health" >/dev/null 2>&1; then
   echo "port $PORT_TEE already serves a TEE (a stale service from an earlier run?): stop it first" >&2
   exit 1
 fi
-(cd "$ROOT/services/tee" && DATA_DIR="$RUN/tee-data" TEE_MODE=local-dev npx tsx src/main.ts) >"$RUN/tee.log" 2>&1 &
+echo "    TEE code: $TEE_DIR"
+(cd "$TEE_DIR" && DATA_DIR="$RUN/tee-data" TEE_MODE=local-dev npx tsx src/main.ts) >"$RUN/tee.log" 2>&1 &
 PIDS+=($!)
 for _ in $(seq 1 60); do curl -sf "$TEE_URL/health" >/dev/null 2>&1 && break; sleep 1; done
 curl -sf "$TEE_URL/health" >/dev/null || { tail -40 "$RUN/tee.log"; exit 1; }
