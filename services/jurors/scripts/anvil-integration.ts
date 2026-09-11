@@ -378,14 +378,28 @@ async function main() {
     RPC_URL: RPC,
     CHAIN_ID: '31337',
     DEPLOYMENTS_DIR: path.join(WORK, 'deployments'),
+    // explicit: process env beats any MARKET_ADDRESS / TOKEN_ADDR (e.g. Base USDC) in the repo .env
+    MARKET_ADDRESS: market,
+    TOKEN_ADDR: dep.token,
+    START_BLOCK: String(dep.startBlock),
     TEE_URL: teeUrl,
     JUROR_DATA_DIR: path.join(WORK, 'data'),
     JUROR_POLL_MS: '1000',
     NO_COLOR: '1',
   };
+  // async (not execFileSync): the harness blob store runs in this process and must stay responsive
   for (const n of [1, 2, 3]) {
-    const out = execFileSync(process.execPath, ['--import', 'tsx', path.join(SERVICE, 'src/juror.ts'), 'register'], { cwd: SERVICE, env: { ...jurorEnv, JUROR_INDEX: String(n) }, encoding: 'utf8' });
+    const child = spawn(process.execPath, ['--import', 'tsx', path.join(SERVICE, 'src/juror.ts'), 'register'], {
+      cwd: SERVICE,
+      env: { ...jurorEnv, JUROR_INDEX: String(n) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    child.stdout!.on('data', (b: Buffer) => (out += b.toString()));
+    child.stderr!.on('data', (b: Buffer) => (out += b.toString()));
+    const code = await new Promise<number | null>((r) => child.on('exit', r));
     for (const l of out.trim().split('\n')) log(l);
+    if (code !== 0) throw new Error(`juror${n} register exited ${code}`);
   }
   const jurors = [cfg.roleAddresses.juror1!, cfg.roleAddresses.juror2!, cfg.roleAddresses.juror3!];
   const jurorBalBefore = await Promise.all(jurors.map(bal));

@@ -370,3 +370,43 @@ Chain watcher loop: on `Purchased` → build wrapper, wrap key, sign `DeliveryRe
   - **Config:** default `CHAIN_ID` is 8453; RPC order is `RPC_URL` > `BASE_RPC` / `BASE_SEPOLIA_RPC` / `ANVIL_RPC` > public default. `deployments/<chainId>.json` accepts `EnvMarket`|`market` and `token`|`TestUSDC`|`USDC`, plus `startBlock`. Env overrides: `MARKET_ADDRESS`, `TOKEN_ADDR`. Explorer links point to basescan.org (8453) or sepolia.basescan.org (84532); anvil gets none.
   - **LLM:** the generic OpenAI-compatible client defaults to Fireworks (`FIREWORKS_API_KEY`), with `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL` and per-role `_<ROLE>` overrides (Ollama supported). `resolveModels(families)` picks the newest id per family by `created`, or else by the version parsed from the id.
   - Note: jurors commit `549c282` accidentally included the initial `packages/shared` files through the shared git index; the content is identical to what the shared builder staged.
+- **services/jurors (2026-09-10):**
+  - *Evidence auth.* Jurors sign shared `evidenceAuthMessage` (EIP-191; chainId, market, disputeId,
+    juror, 16-byte hex nonce, expiresAt = now + 300 s) and `POST /evidence/:disputeId` with JSON body
+    `{juror, message, signature, nonce, expiresAt}`. The TEE should check the signature/expiry
+    (`verifyEvidenceAuth`), that the message binds this chainId/market/disputeId, and that `juror` holds a
+    seat in the dispute's CURRENT round (`getDispute`, status Voting). 401/403/404 are retried until the
+    commit deadline. If no evidence arrives in time the juror abstains (no commit, accepts the non-reveal
+    slash) rather than guessing.
+  - *Case packet.* Any JSON is accepted and passed to the model as untrusted data (≤ 4 MB; prompt copy
+    truncated at 60k chars; sha256 of the exact bytes is recorded). Suggested shape
+    (`envmarket.case-packet.v1`): `{disputeId, purchaseId, ground, disputedTasks, disputedClaims,
+    frozenDescription:{descriptionHash, claims}, buyerStatement, buyerEvidenceHash, mechanicalFindings,
+    sellerResponse}`. String leaves outside keys matching /claim|description|statement|ground|summary|title/
+    are treated as private text: a public rationale copying 7+ consecutive words from them is withheld.
+    The jurors add trusted on-chain facts themselves (description hash, task indices, requested refund).
+  - *Registration.* The contract has no juror metadata field. Registration = owner `approveJuror`
+    (allowlist; `register --self-approve-local` does it with DEPLOYER_PK on anvil only) + token approve +
+    `depositJurorStake` (default 2 × jurorStake, `JUROR_STAKE` overrides). The disclosure (operator, model
+    provider/requested/resolved, `sharesBaseFamilyWithReferencePanel`, prompt version + sha256, expertise,
+    conflicts) is canonical JSON `envmarket.juror.v1`, stored as `.data/juror{n}-disclosure.json` and
+    `PUT /blobs`; its sha256 is logged.
+  - *Models.* The pinned Fireworks ids are the defaults (juror1 deepseek-v4p1-flash, juror2 gpt-oss-120b,
+    juror3 glm-5p2; glm-5p2 shares the GLM family with the reference panel, which the disclosure
+    flags). If a pin is not listed by `GET /models`, the fallback is the newest model of that juror's
+    family, found with shared `pickNewestModels`. `JUROR{n}_MODEL` / `JUROR{n}_FAMILY` override. With no
+    key and no `LLM_BASE_URL`, the jurors use local Ollama (local dev only; the first installed model to
+    answer a probe; recorded as `ollama-local`).
+  - *Rubric.* Prompt `services/jurors/prompts/juror-v1.md` (sha256
+    `0x2477618396db15f16e13d9f73c4a2f108deb7ea59df8a26b80e14a7ce6e3bcb9`); temperature 0; strict output
+    `{verdict, confidence, rationale ≤ 80 words, citedFacts 1–5 × ≤ 25 words}`, up to 3 attempts. Screening
+    never changes the vote. It withholds a failing rationale ("Rationale withheld by output screening.")
+    and drops failing facts.
+  - *Rationale publication* happens only after the juror's own reveal is confirmed. Publishing earlier
+    would leak the vote during the commit phase. Doc `envmarket.juror-rationale.v1` (canonical JSON) at
+    `services/jurors/.data/rationales/<disputeId>-<juror>.json` + `PUT /blobs` on the TEE.
+  - *Keeper.* Every juror calls `selectJurors` once `block.number > selectionBlock` (and again after
+    `selectionDeadline` to trigger round failure), and calls `tallyDispute` once all seats have
+    revealed or `revealDeadline` has passed. Expected reverts from races are ignored. Jurors reveal early
+    as soon as all seats have committed. They auto-`withdraw()` after resolution
+    (`JUROR_AUTO_WITHDRAW=0` disables).
