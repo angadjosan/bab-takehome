@@ -1,23 +1,8 @@
 # RL Environment Market
 
+https://rl-env-market.vercel.app
+
 A market for reinforcement-learning environments: task sets, tools and hidden graders that AI labs use to train agents. The product can't be shown before sale. If the seller shows the tasks and tests, the buyer already has them. Sellers are environment builders. Buyers are labs and agent teams running coding RL, often through their own buyer agents. Before paying, a buyer sees a preview signed inside a TEE: how a fixed panel of reference models scores on the sealed environment, plus a screened validator note. After payment enters escrow, the buyer gets the whole environment. The buyer then has a bonded challenge window to claim specific broken or misdescribed tasks. The seller is paid only after that window closes.
-
-The first vertical is **coding-repair environments with hidden unit tests**. The demo listing is `seller-workspace/py-repair-kit`: 5 purchased tasks and 2 undelivered audit tasks. Its description carries one deliberately false claim for the dispute demo (see [SEEDED_DISPUTE.md](seller-workspace/SEEDED_DISPUTE.md)).
-
-## Live
-
-| What | Where |
-|---|---|
-| App | https://rl-env-market.vercel.app |
-| Live listings | [py-repair-kit](https://rl-env-market.vercel.app/listing/7) (version 7) · [humanevalfix-8](https://rl-env-market.vercel.app/listing/8) (version 8), both with TEE-signed preview reports attached on-chain |
-| AI jurors (Vercel Functions + Workflow) | https://rl-env-market-jurors.vercel.app/api/health · record in [deployments/jurors.json](deployments/jurors.json) |
-| Video (≤ 5 min) | **TBD** |
-| EnvMarket (Base Sepolia, 84532) | `0x2fd644342296df7de57929fa87bd65c05fb415f8` · [basescan](https://sepolia.basescan.org/address/0x2fd644342296df7de57929fa87bd65c05fb415f8) · [blockscout](https://base-sepolia.blockscout.com/address/0x2fd644342296df7de57929fa87bd65c05fb415f8) |
-| EnvMarketViews (read module, delegatecalled from EnvMarket) | `0xf020ec9a3381dfa34a03ad2f8bdb5cae7e890794` · [basescan](https://sepolia.basescan.org/address/0xf020ec9a3381dfa34a03ad2f8bdb5cae7e890794) · [blockscout](https://base-sepolia.blockscout.com/address/0xf020ec9a3381dfa34a03ad2f8bdb5cae7e890794) |
-| TestUSDC (`tUSDC`, 6 decimals, public faucet, no value) | `0x6f3600d4a42d0c6c52a8b9f04abf817ce7d56ceb` · [basescan](https://sepolia.basescan.org/address/0x6f3600d4a42d0c6c52a8b9f04abf817ce7d56ceb) · [blockscout](https://base-sepolia.blockscout.com/address/0x6f3600d4a42d0c6c52a8b9f04abf817ce7d56ceb) |
-| Phala Cloud TEE app (dstack CVM, Intel TDX, production OS `dstack-0.5.9`) | [endpoint](https://4099f96ab07de8666f8a63a0f48e40aa9883eda3-8080.dstack-pha-prod5.phala.network/health) · app `4099f96ab07de8666f8a63a0f48e40aa9883eda3` · signer `0x51EDE7C81B66c4395AEfbdb2d626928018D393c7` · [Trust Center](https://trust.phala.com/app/4099f96ab07de8666f8a63a0f48e40aa9883eda3) · record in [deployments/phala-tee.json](deployments/phala-tee.json) |
-
-Deployed 2026-09-11 from block 46670333; the full record is in [deployments/84532.json](deployments/84532.json). All calls, views included, go to the EnvMarket address with the merged ABI.
 
 ## How it works
 
@@ -34,32 +19,28 @@ Deployed 2026-09-11 from block 46670333; the full record is in [deployments/8453
 
 The full design is in [docs/RL_ENV_MARKET.md](docs/RL_ENV_MARKET.md), with the dispute diagram at [docs/diagrams/dispute.png](docs/diagrams/dispute.png). The interface contract is [docs/BUILD_SPEC.md](docs/BUILD_SPEC.md).
 
-## What's real, what's testnet
+## Trust assumptions and failure modes
 
-Real:
-- **TEE.** One Intel TDX confidential VM on Phala Cloud (dstack) runs the preview runner, key relay, mechanical verifier and evidence server. Its signer comes from Phala's KMS (dstack `GetKey`, deterministic per app id), and a raw Intel DCAP quote whose `report_data` is `sha512(binding)` ties the signer and encryption key to a compose file that pins the image by digest. The web app re-checks the quote through Phala's public verifier, replays RTMR3 and reads the signer's roles from the chain. EigenCompute is still supported (`TEE_VENDOR=eigencompute`) but not deployed: its app quota needs manual EigenLabs approval. Local dev mode exists for tests and labels its reports `none-local-dev`.
-- **Inference.** Fireworks serves the reference panel `glm-5p3` (GLM 5.3), `kimi-k3` (Kimi K3) and `qwen3p8-max` (Qwen 3.8). Episodes run in [`harness/envmarket_coding`](harness/README.md), built on Prime Intellect's open-source `verifiers` 0.3.1. The tools are generated from the environment's manifest, and buyers can load the same environment into `vf-eval` or prime-rl. The validator is `deepseek-v4-pro-0813`. The jurors are `deepseek-v4p1-flash`, `gpt-oss-120b` and `glm-5p2`.
-- **Crypto.** Bundles are AES-256-GCM. Keys are wrapped with HPKE (RFC 9180), and task commitments use salted OpenZeppelin Merkle trees. Reports, receipts and findings are EIP-712 signatures, verified on-chain.
-- **Chain.** Escrow, reserved collateral, delivery and challenge deadlines, three dispute grounds, on-chain juror selection, commit-reveal, tally, majority rewards and minority/non-reveal slashing are all in the contract. So are capped per-task refunds, seller-paid preview fees, reputation and pull payments. Every flow is a real Base Sepolia transaction.
-- **Wallets.** Privy handles email or external-wallet sign-in, and creates an embedded wallet for users who have none.
+The problem: a buyer can't judge an RL environment without having it, and a seller can't show it without giving it away. So the market doesn't try to prove quality up front. It gives buyers a few cheap checks before they pay and a way to get money back after.
 
-Testnet: the token is TestUSDC and **has no value**. The stakes, bonds and collateral demonstrate accounting, not economic deterrence. Windows use demo values: a 5 min challenge window where production would use 7 days, a 10 min delivery window, and 3 min each for commit and reveal.
+What's in place:
+- When the seller lists, the bundle hash and Merkle roots over the tasks go on-chain. After delivery, the buyer hashes what they got and compares.
+- The TEE runs every task against three open models (GLM 5.3, Kimi K3, Qwen 3.8) and signs the scores, so every buyer sees the same baseline. Next step: let buyers bring their own weights and run inference on those.
+- Payment sits in escrow for the dispute window. The seller is paid only after it closes.
+- Seller ratings are weighted by money and only count as a score after 100 settled sales (`QUALIFYING_TX_THRESHOLD` in the contract). Until then the app shows "new seller".
 
-## Trust assumptions
+What can go wrong:
+- The bundle doesn't match its hash, or the key doesn't open it. Dispute it as broken. The TEE reruns and signs the finding.
+- The preview scores don't reproduce. Dispute it. Same mechanical check.
+- It's junk that got past the validator, or the description lies. Dispute the specific false claim. Three staked jurors vote.
+- The buyer keeps a copy and claims everything is broken. Refunds are per task and capped at 50%, and the buyer posts a bond they lose if the claim fails.
+- Nobody disputes before the deadline. The seller gets paid. "It didn't help my model" isn't a ground.
 
-- **Intel TDX, Phala Cloud and Phala's KMS.** Confidentiality of seller bundles, audit tasks and keys depends on TDX and on Phala's KMS operator, who is trusted: with `--kms phala`, that one KMS derives the app key and authorizes compose updates. The attestation shows which compose and image are running, not that they are the right ones.
-  - *The developer can push a new image.* I can deploy a new compose or image to the same app id at any time. The quote would show the new compose hash, but nothing on-chain stops the update.
-  - *The signer survives upgrades.* The signer is derived from the app id's key, so it stays the same across `phala deploy --cvm-id` updates and keeps its on-chain roles. A different app id gets a new signer, and its roles have to be re-granted.
-  - *Storage.* Data lives on the CVM's encrypted disk volume. If the CVM is deleted, undelivered versions fall back to `refundUndelivered`.
-- **Fireworks sees task text.** Inference runs outside the attested boundary. During previews, Fireworks sees task statements, workspace files and, for the validator, environment source. During disputes, the jurors' provider sees case excerpts. Production would move inference inside the boundary.
-- **One TEE signer holds three roles.** The same KMS-derived key is runner, relay and verifier. If it is compromised, it can sign false reports, false deliveries and false findings. The contract caps the damage at the 50% refund cap plus penalties; it cannot reach escrow or balances directly.
-- **The owner key sets roles.** The deployer can change params for future purchases, set the runner, relay and verifier, approve jurors and withdraw the treasury and reserve. It cannot touch escrow, collateral, bonds, stakes or claimable balances. Ownership transfer is single-step, with no multisig.
-- **The jurors are three identities I run, as Vercel Functions.** They are allowlisted, use different model families (one shares the GLM family with the panel, which is disclosed) and are not independent. With only three jurors, a round-2 panel can never fill, so a failed round falls back to "no refund, seller paid".
-  - *Where they run.* [`services/jurors-vercel`](services/jurors-vercel/README.md) runs them on Vercel Workflow, with one durable run per dispute. A dispute wakes the run, and a daily cron sweeps for anything missed. `services/jurors` is the same logic as local processes, for anvil and dev.
-  - *Keys.* The three juror keys and the Fireworks key are Vercel *sensitive* env vars in that project only (the public web project never holds them). They cannot be read back, but Vercel and anyone who can deploy the project can use them.
-  - *Vote secrets.* Each salt is derived from the juror's key (HMAC), so no store has to be trusted or kept alive to reveal. The verdict and commitment are recorded in Vercel's workflow event log before the commit transaction, so project members can see a verdict before the reveal.
-- **Juror randomness is weak.** The seed is `blockhash(selectionBlock)` plus `prevrandao`. On OP-stack chains, prevrandao is the L1 origin's value and is known ahead of time, and the sequencer produces the blockhash. Each juror keeper calls `selectJurors` at the first valid block to shrink the grinding window. Production needs a VRF.
-- **A delivery receipt records a key, not a usable one.** A bad key can be disputed as *broken*, but that relies on the verifier.
+What you still have to trust:
+- The TEE: Intel TDX on Phala Cloud, plus Phala's key service. I can push a new image to the same app. The attestation shows the change, but the contract doesn't block it.
+- The jurors. Right now they're an approved panel of three that I run. The plan is open validators who stake to join.
+- The owner key. It sets roles and approves jurors, but it can't touch escrow or balances.
+- The inference provider (Fireworks), which sees task text during previews.
 
 ## Biggest design decision: deliver everything after escrow, then make lying expensive
 
@@ -78,74 +59,3 @@ What makes after-the-fact protection work:
 - **A cheap, bounded pre-purchase signal.** A fixed panel runs a fixed open harness inside the TEE and the report is signed. The seller pays for it (about $1.50–2.13 per preview, measured in [docs/PREVIEW_COST.md](docs/PREVIEW_COST.md)), and it is cached per bundle so it can't be re-rolled.
 
 The cost of this choice is that an honest buyer of a worthless environment recovers at most half the price. That is disclosed before purchase.
-
-## One important limitation: pass@1 is not training value
-
-The preview measures how today's reference models score on the environment. A buyer wants to know whether training on it improves *their* model, and the preview doesn't answer that. In the harness validation, all 12 panel episodes scored 1: the demo tasks are easy. That result shows the environment runs, the grader works and the tasks are solvable. It says nothing about learning signal. Disputes don't close the gap, because "it didn't help my model" is deliberately not a ground. Today the market prices **integrity**: the environment runs, matches its hash, and its claims are true. It does not price usefulness. Next steps would be buyer-model previews in the TEE (a stretch goal) and reputation built from repeat purchases.
-
-Other known gaps: a buyer can keep a copy after a partial refund (only the cap and the bond limit this); the juror pool is thin; appeals to 7 jurors aren't built; reward hacking is out of scope for previews and disputes.
-
-## Sell an environment
-
-Lay your environment out like [seller-workspace/humanevalfix-8](seller-workspace/humanevalfix-8): `listing/description.json`, `listing/manifest.template.json`, `src/`, `tasks/<id>/{task.json,tests/,…}`, `grader/`, `requirements.lock`, `IMAGE_DIGEST`, and optionally `audit-tasks/`. Put the seller wallet's key in the repo-root `.env` as `SELLER_PK`. The wallet needs a little Base Sepolia ETH, plus tUSDC from the app's faucet for collateral and the preview fee. Then run:
-
-```bash
-./sell.sh path/to/my-env --price 100 --collateral 100   # add --dry-run to check and package only
-```
-
-The script checks the folder, then packages and encrypts it on your machine; plaintext leaves only encrypted to the TEE's key. It uploads to the attested TEE, which rechecks every commitment and runs a sandboxed preflight. Then it lists on Base Sepolia (a new version of your existing listing if you already sell this environment) and tops up collateral if your free stake is short. Finally it pays the TEE's preview quote, waits for the signed report to be attached on-chain, and prints the listing link. Re-running resumes where it stopped.
-
-## Run it yourself
-
-Requirements: Node 22, Foundry, Docker (sandbox for seller code), Python 3.12 with `uv` (harness), and a repo-root `.env` built from [.env.example](.env.example). It needs `DEPLOYER/SELLER/BUYER/BUYER2/RUNNER/RELAY/VERIFIER/JUROR1-3` `_PK`/`_ADDR`, `BUYER_ENC_SK/PK`, `BUYER2_ENC_SK/PK`, `FIREWORKS_API_KEY`, and `CHAIN_ID` plus `BASE_SEPOLIA_RPC` for testnet.
-
-```bash
-# harness venv (the TEE runs previews through it)
-(cd harness/envmarket_coding && uv sync --frozen)
-
-# Full stack in the browser on a private anvil chain: deploy, TEE (local-dev), seller lists
-# py-repair-kit with a real Fireworks preview, 3 juror agents, web app on :3100.
-scripts/local-stack.sh                 # SKIP_PREVIEW=1 to skip inference; JURORS=1,2 to vote seat 3 by hand
-```
-
-Web app against Base Sepolia: run `scripts/sync-web.sh`, then `cd apps/web && npm install && NEXT_PUBLIC_TEE_URL=<tee> npm run dev`. Env vars: `NEXT_PUBLIC_CHAIN_ID` (default 84532), `NEXT_PUBLIC_TEE_URL`, `NEXT_PUBLIC_PRIVY_APP_ID`, and optionally `NEXT_PUBLIC_PRIVY_SPONSOR_GAS=1` and `NEXT_PUBLIC_RPC_URL`. Agents send transactions on anvil and 84532 only, unless `ALLOW_LIVE_TX=1`.
-
-Tests:
-
-| Package | Command |
-|---|---|
-| `contracts` | `npm ci && forge test` (76 tests; the 6 fork tests need `BASE_RPC`) |
-| `packages/shared`, `agents`, `services/jurors`, `services/tee` | `npm install && npm test && npm run typecheck` |
-| `services/tee` | `npm run e2e` (anvil e2e with real preview; `E2E_BROKEN_VARIANT=1` adds an upheld mechanical dispute) |
-| `services/jurors` | `npm run integration` (anvil commit-reveal round) |
-| `services/jurors-vercel` | `npm test && npm run build` (planner, workflow loop vs a simulated EnvMarket, salt/commitment vs `cast`, vendor sync) |
-| `apps/web` | `npm run build && npm run lint` |
-| `seller-workspace/*` | `scripts/verify.sh --docker` (reference solutions pass, starting states fail, offline) |
-
-## Repo map
-
-```
-contracts/          Foundry: EnvMarket (+ Views module via delegatecall), TestUSDC, tests, deploy scripts, security review
-packages/shared/    TS library: canonical tar, commitments/Merkle, HPKE key wrap, EIP-712, schemas, LLM client, ABI
-services/tee/       The TEE service (Phala Cloud dstack; EigenCompute supported): upload checks, paid previews, key relay, mechanical verifier, evidence
-services/jurors/    Three AI juror agents: keeper, case-packet fetch, rubric, commit-reveal, rationale publishing
-services/jurors-vercel/  The same jurors on Vercel Functions + Workflow (what the live market uses): wake/health/cron routes, one durable run per dispute
-harness/            envmarket_coding: reference harness on Prime Intellect verifiers 0.3.1 (usable in vf-eval / prime-rl)
-agents/             Seller and buyer agent CLIs (package, list, buy, decrypt, inspect claims, dispute), e2e orchestrator
-apps/web/           Next.js app with Privy: listings, signed reports, buy/decrypt, disputes, jurors, reputation
-seller-workspace/   Two environments: py-repair-kit (demo listing, seeded false claim) and humanevalfix-8 (HumanEvalFix, MIT)
-deployments/        Deployed addresses, params and tx hashes per chain
-scripts/            local-stack.sh (full local stack), sync-web.sh (ABIs + addresses into the web app)
-docs/               Design, build spec + change log, preview cost model, diagrams, take-home brief
-research/           Background research on markets for uninspectable information and on choosing a vertical
-```
-
-## Security review
-
-[contracts/SECURITY_REVIEW.md](contracts/SECURITY_REVIEW.md) found four issues and fixed all of them, each with a regression test:
-- **F-1 (Medium).** Re-arming an expired selection block pushed the grace deadline back, so a panel that could never fill locked escrow forever.
-- **F-2 (Low).** A juror could re-roll the panel by toggling their own stake, or stake only after seeing the seed. Each juror now draws independently, and stake must predate the selection block.
-- **F-3 (Informational).** Deposits above `uint128` were truncated.
-- **F-4 (Low).** A seller could reclaim a preview fee, re-pay the minimum and attach an already-signed report.
-
-Also checked: fund conservation (an invariant fuzzer over every bucket), single settlement, checks-effects-interactions, EIP-712 replay, the delegatecall storage layout and deadline boundaries. Residual risks are listed there: predictable randomness, a thin juror pool, trusted roles, and a report that doesn't bind `ciphertextHash`.
