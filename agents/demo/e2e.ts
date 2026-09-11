@@ -16,7 +16,8 @@
  * 6. Optional: a purchase whose delivery cannot be made is refunded after the delivery window.
  * 7. Every tx with explorer links, reputation, and a token balance-conservation check.
  *
- * Env: LISTING_PRICE / LISTING_COLLATERAL (token units; defaults: anvil 100/100, else 0.5/0.5),
+ * Env: LISTING_PRICE / LISTING_COLLATERAL (token units; defaults: TestUSDC 100/100 — anvil and Base Sepolia —
+ *   else 0.5/0.5; collateral is raised to the contract floor caseFee + penalty if below),
  * BUYER_BUDGET, BUYER2_BUDGET, FAST_FORWARD=1 (anvil time travel), TEE_URL, E2E_DISPUTE_TIMEOUT_SEC.
  */
 import * as fs from 'node:fs';
@@ -71,9 +72,17 @@ const tee = new TeeClient();
 const health = await tee.health();
 const teeSigner = health.signer as Address;
 
-const price = units(env.LISTING_PRICE ?? (onAnvil ? '100' : '0.5'));
-const collateral = units(env.LISTING_COLLATERAL ?? (onAnvil ? '100' : '0.5'));
+// TestUSDC (anvil, Base Sepolia) → demo-sized terms; real USDC → the small mainnet budget.
+const isTestToken = t.symbol === 'tUSDC' || ctx.cfg.deployment?.raw?.testToken === true;
 const params = await marketRead<Record<string, any>>(ctx, 'params');
+const price = units(env.LISTING_PRICE ?? (isTestToken ? '100' : '0.5'));
+// collateral must cover the worst-case seller-side charge: caseFee + penaltyBps of price
+const collateralFloor = BigInt(params.caseFee) + (price * BigInt(params.penaltyBps)) / 10000n;
+let collateral = units(env.LISTING_COLLATERAL ?? (isTestToken ? '100' : '0.5'));
+if (collateral < collateralFloor) {
+  console.log(`collateral ${formatUnits(collateral, t.decimals)} < contract floor ${formatUnits(collateralFloor, t.decimals)} (caseFee + penalty): using the floor`);
+  collateral = collateralFloor;
+}
 const jurorStake = BigInt(params.jurorStake);
 const bondCapNeed = BigInt(params.bondCap);
 const minPreviewFee = await marketRead<bigint>(ctx, 'minPreviewFee');
@@ -95,7 +104,7 @@ const needs: Record<string, bigint> = {
   juror3: jurorStake,
   deployer: 0n,
 };
-const gasNeed = onAnvil ? parseEther('10') : parseEther('0.00002');
+const gasNeed = onAnvil ? parseEther('10') : ctx.chainId === 84532 ? parseEther('0.0003') : parseEther('0.00002');
 let missing = false;
 for (const r of roles) {
   const a = addr(r);

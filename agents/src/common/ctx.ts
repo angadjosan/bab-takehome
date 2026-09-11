@@ -85,10 +85,14 @@ export function addressOf(ctx: Ctx, role: Role): Address {
   return a;
 }
 
+export const BASE_SEPOLIA = 84532;
+/** Chains the agents transact on by default: local anvil and the Base Sepolia testnet (the deployment target). */
+export const DEFAULT_TX_CHAINS: readonly number[] = [ANVIL, BASE_SEPOLIA];
+
 export function assertTxAllowed(chainId: number): void {
-  if (chainId !== ANVIL && process.env.ALLOW_LIVE_TX !== '1') {
+  if (!DEFAULT_TX_CHAINS.includes(chainId) && process.env.ALLOW_LIVE_TX !== '1') {
     throw new Error(
-      `refusing to send a transaction on chain ${chainId}: set ALLOW_LIVE_TX=1 to transact on a public network (agents default to local anvil only)`,
+      `refusing to send a transaction on chain ${chainId}: agents transact only on anvil (31337) and Base Sepolia (84532) unless ALLOW_LIVE_TX=1`,
     );
   }
 }
