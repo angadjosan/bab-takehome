@@ -111,7 +111,7 @@ export function EnvBrowser() {
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
         <h1 id="envs-title" className="text-xl font-semibold tracking-tight text-ink">
           Environments
-          {versions.data && <span className="ml-2 font-mono text-sm font-normal text-muted tabular-nums">{versions.data.length}</span>}
+          {versions.data && <span className="ml-2 font-mono text-sm font-normal text-muted tabular-nums">{all.length}</span>}
         </h1>
         {totals && (
           <p className="text-xs text-muted">
