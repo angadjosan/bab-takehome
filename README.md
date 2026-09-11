@@ -13,7 +13,7 @@ The first vertical is **coding-repair environments with hidden unit tests**. The
 | EnvMarket (Base Sepolia, 84532) | `0x2fd644342296df7de57929fa87bd65c05fb415f8` · [basescan](https://sepolia.basescan.org/address/0x2fd644342296df7de57929fa87bd65c05fb415f8) · [blockscout](https://base-sepolia.blockscout.com/address/0x2fd644342296df7de57929fa87bd65c05fb415f8) |
 | EnvMarketViews (read module, delegatecalled from EnvMarket) | `0xf020ec9a3381dfa34a03ad2f8bdb5cae7e890794` · [basescan](https://sepolia.basescan.org/address/0xf020ec9a3381dfa34a03ad2f8bdb5cae7e890794) · [blockscout](https://base-sepolia.blockscout.com/address/0xf020ec9a3381dfa34a03ad2f8bdb5cae7e890794) |
 | TestUSDC (`tUSDC`, 6 decimals, public faucet, no value) | `0x6f3600d4a42d0c6c52a8b9f04abf817ce7d56ceb` · [basescan](https://sepolia.basescan.org/address/0x6f3600d4a42d0c6c52a8b9f04abf817ce7d56ceb) · [blockscout](https://base-sepolia.blockscout.com/address/0x6f3600d4a42d0c6c52a8b9f04abf817ce7d56ceb) |
-| EigenCompute TEE app (`sepolia` env, Intel TDX) | **TBD**: app id, signer address and `verify-sepolia.eigencloud.xyz` link go here once `deployments/eigencompute-sepolia.json` exists |
+| Phala Cloud TEE app (dstack CVM, Intel TDX) | **TBD**: endpoint, app id, signer and `trust.phala.com` link go here once `deployments/phala-tee.json` exists |
 
 Deployed 2026-09-11 from block 46670333; the full record is in [deployments/84532.json](deployments/84532.json). All calls, views included, go to the EnvMarket address with the merged ABI.
 
@@ -35,7 +35,7 @@ The full design is in [docs/RL_ENV_MARKET.md](docs/RL_ENV_MARKET.md), with the d
 ## What's real, what's testnet
 
 Real:
-- **TEE.** One Intel TDX app on EigenCompute's `sepolia` environment runs the preview runner, key relay, mechanical verifier and evidence server. Its keys come from EigenCloud KMS, and a KMS-signed attestation JWT binds the signer and encryption key to the image. Local dev mode exists for tests and labels its reports `none-local-dev`.
+- **TEE.** One Intel TDX confidential VM on Phala Cloud (dstack) runs the preview runner, key relay, mechanical verifier and evidence server. Its signer comes from Phala's KMS (dstack `GetKey`, deterministic per app id), and a raw Intel DCAP quote whose `report_data` is `sha512(binding)` ties the signer and encryption key to a compose file that pins the image by digest. The web app re-checks the quote through Phala's public verifier, replays RTMR3 and reads the signer's roles from the chain. EigenCompute is still supported (`TEE_VENDOR=eigencompute`) but not deployed: its app quota needs manual EigenLabs approval. Local dev mode exists for tests and labels its reports `none-local-dev`.
 - **Inference.** Fireworks serves the reference panel `glm-5p3` (GLM 5.3), `kimi-k3` (Kimi K3) and `qwen3p8-max` (Qwen 3.8). Episodes run in [`harness/envmarket_coding`](harness/README.md), built on Prime Intellect's open-source `verifiers` 0.3.1. The tools are generated from the environment's manifest, and buyers can load the same environment into `vf-eval` or prime-rl. The validator is `deepseek-v4-pro-0813`. The jurors are `deepseek-v4p1-flash`, `gpt-oss-120b` and `glm-5p2`.
 - **Crypto.** Bundles are AES-256-GCM. Keys are wrapped with HPKE (RFC 9180), and task commitments use salted OpenZeppelin Merkle trees. Reports, receipts and findings are EIP-712 signatures, verified on-chain.
 - **Chain.** Escrow, reserved collateral, delivery and challenge deadlines, three dispute grounds, on-chain juror selection, commit-reveal, tally, majority rewards and minority/non-reveal slashing are all in the contract. So are capped per-task refunds, seller-paid preview fees, reputation and pull payments. Every flow is a real Base Sepolia transaction.
@@ -45,7 +45,10 @@ Testnet: the token is TestUSDC and **has no value**. The stakes, bonds and colla
 
 ## Trust assumptions
 
-- **TEE operator, Intel TDX and EigenCloud KMS.** Confidentiality of seller bundles, audit tasks and keys depends on TDX and on EigenLabs' KMS. The app developer can upgrade the image; attestation shows which image is running, not that it is the right one. Storage is ephemeral: if the VM is replaced, undelivered versions fall back to `refundUndelivered`.
+- **Intel TDX, Phala Cloud and Phala's KMS.** Confidentiality of seller bundles, audit tasks and keys depends on TDX and on Phala's KMS operator, who is trusted: with `--kms phala`, that one KMS derives the app key and authorizes compose updates. The attestation shows which compose and image are running, not that they are the right ones.
+  - *The developer can push a new image.* I can deploy a new compose or image to the same app id at any time. The quote would show the new compose hash, but nothing on-chain stops the update.
+  - *The signer survives upgrades.* The signer is derived from the app id's key, so it stays the same across `phala deploy --cvm-id` updates and keeps its on-chain roles. A different app id gets a new signer, and its roles have to be re-granted.
+  - *Storage.* Data lives on the CVM's encrypted disk volume. If the CVM is deleted, undelivered versions fall back to `refundUndelivered`.
 - **Fireworks sees task text.** Inference runs outside the attested boundary. During previews, Fireworks sees task statements, workspace files and, for the validator, environment source. During disputes, the jurors' provider sees case excerpts. Production would move inference inside the boundary.
 - **One TEE signer holds three roles.** The same KMS-derived key is runner, relay and verifier. If it is compromised, it can sign false reports, false deliveries and false findings. The contract caps the damage at the 50% refund cap plus penalties; it cannot reach escrow or balances directly.
 - **The owner key sets roles.** The deployer can change params for future purchases, set the runner, relay and verifier, approve jurors and withdraw the treasury and reserve. It cannot touch escrow, collateral, bonds, stakes or claimable balances. Ownership transfer is single-step, with no multisig.
@@ -111,7 +114,7 @@ Tests:
 ```
 contracts/          Foundry: EnvMarket (+ Views module via delegatecall), TestUSDC, tests, deploy scripts, security review
 packages/shared/    TS library: canonical tar, commitments/Merkle, HPKE key wrap, EIP-712, schemas, LLM client, ABI
-services/tee/       The EigenCompute TEE service: upload checks, paid previews, key relay, mechanical verifier, evidence
+services/tee/       The TEE service (Phala Cloud dstack; EigenCompute supported): upload checks, paid previews, key relay, mechanical verifier, evidence
 services/jurors/    Three AI juror agents: keeper, case-packet fetch, rubric, commit-reveal, rationale publishing
 harness/            envmarket_coding: reference harness on Prime Intellect verifiers 0.3.1 (usable in vf-eval / prime-rl)
 agents/             Seller and buyer agent CLIs (package, list, buy, decrypt, inspect claims, dispute), e2e orchestrator

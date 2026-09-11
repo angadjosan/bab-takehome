@@ -28,7 +28,7 @@ The structure follows the separation of components and operations in the [Aave v
 
 Arrows show transfers of data or funds, including event-triggered work; the contract does not execute off-chain services. Audit tasks use separate storage objects and keys and are excluded from buyer delivery. Dispute evidence is shared privately with assigned reviewers.
 
-In the current deployment the off-chain services run as one EigenCompute TEE app (Intel TDX, EigenCompute `sepolia` environment) whose signer holds the runner, relay and verifier roles; reference and validator models are called through Fireworks; the contract and Test USDC (no value) are on the Base Sepolia testnet. Proceeds, refunds and juror rewards are credited on-chain and collected with `withdraw()`. The HTML sources for all diagrams in this document are in [docs/diagrams/](diagrams/).
+In the current deployment the off-chain services run as one Phala Cloud TEE app (Intel TDX, dstack confidential VM) whose signer holds the runner, relay and verifier roles; reference and validator models are called through Fireworks; the contract and Test USDC (no value) are on the Base Sepolia testnet. Proceeds, refunds and juror rewards are credited on-chain and collected with `withdraw()`. The HTML sources for all diagrams in this document are in [docs/diagrams/](diagrams/).
 
 | Component | Responsibility |
 |---|---|
@@ -61,7 +61,7 @@ These are proposed state names for the existing purchase flow. Each purchase fre
 - Each purchase settles once. A timely dispute blocks normal finalization, and each defect can receive its allowed remedy only once.
 - Public chain data contains commitments and outcomes. Plaintext tasks, private logs, and decryption keys stay off-chain with controlled access.
 
-The demo uses one marketplace contract plus Test USDC (no value) on Base Sepolia. The runner, report signer, delivery relay, and mechanical verifier run in an EigenCompute TEE (Intel TDX) with real attestation; the juror processes run outside it and are trusted. Model inference goes to Fireworks, outside the attested boundary (see the verification section). Production moves inference inside that boundary. Neither a signature nor attestation proves training value or a juror’s correctness.
+The demo uses one marketplace contract plus Test USDC (no value) on Base Sepolia. The runner, report signer, delivery relay, and mechanical verifier run in a Phala Cloud TEE (Intel TDX, dstack) with real attestation; the juror processes run outside it and are trusted. Model inference goes to Fireworks, outside the attested boundary (see the verification section). Production moves inference inside that boundary. Neither a signature nor attestation proves training value or a juror’s correctness.
 
 This is a build plan, not a claim that anything has been deployed.
 
