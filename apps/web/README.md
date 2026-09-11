@@ -23,14 +23,18 @@ renders a "not deployed on this chain" state instead of listings.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `NEXT_PUBLIC_CHAIN_ID` | `8453` | 8453 Base mainnet, 84532 Base Sepolia, 31337 local Anvil |
+| `NEXT_PUBLIC_CHAIN_ID` | `84532` | 84532 Base Sepolia (the public testnet deployment, TestUSDC with a faucet), 31337 local Anvil; 8453 Base mainnet stays supported but unused |
 | `NEXT_PUBLIC_RPC_URL` | public RPC for the chain | JSON-RPC endpoint (log reads are chunked to 9k blocks) |
 | `NEXT_PUBLIC_TEE_URL` | none | TEE service base URL (see "TEE API used" below) |
 | `NEXT_PUBLIC_MARKET_ADDRESS` | from the synced deployment | Overrides the deployment file: market address (with `NEXT_PUBLIC_START_BLOCK`, optional `NEXT_PUBLIC_TOKEN_ADDRESS`). Used for throwaway local chains so they never land in `src/generated/` |
 
 Contract addresses and the log start block come from the synced deployment file (or the override). The
-payment token is read from the market's `token()`, and its symbol/decimals from the token itself. The
-faucet button only appears when the token has `faucet()` (local TestUSDC).
+payment token is read from the market's `token()`, and its symbol/decimals from the token itself.
+On testnets a banner under the header says the token has no value, offers the TestUSDC `faucet()`
+(rate-limited on-chain; it shows when the connected wallet can use it again) and links to Base Sepolia
+ETH faucets for gas, so a reviewer can go connect → faucet → buy → decrypt → dispute → finalize → rate.
+Attestation links go to the EigenCompute verify dashboard (`verify-sepolia.eigencloud.xyz` on testnet)
+when the report carries no `verifyUrl` of its own.
 
 ## Wallets
 

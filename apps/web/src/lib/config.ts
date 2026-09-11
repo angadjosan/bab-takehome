@@ -4,10 +4,12 @@ import { generatedDeployments } from "@/generated/contracts";
 
 /**
  * Chain selection. Everything chain-specific (RPC, explorer, token, addresses) derives from
- * NEXT_PUBLIC_CHAIN_ID. Supported: 8453 Base mainnet (default, real USDC), 84532 Base Sepolia,
- * 31337 local Anvil.
+ * NEXT_PUBLIC_CHAIN_ID. Supported: 84532 Base Sepolia (default: the public testnet deployment with
+ * TestUSDC), 31337 local Anvil, and 8453 Base mainnet (supported, unused).
  */
-export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 8453);
+export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 84532);
+/** Gas for testnet users: Base Sepolia ETH faucets listed by Base. */
+export const GAS_FAUCET_URL = CHAIN_ID === 84532 ? "https://docs.base.org/base-chain/tools/network-faucets" : null;
 
 const DEFAULT_RPC: Record<number, string> = {
   8453: "https://mainnet.base.org",

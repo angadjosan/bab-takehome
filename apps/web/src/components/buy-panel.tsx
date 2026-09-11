@@ -5,7 +5,7 @@ import { useState } from "react";
 import { parseEventLogs } from "viem";
 import { useAccount, useReadContract } from "wagmi";
 import { marketAbi, tokenAbi } from "@/lib/abi";
-import { deployment } from "@/lib/config";
+import { deployment, GAS_FAUCET_URL } from "@/lib/config";
 import { encKeyFromSecret, generateEncKey, type EncKey } from "@/lib/crypto";
 import { fmtUsdc, fmtWindow } from "@/lib/format";
 import { downloadKey, useEncKeys } from "@/lib/keys";
@@ -185,6 +185,15 @@ function BuySteps({ v }: { v: Version }) {
           </button>
         )}
         {!enoughFunds && !token.hasFaucet && balance !== undefined && <p className="text-warn">Top up your wallet with {token.symbol} on this network to continue.</p>}
+        {GAS_FAUCET_URL && (
+          <p className="text-muted">
+            No ETH for gas?{" "}
+            <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="link">
+              Base Sepolia ETH faucets
+            </a>
+            .
+          </p>
+        )}
         <TxStatus state={faucet.state} />
       </Step>
 

@@ -2,6 +2,7 @@
 
 import { fmtPass, useAttestation, useReportState, useVerifiedReport, type ReportVerification } from "@/lib/docs";
 import { eqHash } from "@/lib/crypto";
+import { IS_MAINNET } from "@/lib/config";
 import { isZeroHash, type Version } from "@/lib/market";
 import { fmtTime } from "@/lib/format";
 import type { ModelResult, Outcome } from "@/lib/tee";
@@ -265,6 +266,8 @@ function AttestationBlock({ rv }: { rv: ReportVerification }) {
   const live = useAttestation();
   const att = rv.report.attestation;
   const real = att.kind === "eigencompute-tdx";
+  // EigenCompute's verify dashboard; the testnet deployment runs in the EigenCompute sepolia environment
+  const verifyUrl = att.verifyUrl ?? (real && att.appId ? `https://${IS_MAINNET ? "verify" : "verify-sepolia"}.eigencloud.xyz/app/${att.appId}` : null);
   const signer = rv.recoveredSigner ?? rv.report.signer;
   const roles = live.data?.signerRoles;
   return (
@@ -310,8 +313,8 @@ function AttestationBlock({ rv }: { rv: ReportVerification }) {
         </dd>
         <dt>Verify</dt>
         <dd>
-          {att.verifyUrl ? (
-            <a href={att.verifyUrl} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1">
+          {verifyUrl ? (
+            <a href={verifyUrl} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1">
               EigenCloud verification dashboard <IconExternal />
             </a>
           ) : (

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useAccount, useChainId, useConnect, useDisconnect, useReadContract, useSwitchChain } from "wagmi";
-import { CHAIN_ID, CHAIN_NAME, deployment, TEE_URL, addressUrl, IS_MAINNET } from "@/lib/config";
+import { CHAIN_ID, CHAIN_NAME, deployment, TEE_URL, addressUrl, IS_MAINNET, GAS_FAUCET_URL } from "@/lib/config";
 import { marketAbi, tokenAbi } from "@/lib/abi";
 import { fmtUsdc, shortAddr } from "@/lib/format";
 import { useClaimable } from "@/lib/market";
@@ -54,6 +54,7 @@ export function SiteHeader() {
           <WalletButton />
         </div>
       </div>
+      {!IS_MAINNET && <TestnetBanner />}
       <nav className="flex gap-1 overflow-x-auto border-t border-line px-4 py-1.5 md:hidden">
         {NAV.map((n) => (
           <Link key={n.href} href={n.href} className={cx("whitespace-nowrap rounded-md px-2.5 py-1 text-sm", isActive(n.href) ? "bg-panel-2 text-ink" : "text-muted")}>
@@ -62,6 +63,56 @@ export function SiteHeader() {
         ))}
       </nav>
     </header>
+  );
+}
+
+/**
+ * Always-visible testnet strip: what the token is worth (nothing), the TestUSDC faucet for the
+ * connected wallet (rate-limited on-chain; shows when it can be used again), and where to get
+ * Base Sepolia ETH for gas.
+ */
+function TestnetBanner() {
+  const { address, isConnected } = useAccount();
+  const token = useTokenInfo();
+  const faucet = useTx();
+  const { data: availableAt } = useReadContract({
+    address: deployment?.token,
+    abi: tokenAbi,
+    functionName: "faucetAvailableAt",
+    args: address ? [address] : undefined,
+    query: { enabled: !!address && !!deployment && token.hasFaucet, refetchInterval: 15_000 },
+  });
+  const [now] = useState(() => Math.floor(Date.now() / 1000));
+  const waitUntil = availableAt !== undefined ? Number(availableAt as bigint) : 0;
+  const coolingDown = waitUntil > now;
+  return (
+    <div className="border-t border-line bg-warn-soft">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2 text-xs sm:px-6">
+        <span className="font-semibold text-warn">{CHAIN_NAME} testnet · {token.symbol} has no value</span>
+        {deployment && token.hasFaucet && (
+          isConnected ? (
+            <span className="flex items-center gap-2">
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={faucet.busy || coolingDown}
+                onClick={() => faucet.run("Faucet", { address: deployment!.token, abi: tokenAbi, functionName: "faucet" })}
+              >
+                Get test {token.symbol}
+              </button>
+              {coolingDown && <span className="text-muted">faucet used; available again {new Date(waitUntil * 1000).toLocaleString()}</span>}
+              <TxStatus state={faucet.state} />
+            </span>
+          ) : (
+            <span className="text-muted">Connect a wallet (or a burner key) to get test {token.symbol} from the faucet.</span>
+          )
+        )}
+        {GAS_FAUCET_URL && (
+          <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1">
+            Base Sepolia ETH for gas <IconExternal />
+          </a>
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -20,5 +20,5 @@ export function setTokenMeta(m: Partial<typeof tokenMeta>) {
 /** One-line disclosure of what the payment token is worth. */
 export function tokenValueNote() {
   if (IS_MAINNET) return `Payments use real ${tokenMeta.symbol} on Base mainnet. Demo amounts are deliberately small.`;
-  return `Payments use ${tokenMeta.symbol}, a test token with no monetary value.`;
+  return `Testnet: payments use ${tokenMeta.symbol}, a test token with no value.`;
 }
