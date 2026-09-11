@@ -1,0 +1,65 @@
+{
+  "chainId": 84532,
+  "market": "0x2fd644342296df7de57929fa87bd65c05fb415f8",
+  "token": "0x6f3600d4a42d0c6c52a8b9f04abf817ce7d56ceb",
+  "views": "0xf020ec9a3381dfa34a03ad2f8bdb5cae7e890794",
+  "startBlock": 46670333,
+  "deployer": "0xf21824641e6368fc34d6b1fc01ad91f56ae33784",
+  "owner": "0xf21824641e6368fc34d6b1fc01ad91f56ae33784",
+  "tokenSymbol": "tUSDC",
+  "tokenDecimals": 6,
+  "testToken": true,
+  "params": {
+    "challengeWindow": 300,
+    "deliveryWindow": 600,
+    "refundCapBps": 5000,
+    "penaltyThresholdBps": 500,
+    "penaltyBps": 1000,
+    "feeBps": 200,
+    "bondFloor": 5000000,
+    "bondCap": 50000000,
+    "caseFee": 6000000,
+    "participationFee": 1000000,
+    "jurorStake": 20000000,
+    "minoritySlashBps": 2000,
+    "nonRevealSlashBps": 5000,
+    "commitWindow": 180,
+    "revealWindow": 180,
+    "verifierTimeout": 1800
+  },
+  "preview": {
+    "feeRecipient": "0xf21824641e6368fc34d6b1fc01ad91f56ae33784",
+    "minFee": 1000000,
+    "timeout": 3600
+  },
+  "deployedAt": "2026-09-11T06:43:48.762Z",
+  "txs": [
+    "0x3334921cc65b680dde96b8497da893484b1684c77c8e80d43ac952a761709c1b",
+    "0x18b77ed2d6cf62eb9aaac4678b9547309e8f1762a6fc5d520166926d480ffbda",
+    "0xf7b3e1d3928a208b2a8cb8ff93c7f2494c33c3e2303350919608d289b50494fa",
+    "0xc75e05c37cb650be79d57af43d6b6f273bb942324e54e69265560d083b7c0d1e",
+    "0x7fe41b5e45a72bdcde87ca39702d39ac0a561bd6836e091d7ef53a2c7c7289d5",
+    "0xa9198143ccae16e45867fbd15874242263a0e45c289a62a127b099306f607f71",
+    "0x89c720c8b62dde09f521c2bd4ce635790814c73dfcc774a3ef98ac2f07c4d3bf",
+    "0x9d54e03a4cdabf4df47ef963c3818f587c76aeadda790c9d761dc51c7858aba6",
+    "0x3b11b202839900bc8fc4b4d00ae48a3adebf91f90fc27bf3fc01cc363e5fd786",
+    "0xb3cb3491c656c050a6e5a3b7cc182cbc6e00fd873aa889489d0fd1bb5e1896a9",
+    "0xd7eb633bdc04783ceb016877fd12da49028f37f50d9c812775b6975e4c0caa9d",
+    "0x79228fdb50994f925df645fa925d5557ba39dc643849ed4036f0160a60c47327",
+    "0x6c88cee5895bb728113c2b47b9947fedf0d1ad76db3fc8aa94227a50696d5ec7"
+  ],
+  "explorers": [
+    {
+      "base": "https://sepolia.basescan.org",
+      "market": "https://sepolia.basescan.org/address/0x2fd644342296df7de57929fa87bd65c05fb415f8",
+      "views": "https://sepolia.basescan.org/address/0xf020ec9a3381dfa34a03ad2f8bdb5cae7e890794",
+      "token": "https://sepolia.basescan.org/address/0x6f3600d4a42d0c6c52a8b9f04abf817ce7d56ceb"
+    },
+    {
+      "base": "https://base-sepolia.blockscout.com",
+      "market": "https://base-sepolia.blockscout.com/address/0x2fd644342296df7de57929fa87bd65c05fb415f8",
+      "views": "https://base-sepolia.blockscout.com/address/0xf020ec9a3381dfa34a03ad2f8bdb5cae7e890794",
+      "token": "https://base-sepolia.blockscout.com/address/0x6f3600d4a42d0c6c52a8b9f04abf817ce7d56ceb"
+    }
+  ]
+}

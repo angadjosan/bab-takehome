@@ -1,0 +1,7 @@
+.next/
+.vercel/
+.well-known/
+next-env.d.ts
+*.tsbuildinfo
+.env*.local
+/.swc
