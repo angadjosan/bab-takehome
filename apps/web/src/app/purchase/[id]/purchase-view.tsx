@@ -117,6 +117,14 @@ function PurchaseBody({ p, v }: { p: Purchase; v: Version }) {
   const isSeller = !!address && address.toLowerCase() === p.seller.toLowerCase();
   const dl = useDownload(p, v, isBuyer && p.deliveredAt > 0);
   const title = d.title ?? `Environment #${v.id}`;
+  // "Report a problem" is reachable from the header and from My purchases (/purchase/:id#report).
+  // This view only mounts client-side after the purchase loads, so reading the hash here is safe.
+  const [reporting, setReporting] = useState(() => typeof window !== "undefined" && window.location.hash === "#report");
+  const scrollToReport = () => requestAnimationFrame(() => document.getElementById("report-problem")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  useEffect(() => {
+    if (reporting || window.location.hash === "#rate") scrollToReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on arrival from a deep link
+  }, []);
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -124,6 +132,17 @@ function PurchaseBody({ p, v }: { p: Purchase; v: Version }) {
         back={{ href: `/listing/${v.id}`, label: title }}
         eyebrow={`Purchase #${p.id.toString()}`}
         title={title}
+        actions={
+          isBuyer ? (
+            <ReportShortcut
+              p={p}
+              onClick={() => {
+                setReporting(true);
+                scrollToReport();
+              }}
+            />
+          ) : undefined
+        }
         meta={
           <>
             <PurchaseStateChip state={p.state} long />
@@ -140,10 +159,24 @@ function PurchaseBody({ p, v }: { p: Purchase; v: Version }) {
 
       <Tracker p={p} events={mine} />
 
-      <NextAction p={p} v={v} isBuyer={isBuyer} dl={dl} />
+      <NextAction p={p} v={v} isBuyer={isBuyer} dl={dl} reporting={reporting} setReporting={setReporting} />
 
       <PurchaseDetails p={p} v={v} dl={dl} events={mine} eventsLoading={events.isLoading} />
     </div>
+  );
+}
+
+/** Header button while the buyer can still report a problem, with the time left. */
+function ReportShortcut({ p, onClick }: { p: Purchase; onClick: () => void }) {
+  const now = useNow();
+  if (p.state !== "Delivered" || !p.deliveredAt || now > p.challengeDeadline) return null;
+  return (
+    <button className="btn btn-sm" onClick={onClick}>
+      Report a problem
+      <span className="text-xs font-normal text-muted">
+        · <Countdown to={p.challengeDeadline} /> left
+      </span>
+    </button>
   );
 }
 
@@ -463,11 +496,10 @@ function Panel({ title, children }: { title: ReactNode; children: ReactNode }) {
   );
 }
 
-function NextAction({ p, v, isBuyer, dl }: { p: Purchase; v: Version; isBuyer: boolean; dl: Download }) {
+function NextAction({ p, v, isBuyer, dl, reporting, setReporting }: { p: Purchase; v: Version; isBuyer: boolean; dl: Download; reporting: boolean; setReporting: (x: boolean) => void }) {
   const now = useNow();
   const finalize = useTx();
   const refund = useTx();
-  const [reporting, setReporting] = useState(false);
   const dispute = useDispute(p.disputeId > 0n ? p.disputeId : null);
   const m = deployment!.market;
 
@@ -588,7 +620,11 @@ function NextAction({ p, v, isBuyer, dl }: { p: Purchase; v: Version; isBuyer: b
     return (
       <Panel title="Complete">
         <SettlementRows p={p} />
-        {p.deliveredAt > 0 && <RateBlock p={p} isBuyer={isBuyer} />}
+        {p.deliveredAt > 0 && (
+          <div id="rate">
+            <RateBlock p={p} isBuyer={isBuyer} />
+          </div>
+        )}
         {isBuyer && p.deliveredAt > 0 && (
           <div className="border-t border-line pt-4">
             <DownloadControl p={p} dl={dl} quiet />

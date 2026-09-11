@@ -75,11 +75,11 @@ export function AccountPanel({ onClose }: { onClose: () => void }) {
         )}
       </div>
       <nav aria-label="Account" className="flex flex-col">
-        <Link href={`/seller/${address}`} className="rounded px-1.5 py-1.5 transition-colors duration-150 hover:bg-panel-2" onClick={onClose}>
-          Purchases and sales
+        <Link href="/me/environments" className="rounded px-1.5 py-1.5 transition-colors duration-150 hover:bg-panel-2" onClick={onClose}>
+          My environments
         </Link>
-        <Link href="/jurors" className="rounded px-1.5 py-1.5 transition-colors duration-150 hover:bg-panel-2" onClick={onClose}>
-          Juror stake
+        <Link href="/me/purchases" className="rounded px-1.5 py-1.5 transition-colors duration-150 hover:bg-panel-2" onClick={onClose}>
+          My purchases
         </Link>
         <Link href="/keys" className="rounded px-1.5 py-1.5 transition-colors duration-150 hover:bg-panel-2" onClick={onClose}>
           Delivery keys

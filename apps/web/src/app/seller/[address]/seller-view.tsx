@@ -301,7 +301,7 @@ function Body({ a }: { a: Address }) {
 
 /* -------------------------- permissionless keeper actions -------------------------- */
 
-function KeeperRow({ id }: { id: bigint }) {
+export function KeeperRow({ id }: { id: bigint }) {
   const q = usePurchase(id);
   const now = useNow();
   const tx = useTx();
@@ -406,7 +406,7 @@ function VersionRow({ id, isMe }: { id: bigint; isMe: boolean }) {
   );
 }
 
-function PreviewActions({ versionId, paid, reclaimable, deadline }: { versionId: bigint; paid: boolean; reclaimable: boolean; deadline: number }) {
+export function PreviewActions({ versionId, paid, reclaimable, deadline }: { versionId: bigint; paid: boolean; reclaimable: boolean; deadline: number }) {
   const health = useHealth();
   const [quote, setQuote] = useState<PreviewQuote | null>(null);
   const [err, setErr] = useState<string | null>(null);
