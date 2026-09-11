@@ -1,0 +1,29 @@
+{
+  "name": "@envmarket/jurors",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Three AI juror agent processes for EnvMarket FalseDescription disputes (real LLM verdicts, on-chain commit-reveal)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "juror": "tsx src/juror.ts",
+    "register": "tsx src/juror.ts register",
+    "start": "tsx src/run-all.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "integration": "tsx scripts/anvil-integration.ts"
+  },
+  "dependencies": {
+    "@envmarket/shared": "file:../../packages/shared",
+    "viem": "^2.56.3",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
