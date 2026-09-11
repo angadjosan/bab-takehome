@@ -28,6 +28,7 @@ import {
   TX_LOG,
   balanceOf,
   chainNow,
+  explorerTx,
   fmt,
   getDispute,
   getPurchase,
@@ -287,6 +288,24 @@ console.log(`  seller: money-weighted rating (hidden until 100 tx) ${rret > 0n ?
 
 banner(`TRANSACTIONS (${TX_LOG.length})`);
 for (const x of TX_LOG) console.log(`  ${x.label.padEnd(36)} ${x.url ?? x.hash}  (block ${x.block}, gas ${x.gasUsed})`);
+// Transactions sent by the other parties (TEE runner/relay, juror processes), read back from the
+// market's own events so the list covers the whole story.
+const mine = new Set(TX_LOG.map((x) => x.hash.toLowerCase()));
+const logs = (await ctx.read.publicClient.getContractEvents({ address: ctx.market, abi: ctx.abi, fromBlock: ctx.cfg.startBlock } as never)) as any[];
+const others = new Map<string, { names: string[]; block: bigint }>();
+for (const l of logs) {
+  const h = String(l.transactionHash).toLowerCase();
+  if (mine.has(h) || /^(JurorStakeChanged|Credited|ParamsUpdated|RunnerSet|RelaySet|VerifierSet|JurorRegistered)$/.test(l.eventName)) continue;
+  const e: { names: string[]; block: bigint } = others.get(h) ?? { names: [], block: BigInt(l.blockNumber) };
+  e.names.push(l.eventName);
+  others.set(h, e);
+}
+if (others.size) console.log(`\n  by other parties (TEE service, juror agents): ${others.size}`);
+for (const [h, e] of others) {
+  const tx = await ctx.read.publicClient.getTransaction({ hash: h as Hex });
+  const who = tx.from.toLowerCase() === teeSigner.toLowerCase() ? 'tee' : (roles.find((r) => addr(r).toLowerCase() === tx.from.toLowerCase()) ?? tx.from.slice(0, 10));
+  console.log(`  ${`${who}: ${[...new Set(e.names)].join('+')}`.padEnd(36)} ${explorerTx(ctx.chainId, h as Hex) ?? h}  (block ${e.block})`);
+}
 
 banner('BALANCE CONSERVATION');
 const after = await snapshot();

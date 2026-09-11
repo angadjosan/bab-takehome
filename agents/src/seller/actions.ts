@@ -230,7 +230,8 @@ export async function previewAndAttach(ctx: Ctx, versionId: bigint, tee = new Te
   for (const m of vr.report.models) {
     log(`  model ${m.requested} → ${m.resolved ?? '(unavailable)'} [${m.status}] purchased pass@1 ${m.purchased.pass1Rounded ?? 'n/a'}% (${m.purchased.solved}/${m.purchased.attempted}), audit ${m.audit.pass1Rounded ?? 'n/a'}%`);
   }
-  let attachedBy: 'seller' | 'tee' | 'already' = 'already';
+  // A non-zero reportHash at this point was submitted by the TEE itself (res.attachTx) or earlier.
+  let attachedBy: 'seller' | 'tee' | 'already' = res.attachTx ? 'tee' : 'already';
   version = await getVersion(ctx, versionId);
   if (version.reportHash === `0x${'00'.repeat(32)}`) {
     // The TEE may be submitting attachReport itself; give it a moment, then submit (anyone may).
