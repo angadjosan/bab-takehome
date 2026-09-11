@@ -56,7 +56,10 @@ else
   fi
 fi
 
-dep_files=("$SRC_DEP"/*.json)
+dep_files=()
+for f in "$SRC_DEP"/*.json; do
+  [[ $(basename "$f") == web.json ]] || dep_files+=("$f") # web.json records the web deploy itself
+done
 if ((${#dep_files[@]})); then
   cp "${dep_files[@]}" "$OUT/deployments/"
   echo "synced ${#dep_files[@]} deployment file(s) from deployments/"
@@ -82,7 +85,10 @@ ts += "export const generatedAbis: Record<string, readonly unknown[]> = {\n";
 for (const [name] of abis) ts += `  ${JSON.stringify(name)}: ${ident(name)}Abi,\n`;
 ts += "};\n\n";
 ts += "export const generatedDeployments: Record<string, Record<string, unknown>> = {\n";
-for (const [name, json] of deps) ts += `  ${JSON.stringify(String(json.chainId ?? name))}: ${JSON.stringify(json)},\n`;
+// <chainId>.json files are keyed by chain id (config.ts looks them up that way); every other record
+// (phala-tee.json, web.json, ...) by file name, so a record that happens to carry chainId never
+// overwrites the contract deployment.
+for (const [name, json] of deps) ts += `  ${JSON.stringify(/^\d+$/.test(name) ? String(json.chainId ?? name) : name)}: ${JSON.stringify(json)},\n`;
 ts += "};\n";
 fs.writeFileSync(path.join(out, "contracts.ts"), ts);
 console.log(`wrote apps/web/src/generated/contracts.ts (${abis.length} ABI(s), ${deps.length} deployment(s))`);
