@@ -36,14 +36,47 @@ ETH faucets for gas, so a reviewer can go connect → faucet → buy → decrypt
 Attestation links go to the EigenCompute verify dashboard (`verify-sepolia.eigencloud.xyz` on testnet)
 when the report carries no `verifyUrl` of its own.
 
-## Wallets
+## Wallets and payments (Privy)
 
-Browser wallets (injected, Coinbase) and a **burner key** option: paste the private key of a
-throwaway wallet ("Use a burner key" in the wallet menu or any "connect" prompt). It is a real wallet
-on whatever chain the app runs on — a wagmi connector backed by a viem local account that signs in
-the page — but the key sits in this tab's sessionStorage and signs without a confirmation prompt, so
-use it only for wallets with tiny balances. Several keys can be added and switched between from the
-wallet menu, which lets one browser act as buyer, second buyer, seller, juror and observer.
+All wallet and payment UX goes through [Privy](https://docs.privy.io) (`@privy-io/react-auth` +
+`@privy-io/wagmi`): log in with email, Google or an external wallet; users without a wallet get an
+embedded EVM wallet on Base Sepolia at login. Every contract write (faucet, approve, buy,
+requestPreview, openDispute, commit/reveal, finalize, tally, rate, withdraw, collateral/stake
+deposits) is a wagmi call on the active Privy wallet. The wallet menu shows the active wallet, the
+embedded wallet with **Export wallet** (Privy's `exportWallet`; the key is shown on Privy's origin,
+never this app's), token / ETH / claimable balances, the faucet and withdraw.
+
+| Variable | Meaning |
+|---|---|
+| `NEXT_PUBLIC_PRIVY_APP_ID` | Privy app id (Dashboard → App settings). Unset: the app builds and runs with browser wallets only and shows a setup notice. |
+| `NEXT_PUBLIC_PRIVY_CLIENT_ID` | Optional app client id (Dashboard → App settings → Clients), for per-environment settings. |
+| `NEXT_PUBLIC_PRIVY_SPONSOR_GAS` | `1` sends writes from the **embedded** wallet through Privy's native gas sponsorship (`useSendTransaction(…, {sponsor: true})`), so a first-time reviewer needs no ETH. External wallets always pay their own gas. |
+
+Privy dashboard settings (https://dashboard.privy.io):
+
+1. **App settings → Domains / allowed origins:** `http://localhost:3000` (and `http://localhost:3100` for
+   `scripts/local-stack.sh`) plus the Vercel production and preview domains.
+2. **User management → Authentication → Login methods:** Email, Google, External wallets (EVM).
+3. **Wallet infrastructure → Embedded wallets:** EVM enabled, create on login for users without wallets
+   (the code also sets `createOnLogin: "users-without-wallets"`).
+4. **Chains:** the app passes Base Sepolia (84532) as `defaultChain`/`supportedChains`; nothing to add in
+   the dashboard unless it restricts networks.
+5. **Gas sponsorship** (for `NEXT_PUBLIC_PRIVY_SPONSOR_GAS=1`): Dashboard → Gas sponsorship → **App
+   pays**, enable **Base Sepolia**, and make sure embedded wallets use **TEE execution** (Privy requires
+   it for native EVM sponsorship; sponsored wallets are upgraded with EIP-7702 and a Privy paymaster
+   pays). Keep the flag off until this is enabled, or sponsored sends fail.
+6. **Test accounts** for automated browser tests: User management → Authentication → **Advanced** →
+   *Enable test accounts*. Log in with the listed `test-XXXX@privy.io` email and its fixed `XXXXXX`
+   OTP exactly (development apps only).
+
+### Burner keys (dev tool only)
+
+On the local anvil chain, or with `?dev=1` in the URL (remembered for the tab, `?dev=0` turns it off),
+the app switches to plain wagmi with browser wallets plus a **burner key** connector: paste the private
+key of a throwaway wallet and it signs in the page with a viem local account. The key sits in this tab's
+sessionStorage and signs without a prompt, so use it only for wallets with tiny balances. Several keys
+can be added and switched between, which lets one browser act as buyer, second buyer, seller, juror
+and observer.
 
 ## Routes
 

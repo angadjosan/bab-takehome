@@ -5,15 +5,18 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useAccount, useChainId, useConnect, useDisconnect, useReadContract, useSwitchChain } from "wagmi";
 import { CHAIN_ID, CHAIN_NAME, deployment, TEE_URL, addressUrl, IS_MAINNET, GAS_FAUCET_URL } from "@/lib/config";
-import { marketAbi, tokenAbi } from "@/lib/abi";
+import { tokenAbi } from "@/lib/abi";
+import { BURNER_CONNECTOR_ID } from "@/lib/burner";
 import { fmtUsdc, shortAddr } from "@/lib/format";
 import { useClaimable } from "@/lib/market";
 import { tokenValueNote } from "@/lib/token";
-import { BURNER_CONNECTOR_ID } from "@/lib/burner";
+import { PRIVY_SPONSOR_GAS } from "@/lib/wallet-mode";
 import { BurnerForm, BurnerSwitcher } from "./burner-ui";
-import { useTokenInfo } from "./providers";
+import { PrivyWalletButton } from "./privy-wallet";
+import { useTokenInfo, useWalletMode } from "./providers";
 import { useTx, TxStatus } from "./tx";
 import { cx, IconExternal } from "./ui";
+import { AccountPanel } from "./wallet-panel";
 
 const NAV = [
   { href: "/", label: "Marketplace" },
@@ -25,6 +28,7 @@ const NAV = [
 
 export function SiteHeader() {
   const path = usePathname();
+  const { mode, devTools, privyConfigured } = useWalletMode();
   const isActive = (href: string) => (href === "/" ? path === "/" || path.startsWith("/listing") : path.startsWith(href));
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-bg/85 backdrop-blur">
@@ -50,10 +54,18 @@ export function SiteHeader() {
             <span className={cx("h-1.5 w-1.5 rounded-full", deployment ? "bg-ok" : "bg-warn")} />
             {CHAIN_NAME}
             {IS_MAINNET && <span className="text-[10px] font-semibold uppercase text-warn">mainnet</span>}
+            {devTools && <span className="text-[10px] font-semibold uppercase text-accent">dev tools</span>}
           </span>
-          <WalletButton />
+          {mode === "privy" ? <PrivyWalletButton /> : <WagmiWalletButton />}
         </div>
       </div>
+      {!privyConfigured && !devTools && (
+        <div className="border-t border-line bg-info-soft">
+          <div className="mx-auto max-w-6xl px-4 py-1.5 text-xs text-info sm:px-6">
+            Wallet login (Privy) is not configured for this deployment: set <code className="font-mono">NEXT_PUBLIC_PRIVY_APP_ID</code> (see apps/web/README.md). Browser wallets still work.
+          </div>
+        </div>
+      )}
       {!IS_MAINNET && <TestnetBanner />}
       <nav className="flex gap-1 overflow-x-auto border-t border-line px-4 py-1.5 md:hidden">
         {NAV.map((n) => (
@@ -69,10 +81,11 @@ export function SiteHeader() {
 /**
  * Always-visible testnet strip: what the token is worth (nothing), the TestUSDC faucet for the
  * connected wallet (rate-limited on-chain; shows when it can be used again), and where to get
- * Base Sepolia ETH for gas.
+ * Base Sepolia ETH for gas (unless gas is sponsored).
  */
 function TestnetBanner() {
   const { address, isConnected } = useAccount();
+  const { mode } = useWalletMode();
   const token = useTokenInfo();
   const faucet = useTx();
   const { data: availableAt } = useReadContract({
@@ -85,31 +98,34 @@ function TestnetBanner() {
   const [now] = useState(() => Math.floor(Date.now() / 1000));
   const waitUntil = availableAt !== undefined ? Number(availableAt as bigint) : 0;
   const coolingDown = waitUntil > now;
+  const sponsored = mode === "privy" && PRIVY_SPONSOR_GAS;
   return (
     <div className="border-t border-line bg-warn-soft">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2 text-xs sm:px-6">
-        <span className="font-semibold text-warn">{CHAIN_NAME} testnet · {token.symbol} has no value</span>
-        {deployment && token.hasFaucet && (
-          isConnected ? (
+        <span className="font-semibold text-warn">
+          {CHAIN_NAME} testnet · {token.symbol} has no value
+        </span>
+        {deployment &&
+          token.hasFaucet &&
+          (isConnected ? (
             <span className="flex items-center gap-2">
-              <button
-                className="btn btn-primary btn-sm"
-                disabled={faucet.busy || coolingDown}
-                onClick={() => faucet.run("Faucet", { address: deployment!.token, abi: tokenAbi, functionName: "faucet" })}
-              >
+              <button className="btn btn-primary btn-sm" disabled={faucet.busy || coolingDown} onClick={() => faucet.run("Faucet", { address: deployment!.token, abi: tokenAbi, functionName: "faucet" })}>
                 Get test {token.symbol}
               </button>
               {coolingDown && <span className="text-muted">faucet used; available again {new Date(waitUntil * 1000).toLocaleString()}</span>}
               <TxStatus state={faucet.state} />
             </span>
           ) : (
-            <span className="text-muted">Connect a wallet (or a burner key) to get test {token.symbol} from the faucet.</span>
+            <span className="text-muted">{mode === "privy" ? "Log in (top right) to get" : "Connect a wallet to get"} test {token.symbol} from the faucet.</span>
+          ))}
+        {sponsored ? (
+          <span className="text-muted">Gas is sponsored for wallets created at login.</span>
+        ) : (
+          GAS_FAUCET_URL && (
+            <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1">
+              Base Sepolia ETH for gas <IconExternal />
+            </a>
           )
-        )}
-        {GAS_FAUCET_URL && (
-          <a href={GAS_FAUCET_URL} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1">
-            Base Sepolia ETH for gas <IconExternal />
-          </a>
         )}
       </div>
     </div>
@@ -125,13 +141,14 @@ function Logo() {
   );
 }
 
-export function WalletButton() {
+/** wagmi mode: browser wallets; with dev tools also burner keys and a per-session account switcher. */
+function WagmiWalletButton() {
   const { address, isConnected, connector } = useAccount();
+  const { devTools } = useWalletMode();
   const chainId = useChainId();
   const { connectors, connect, isPending, error } = useConnect();
   const { disconnect } = useDisconnect();
   const { switchChain, isPending: switching } = useSwitchChain();
-  const token = useTokenInfo();
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -143,8 +160,6 @@ export function WalletButton() {
     query: { enabled: !!address && !!deployment, refetchInterval: 15_000 },
   });
   const claimable = useClaimable(address);
-  const withdraw = useTx();
-  const faucet = useTx();
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- hydration guard: wallet state only exists client-side
   useEffect(() => setMounted(true), []);
@@ -203,11 +218,13 @@ export function WalletButton() {
                 </button>
               ))}
               {error && <p className="px-2 pt-1 text-xs text-bad">{error.message.split("\n")[0]}</p>}
-              <div className="mt-2 space-y-2 border-t border-line px-2 pb-1 pt-2">
-                <div className="text-xs font-medium">Use a burner key</div>
-                <BurnerSwitcher onSwitch={() => setOpen(false)} />
-                <BurnerForm onDone={() => setOpen(false)} />
-              </div>
+              {devTools && (
+                <div className="mt-2 space-y-2 border-t border-line px-2 pb-1 pt-2">
+                  <div className="text-xs font-medium">Use a burner key (dev tool)</div>
+                  <BurnerSwitcher onSwitch={() => setOpen(false)} />
+                  <BurnerForm onDone={() => setOpen(false)} />
+                </div>
+              )}
             </>
           ) : (
             <div className="space-y-2 p-1 text-sm">
@@ -215,70 +232,27 @@ export function WalletButton() {
                 <div className="text-xs text-muted">Connected with {connector?.name}</div>
                 <div className="break-all font-mono text-xs">{address}</div>
               </div>
-              <BurnerSwitcher />
-              <details className="rounded-lg border border-line px-2 py-1.5 text-xs">
-                <summary className="cursor-pointer text-muted">Add a burner key (switch perspective)</summary>
-                <div className="mt-2">
-                  <BurnerForm />
-                </div>
-              </details>
-              <div className="rounded-lg bg-panel-2 p-2.5 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-muted">Wallet balance</span>
-                  <span className="font-medium">{bal === undefined ? "…" : fmtUsdc(bal as bigint)}</span>
-                </div>
-                {claimable.data !== undefined && (
-                  <div className="mt-1 flex items-center justify-between">
-                    <span className="text-muted" title="Refunds, returned bonds, seller proceeds and juror rewards are credited here and withdrawn by you (pull payments).">
-                      Claimable in market
-                    </span>
-                    <span className={cx("font-medium", hasClaim && "text-warn")}>{fmtUsdc(claimable.data)}</span>
-                  </div>
-                )}
-                {hasClaim && deployment && (
-                  <button
-                    className="btn btn-primary btn-sm mt-2 w-full"
-                    disabled={withdraw.busy}
-                    onClick={() => withdraw.run("Withdraw", { address: deployment!.market, abi: marketAbi, functionName: "withdraw" })}
-                  >
-                    Withdraw {fmtUsdc(claimable.data)}
-                  </button>
-                )}
-                <TxStatus state={withdraw.state} />
-                {token.hasFaucet && deployment && (
-                  <>
-                    <button
-                      className="btn btn-sm mt-2 w-full"
-                      disabled={faucet.busy}
-                      onClick={() => faucet.run("Faucet", { address: deployment!.token, abi: tokenAbi, functionName: "faucet" })}
-                    >
-                      Get test {token.symbol} from faucet
-                    </button>
-                    <TxStatus state={faucet.state} />
-                  </>
-                )}
-                <p className="mt-2 text-[11px] text-muted">{tokenValueNote()}</p>
-              </div>
-              <div className="flex flex-col">
-                <Link href={`/seller/${address}`} className="rounded-md px-1 py-1.5 hover:bg-panel-2" onClick={() => setOpen(false)}>
-                  My purchases & seller dashboard
-                </Link>
-                <Link href="/jurors" className="rounded-md px-1 py-1.5 hover:bg-panel-2" onClick={() => setOpen(false)}>
-                  Juror stake
-                </Link>
-                <Link href="/keys" className="rounded-md px-1 py-1.5 hover:bg-panel-2" onClick={() => setOpen(false)}>
-                  My encryption keys
-                </Link>
-                <button
-                  className="rounded-md px-1 py-1.5 text-left text-bad hover:bg-panel-2"
-                  onClick={() => {
-                    disconnect();
-                    setOpen(false);
-                  }}
-                >
-                  Disconnect
-                </button>
-              </div>
+              {devTools && (
+                <>
+                  <BurnerSwitcher />
+                  <details className="rounded-lg border border-line px-2 py-1.5 text-xs">
+                    <summary className="cursor-pointer text-muted">Add a burner key (switch perspective)</summary>
+                    <div className="mt-2">
+                      <BurnerForm />
+                    </div>
+                  </details>
+                </>
+              )}
+              <AccountPanel onClose={() => setOpen(false)} />
+              <button
+                className="w-full rounded-md px-1 py-1.5 text-left text-bad hover:bg-panel-2"
+                onClick={() => {
+                  disconnect();
+                  setOpen(false);
+                }}
+              >
+                Disconnect
+              </button>
             </div>
           )}
         </div>

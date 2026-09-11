@@ -1,16 +1,19 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
-import { BaseError, ContractFunctionRevertedError, type Abi, type Address, type TransactionReceipt } from "viem";
+import { useContext, useState, type ReactNode } from "react";
+import { BaseError, ContractFunctionRevertedError, encodeFunctionData, type Abi, type Address, type Hex, type TransactionReceipt } from "viem";
 import { useAccount, useChainId, useConnect, useSwitchChain, useWriteContract } from "wagmi";
 import { BURNER_CONNECTOR_ID } from "@/lib/burner";
 import { publicClient } from "@/lib/client";
 import { CHAIN_ID, CHAIN_NAME } from "@/lib/config";
+import { SponsorCtx } from "@/lib/sponsor";
 import { BurnerForm, BurnerSwitcher } from "./burner-ui";
+import { PrivyLoginPrompt } from "./privy-login";
+import { useWalletMode } from "./providers";
 import { ErrorText, Spinner, TxLink } from "./ui";
 
-export type TxState = { status: "idle" | "simulating" | "signing" | "pending" | "success" | "error"; hash?: `0x${string}`; error?: unknown; receipt?: TransactionReceipt; label?: string };
+export type TxState = { status: "idle" | "simulating" | "signing" | "pending" | "success" | "error"; hash?: `0x${string}`; error?: unknown; receipt?: TransactionReceipt; label?: string; sponsored?: boolean };
 
 export function friendlyError(e: unknown): string {
   if (e instanceof BaseError) {
@@ -25,23 +28,36 @@ export function friendlyError(e: unknown): string {
   return (e as Error)?.message ?? String(e);
 }
 
-/** simulate → sign → wait for receipt, with query invalidation afterwards. */
+/**
+ * simulate → sign → wait for receipt, with query invalidation afterwards. Writes from a Privy
+ * embedded wallet go through Privy's sponsored sender when gas sponsorship is on; every other
+ * account signs through wagmi (browser wallet, Privy wallet without sponsorship, burner key).
+ */
 export function useTx() {
   const { address } = useAccount();
   const { writeContractAsync } = useWriteContract();
+  const sponsor = useContext(SponsorCtx);
   const qc = useQueryClient();
   const [state, setState] = useState<TxState>({ status: "idle" });
 
   async function run(label: string, p: { address: Address; abi: Abi; functionName: string; args?: readonly unknown[] }) {
     setState({ status: "simulating", label });
     try {
+      // simulation surfaces revert reasons before the user is asked to sign anything
       const sim = await publicClient.simulateContract({ ...p, account: address } as never);
-      setState({ status: "signing", label });
-      const hash = await writeContractAsync((sim as unknown as { request: never }).request);
-      setState({ status: "pending", hash, label });
+      const sponsored = !!sponsor && !!address && sponsor.canSponsor(address);
+      setState({ status: "signing", label, sponsored });
+      let hash: Hex;
+      if (sponsored) {
+        const data = encodeFunctionData({ abi: p.abi, functionName: p.functionName, args: p.args } as never);
+        hash = await sponsor!.send({ to: p.address, data }, address!);
+      } else {
+        hash = await writeContractAsync((sim as unknown as { request: never }).request);
+      }
+      setState({ status: "pending", hash, label, sponsored });
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status !== "success") throw new Error("Transaction reverted on-chain");
-      setState({ status: "success", hash, receipt, label });
+      setState({ status: "success", hash, receipt, label, sponsored });
       await qc.invalidateQueries();
       return receipt;
     } catch (error) {
@@ -72,7 +88,11 @@ export function TxStatus({ state }: { state: TxState }) {
       ) : (
         <div className="flex flex-wrap items-center gap-2 text-muted">
           {state.status !== "success" ? <Spinner className="h-3.5 w-3.5" /> : <span className="text-ok">✓</span>}
-          <span>{state.label ? `${state.label}: ` : ""}{text}</span>
+          <span>
+            {state.label ? `${state.label}: ` : ""}
+            {text}
+            {state.sponsored ? " (gas sponsored)" : ""}
+          </span>
           {state.hash && <TxLink hash={state.hash} />}
         </div>
       )}
@@ -80,37 +100,13 @@ export function TxStatus({ state }: { state: TxState }) {
   );
 }
 
-/** Renders children only when a wallet is connected to the right chain; otherwise a prompt. */
+/** Renders children only when a wallet is connected to the right chain; otherwise a login/connect prompt. */
 export function RequireWallet({ children, why }: { children: ReactNode; why?: string }) {
+  const { mode } = useWalletMode();
   const { isConnected } = useAccount();
   const chainId = useChainId();
-  const { connectors, connect, isPending } = useConnect();
   const { switchChain, isPending: switching } = useSwitchChain();
-  const [burnerOpen, setBurnerOpen] = useState(false);
-  if (!isConnected) {
-    const uniq = connectors.filter((c, i, arr) => c.id !== BURNER_CONNECTOR_ID && arr.findIndex((x) => x.name === c.name) === i);
-    return (
-      <div className="rounded-lg border border-dashed border-line-strong p-4 text-sm">
-        <p className="text-muted">{why ?? "Connect a wallet to continue."}</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {uniq.map((c) => (
-            <button key={c.uid} className="btn btn-sm" disabled={isPending} onClick={() => connect({ connector: c, chainId: CHAIN_ID })}>
-              {c.name === "Injected" ? "Browser wallet" : c.name}
-            </button>
-          ))}
-          <button className="btn btn-sm" onClick={() => setBurnerOpen((x) => !x)}>
-            Use a burner key
-          </button>
-        </div>
-        {burnerOpen && (
-          <div className="mt-3 space-y-3">
-            <BurnerSwitcher />
-            <BurnerForm />
-          </div>
-        )}
-      </div>
-    );
-  }
+  if (!isConnected) return mode === "privy" ? <PrivyLoginPrompt why={why} /> : <ConnectPrompt why={why} />;
   if (chainId !== CHAIN_ID) {
     return (
       <div className="rounded-lg border border-dashed border-warn p-4 text-sm">
@@ -122,4 +118,35 @@ export function RequireWallet({ children, why }: { children: ReactNode; why?: st
     );
   }
   return <>{children}</>;
+}
+
+/** wagmi mode (dev tools, or Privy not configured): browser wallets, plus burner keys with dev tools on. */
+function ConnectPrompt({ why }: { why?: string }) {
+  const { devTools } = useWalletMode();
+  const { connectors, connect, isPending } = useConnect();
+  const [burnerOpen, setBurnerOpen] = useState(false);
+  const uniq = connectors.filter((c, i, arr) => c.id !== BURNER_CONNECTOR_ID && arr.findIndex((x) => x.name === c.name) === i);
+  return (
+    <div className="rounded-lg border border-dashed border-line-strong p-4 text-sm">
+      <p className="text-muted">{why ?? "Connect a wallet to continue."}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {uniq.map((c) => (
+          <button key={c.uid} className="btn btn-sm" disabled={isPending} onClick={() => connect({ connector: c, chainId: CHAIN_ID })}>
+            {c.name === "Injected" ? "Browser wallet" : c.name}
+          </button>
+        ))}
+        {devTools && (
+          <button className="btn btn-sm" onClick={() => setBurnerOpen((x) => !x)}>
+            Use a burner key (dev)
+          </button>
+        )}
+      </div>
+      {devTools && burnerOpen && (
+        <div className="mt-3 space-y-3">
+          <BurnerSwitcher />
+          <BurnerForm />
+        </div>
+      )}
+    </div>
+  );
 }
