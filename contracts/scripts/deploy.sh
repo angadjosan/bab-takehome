@@ -25,7 +25,8 @@ TARGET="${1:-anvil}"
 case "$TARGET" in
   anvil) RPC="${RPC:-http://127.0.0.1:8545}" ;;
   base) RPC="${RPC:-${BASE_RPC:-https://mainnet.base.org}}" ;;
-  *) echo "usage: $0 [anvil|base]" >&2; exit 1 ;;
+  base-sepolia) RPC="${RPC:-${BASE_SEPOLIA_RPC:-https://sepolia.base.org}}" ;;
+  *) echo "usage: $0 [anvil|base|base-sepolia]" >&2; exit 1 ;;
 esac
 
 CHAIN_ID="$(cast chain-id --rpc-url "$RPC")"
@@ -45,11 +46,14 @@ if [ "$CHAIN_ID" = "31337" ]; then
   fi
 else
   : "${DEPLOYER_PK:?DEPLOYER_PK is required}"
-  : "${TOKEN_ADDR:?TOKEN_ADDR is required off-anvil (Base mainnet USDC: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)}"
-  SYMBOL="$(cast call "$TOKEN_ADDR" 'symbol()(string)' --rpc-url "$RPC")"
-  DECIMALS="$(cast call "$TOKEN_ADDR" 'decimals()(uint8)' --rpc-url "$RPC")"
-  echo "==> token $TOKEN_ADDR symbol=$SYMBOL decimals=$DECIMALS"
-  [ "$DECIMALS" = "6" ] || { echo "token must have 6 decimals" >&2; exit 1; }
+  if [ "$CHAIN_ID" != "84532" ] || [ -n "${TOKEN_ADDR:-}" ]; then
+    # Base Sepolia deploys TestUSDC when TOKEN_ADDR is empty; every other chain needs a real token.
+    : "${TOKEN_ADDR:?TOKEN_ADDR is required off-anvil (Base mainnet USDC: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)}"
+    SYMBOL="$(cast call "$TOKEN_ADDR" 'symbol()(string)' --rpc-url "$RPC")"
+    DECIMALS="$(cast call "$TOKEN_ADDR" 'decimals()(uint8)' --rpc-url "$RPC")"
+    echo "==> token $TOKEN_ADDR symbol=$SYMBOL decimals=$DECIMALS"
+    [ "$DECIMALS" = "6" ] || { echo "token must have 6 decimals" >&2; exit 1; }
+  fi
   if [ "$CHAIN_ID" = "8453" ] && [ "${CONFIRM_MAINNET:-}" != "yes" ]; then
     echo "Refusing to deploy to Base MAINNET without CONFIRM_MAINNET=yes" >&2
     exit 1

@@ -77,6 +77,18 @@ const out = {
   deployedAt: new Date().toISOString(),
   txs: receipts.map((r) => r.transactionHash),
 };
+const EXPLORERS = {
+  8453: ["https://basescan.org"],
+  84532: ["https://sepolia.basescan.org", "https://base-sepolia.blockscout.com"],
+};
+if (EXPLORERS[chainId]) {
+  out.explorers = EXPLORERS[chainId].map((base) => ({
+    base,
+    market: `${base}/address/${market}`,
+    views: `${base}/address/${views}`,
+    token: `${base}/address/${token}`,
+  }));
+}
 fs.mkdirSync(path.dirname(outFile), { recursive: true });
 fs.writeFileSync(outFile, JSON.stringify(out, null, 2) + "\n");
 console.log(`wrote ${outFile}`);

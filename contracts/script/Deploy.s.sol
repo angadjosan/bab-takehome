@@ -24,14 +24,16 @@ import {MarketParams} from "./MarketParams.sol";
 /// Writes nothing to disk and prints no secrets; scripts/deploy.sh records deployments/<chainId>.json.
 contract Deploy is Script {
     uint256 constant ANVIL_CHAIN_ID = 31337;
+    uint256 constant BASE_SEPOLIA_CHAIN_ID = 84532;
     uint256 constant DEMO_MINT = 10_000e6;
 
     function run() external {
         uint256 pk = vm.envUint("DEPLOYER_PK");
         address deployer = vm.addr(pk);
         address tokenAddr = _addr("TOKEN_ADDR");
-        if (tokenAddr == address(0) && block.chainid != ANVIL_CHAIN_ID) {
-            revert("TOKEN_ADDR is required off-anvil (TestUSDC is for local tests only)");
+        // TestUSDC (with public faucet) is deployed when TOKEN_ADDR is unset on anvil or Base Sepolia (testnet).
+        if (tokenAddr == address(0) && block.chainid != ANVIL_CHAIN_ID && block.chainid != BASE_SEPOLIA_CHAIN_ID) {
+            revert("TOKEN_ADDR is required except on anvil / Base Sepolia (TestUSDC is testnet-only)");
         }
         string memory set = vm.envOr("PARAM_SET", string(""));
         if (bytes(set).length == 0) set = block.chainid == 8453 ? "mainnet" : "demo";
