@@ -168,8 +168,64 @@ to the ABI. Test: `testDepositsAboveUint128Revert`.
     ciphertexts it has verified decrypt to `bundleHash`. The TEE keys uploads by ciphertextHash.
     This is off-chain trust.
 
+## Addendum: seller-paid previews (2026-09-10)
+
+Scope: `requestPreview`, `reclaimPreviewFee`, the paid-preview gate in `attachReport`, and the
+preview config setters. Tests: `test/Preview.t.sol`, the preview handler paths in
+`test/Invariant.t.sol`, and `testForkSellerPaysPreviewWithRealUsdc`.
+
+**F-4 (Low, fixed in the design): reclaim-and-downgrade.** A `PreviewReport` signature binds
+versionId, bundleHash and reportHash, but not the fee. With the specified design, a seller could:
+
+1. pay the TEE's quote;
+2. obtain the signed report (for example from `POST /preview`);
+3. wait out `previewTimeout` before anyone attaches it;
+4. reclaim the fee;
+5. re-request at `minPreviewFee`;
+6. attach the old signature.
+
+That pays `minPreviewFee` instead of the quote. **Fix:** after a reclaim, the next `requestPreview`
+for the version must pay at least the reclaimed fee (`PreviewFeeTooLow(fee, reclaimedFee)`). The
+EIP-712 type is unchanged, so TEE signing code is unaffected. Test: `testReclaimBeforeTimeoutRevertsAfterWorks`.
+
+**Checked:**
+- **Conservation.** The new bucket `totalPreviewFees()` counts requested fees that have been neither
+  released nor reclaimed. Every fee moves only between the seller's wallet, this bucket and
+  `claimable` (recipient or seller), and it moves exactly once. `released` and `reclaimed` are
+  mutually exclusive. `reportHash != 0` holds exactly when the version's preview was released.
+  The invariant fuzzer covers request, attach, reclaim and re-request.
+- **Checks-effects-interactions.** `requestPreview` writes state before `safeTransferFrom`. It skips
+  the transfer for a zero fee. Attach and reclaim only credit `claimable`.
+- **Access and state gates.**
+  - Only the version's seller can request or reclaim.
+  - Request needs no report and no outstanding preview.
+  - Reclaim needs no report, an outstanding preview, and `now > paidAt + timeout`.
+  - Attach needs an outstanding preview, so it is impossible after a reclaim until the seller pays again.
+  - A late attach, after the timeout but before any reclaim, is valid, so a slow TEE still gets paid.
+- **Snapshots.**
+  - The timeout is snapshotted per request. The owner cannot extend a pending one to block a refund.
+  - Raising `minPreviewFee` does not invalidate a preview that is already paid.
+  - The recipient is read at attach time.
+  - A zero recipient or zero timeout reverts `InvalidParams`.
+- **Layout.** The new state is appended after `claimable` in `EnvMarketStorage`, so EnvMarket and
+  EnvMarketViews still share slots. EnvMarket's own EIP712 and Ownable slots move down. This needs a
+  fresh deployment, as every version does (no proxy).
+
+**Residual:**
+1. The fee-to-quote check is off-chain. The TEE must verify `previewInfo.fee ≥ quote` and the
+   quoteHash before running. On-chain, only `minPreviewFee` is enforced.
+2. If a TEE run outlives `previewDeadline`, the seller can reclaim before the attach. The TEE is then
+   unpaid until the seller re-requests, which the seller must do to list at all, paying at least the
+   same fee. The TEE should attach immediately after signing, and should not start a run it cannot
+   finish before the deadline.
+3. The owner can redirect `previewFeeRecipient` before an attach. This is trusted-owner scope,
+   like the other roles.
+
 ## Results
 
-- `forge test`: 59 tests. All pass except the 4 fork tests, which are skipped without `BASE_RPC`.
-- `BASE_RPC=https://mainnet.base.org forge test --mc ForkUSDC`: 4 of 4 pass against real Base USDC.
-- `forge build --sizes`: EnvMarket runtime 22,056 B (2,520 B under EIP-170).
+- `forge test`: 75 tests (59 at the original review, then +16 for seller-paid previews). All pass
+  except the 5 fork tests, which are skipped without `BASE_RPC`.
+- `BASE_RPC=https://mainnet.base.org forge test --mc ForkUSDC`: 5 of 5 pass against real Base USDC.
+  This includes the 0.2 USDC preview fee test.
+- `forge build --sizes`: EnvMarket runtime 23,371 B (1,205 B under EIP-170). It was 22,056 B before the
+  preview functions.

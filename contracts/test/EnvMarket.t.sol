@@ -403,6 +403,7 @@ contract EnvMarketCoreTest is MarketBase {
     function testAttachReportSignatureBinding() public {
         vm.prank(seller);
         uint256 vid = market.createListing(_input(5, uint128(100 * U), uint128(100 * U)));
+        _requestPreview(seller, vid, PREVIEW_FEE);
         bytes memory byMallory = _sign(malloryPk, market.previewReportDigest(vid, BUNDLE, REPORT));
         bytes memory otherReport = _sign(runnerPk, market.previewReportDigest(vid, BUNDLE, keccak256("x")));
         bytes memory otherBundle = _sign(runnerPk, market.previewReportDigest(vid, keccak256("x"), REPORT));
@@ -432,6 +433,7 @@ contract EnvMarketCoreTest is MarketBase {
         market.setRunner(runner, false);
         vm.prank(seller);
         uint256 v2 = market.createListing(_input(5, uint128(100 * U), uint128(100 * U)));
+        _requestPreview(seller, v2, PREVIEW_FEE);
         bytes memory sig2 = _sign(runnerPk, market.previewReportDigest(v2, BUNDLE, REPORT));
         vm.expectRevert(S.BadSignature.selector);
         market.attachReport(v2, REPORT, sig2);

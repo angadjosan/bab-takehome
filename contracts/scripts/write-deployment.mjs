@@ -50,6 +50,12 @@ const names = [
   "nonRevealSlashBps", "commitWindow", "revealWindow", "verifierTimeout",
 ];
 const params = Object.fromEntries(names.map((n, i) => [n, Number(word(p, i))]));
+// seller-paid preview config (views via fallback): previewFeeRecipient() minPreviewFee() previewTimeout()
+const preview = {
+  feeRecipient: asAddr(await call(market, "0x96f6b06e")),
+  minFee: Number(word(await call(market, "0x2a6c20c1"), 0)),
+  timeout: Number(word(await call(market, "0x7cdae7d3"), 0)),
+};
 const symHex = await call(token, "0x95d89b41");
 const symLen = Number(word(symHex, 1));
 const tokenSymbol = Buffer.from(symHex.slice(2 + 128, 2 + 128 + symLen * 2), "hex").toString("utf8");
@@ -67,6 +73,7 @@ const out = {
   tokenDecimals,
   testToken: Boolean(addrOf("TestUSDC")),
   params,
+  preview,
   deployedAt: new Date().toISOString(),
   txs: receipts.map((r) => r.transactionHash),
 };

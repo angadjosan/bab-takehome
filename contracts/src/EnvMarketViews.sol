@@ -98,6 +98,41 @@ contract EnvMarketViews is EnvMarketStorage {
         return _quote(p, taskMask);
     }
 
+    // ------------------------------------------------------ seller-paid previews
+    /// @notice Preview payment record of a version. `paidAt == 0` = never requested. After a reclaim the
+    ///         record keeps the reclaimed fee (a new request must pay at least that much) until re-requested.
+    function previewInfo(uint256 versionId)
+        external
+        view
+        returns (uint256 fee, uint256 paidAt, bytes32 quoteHash, bool released, bool reclaimed)
+    {
+        Preview storage pv = _previews[versionId];
+        return (pv.fee, pv.paidAt, pv.quoteHash, pv.released, pv.reclaimed);
+    }
+
+    /// @notice Last second at which the seller may NOT yet reclaim (reclaim needs now > this); 0 if never paid.
+    function previewDeadline(uint256 versionId) external view returns (uint256) {
+        Preview storage pv = _previews[versionId];
+        return pv.paidAt == 0 ? 0 : uint256(pv.paidAt) + pv.timeout;
+    }
+
+    function previewFeeRecipient() external view returns (address) {
+        return _previewFeeRecipient;
+    }
+
+    function minPreviewFee() external view returns (uint256) {
+        return _minPreviewFee;
+    }
+
+    function previewTimeout() external view returns (uint256) {
+        return _previewTimeout;
+    }
+
+    /// @notice Accounting bucket: Σ preview fees held in escrow (requested, not yet released or reclaimed).
+    function totalPreviewFees() external view returns (uint256) {
+        return _totalPreviewFees;
+    }
+
     function qualifyingTxThreshold() external pure returns (uint256) {
         return QUALIFYING_TX_THRESHOLD;
     }

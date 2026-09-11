@@ -6,6 +6,11 @@ import {EnvMarketStorage} from "../src/EnvMarketStorage.sol";
 /// @notice Market-level parameter sets (amounts in 6-decimal token base units).
 ///         Per-listing price/collateral are seller inputs, not market params.
 library MarketParams {
+    /// Seller-paid preview config (outside Params; set with setMinPreviewFee / setPreviewTimeout).
+    uint128 internal constant DEMO_MIN_PREVIEW_FEE = 1e6; // 1 tUSDC (anvil)
+    uint128 internal constant MAINNET_MIN_PREVIEW_FEE = 50_000; // 0.05 USDC
+    uint32 internal constant PREVIEW_TIMEOUT = 3600; // seller may reclaim an unattached preview after 1 h
+
     /// Demo table in docs/BUILD_SPEC.md (local anvil / TestUSDC).
     function demo() internal pure returns (EnvMarketStorage.Params memory p) {
         p = _common();

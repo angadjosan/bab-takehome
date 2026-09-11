@@ -180,6 +180,7 @@ contract SecurityReviewTest is MarketBase {
         token.approve(address(other), type(uint256).max);
         other.depositCollateral(100 * U);
         uint256 vid2 = other.createListing(_input(5, uint128(100 * U), uint128(100 * U)));
+        other.requestPreview(vid2, 0, QUOTE);
         vm.stopPrank();
         bytes memory reportSigA = _sign(runnerPk, market.previewReportDigest(vid2, BUNDLE, REPORT));
         vm.expectRevert(S.BadSignature.selector);

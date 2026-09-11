@@ -42,8 +42,11 @@ owner (`setRunner/setRelay/setVerifier/approveJuror`), e.g. once the EigenComput
 address is known.
 
 `deployments/<chainId>.json`: `{chainId, market, token, views, startBlock, deployer, owner,
-tokenSymbol, tokenDecimals, testToken, params, deployedAt, txs}`. Params are read back from the
-chain (amounts in 6-decimal base units).
+tokenSymbol, tokenDecimals, testToken, params, preview, deployedAt, txs}`. Params are read back from the
+chain (amounts in 6-decimal base units). `preview = {feeRecipient, minFee, timeout}` is the
+seller-paid preview config: `PREVIEW_FEE_RECIPIENT` (default: first `RUNNER_ADDR`, else the
+deployer), `MIN_PREVIEW_FEE` (default 50000 = 0.05 USDC with mainnet params, 1 tUSDC with demo
+params), `PREVIEW_TIMEOUT` (default 3600 s).
 
 ## Things clients must know
 
@@ -58,5 +61,10 @@ chain (amounts in 6-decimal base units).
   of the round has committed.
 - **Signatures** are EIP-712, domain `EnvMarket`/`1`. `previewReportDigest`,
   `deliveryReceiptDigest` and `mechanicalFindingDigest` return the exact digest to sign.
+- **Sellers pay for previews.** `attachReport` reverts `PreviewNotPaid()` unless the version's seller
+  first called `requestPreview(versionId, fee, quoteHash)` (fee ≥ `minPreviewFee()`, pulled with
+  `transferFrom`, so approve first). Attaching releases the fee to `claimable(previewFeeRecipient())`.
+  If no report is attached by `previewDeadline(versionId)`, the seller may `reclaimPreviewFee`, then
+  request again, paying at least the reclaimed fee. `previewInfo(versionId) → (fee, paidAt, quoteHash, released, reclaimed)`.
 - **Accounting invariant** (tested after every scenario and under fuzzing):
-  `balanceOf(market) == totalEscrow + totalCollateral + totalBonds + totalJurorStake + treasury + reserve + totalClaimable`.
+  `balanceOf(market) == totalEscrow + totalCollateral + totalBonds + totalJurorStake + treasury + reserve + totalClaimable + totalPreviewFees`.

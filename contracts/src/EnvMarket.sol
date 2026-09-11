@@ -49,6 +49,10 @@ contract EnvMarket is EnvMarketStorage, EIP712, Ownable {
     );
     event VersionActiveSet(uint256 indexed versionId, bool active);
     event ReportAttached(uint256 indexed versionId, bytes32 reportHash, address indexed runner);
+    event PreviewConfigUpdated(address recipient, uint256 minFee, uint32 timeout);
+    event PreviewRequested(uint256 indexed versionId, address indexed seller, uint256 fee, bytes32 quoteHash);
+    event PreviewFeeReleased(uint256 indexed versionId, address indexed recipient, uint256 fee);
+    event PreviewFeeReclaimed(uint256 indexed versionId, address indexed seller, uint256 fee);
 
     event CollateralDeposited(address indexed seller, uint256 amount);
     event CollateralWithdrawn(address indexed seller, uint256 amount);
@@ -124,6 +128,7 @@ contract EnvMarket is EnvMarketStorage, EIP712, Ownable {
         token = token_;
         viewsModule = views_;
         _setParams(p);
+        _setPreviewConfig(initialOwner, 0, 3600);
     }
 
     // =================================================================== ADMIN
@@ -140,6 +145,29 @@ contract EnvMarket is EnvMarketStorage, EIP712, Ownable {
         ) revert InvalidParams();
         _params = p;
         emit ParamsUpdated(p);
+    }
+
+    /// @notice Where released preview fees are credited (the TEE operator's payout address).
+    function setPreviewFeeRecipient(address recipient) external onlyOwner {
+        _setPreviewConfig(recipient, _minPreviewFee, _previewTimeout);
+    }
+
+    /// @notice Minimum fee for FUTURE `requestPreview` calls (already-paid previews are unaffected).
+    function setMinPreviewFee(uint128 minFee) external onlyOwner {
+        _setPreviewConfig(_previewFeeRecipient, minFee, _previewTimeout);
+    }
+
+    /// @notice Reclaim delay for FUTURE `requestPreview` calls (each request snapshots its own).
+    function setPreviewTimeout(uint32 timeout) external onlyOwner {
+        _setPreviewConfig(_previewFeeRecipient, _minPreviewFee, timeout);
+    }
+
+    function _setPreviewConfig(address recipient, uint128 minFee, uint32 timeout) internal {
+        if (recipient == address(0) || timeout == 0) revert InvalidParams();
+        _previewFeeRecipient = recipient;
+        _minPreviewFee = minFee;
+        _previewTimeout = timeout;
+        emit PreviewConfigUpdated(recipient, minFee, timeout);
     }
 
     function setRunner(address a, bool allowed) external onlyOwner {
@@ -256,15 +284,69 @@ contract EnvMarket is EnvMarketStorage, EIP712, Ownable {
         emit VersionActiveSet(versionId, active);
     }
 
+    // ------------------------------------------------------ seller-paid previews
+    /// @notice Seller escrows the preview inference fee (reference-model episodes + validator, run by
+    ///         the TEE). Must precede `attachReport`. `quoteHash` = sha256 of the TEE's signed quote JSON;
+    ///         the TEE only runs once the on-chain fee is >= its quote.
+    function requestPreview(uint256 versionId, uint256 fee, bytes32 quoteHash) external {
+        VersionTerms storage t = _versions[versionId];
+        if (t.seller == address(0)) revert UnknownVersion();
+        if (t.seller != msg.sender) revert Unauthorized();
+        if (t.reportHash != 0) revert ReportAlreadyAttached();
+        Preview storage pv = _previews[versionId];
+        if (pv.paidAt != 0 && !pv.reclaimed) revert PreviewAlreadyPaid();
+        // Report signatures do not bind the fee, so after a reclaim the next request must pay at least
+        // the reclaimed fee: a seller cannot reclaim, re-request at the minimum and attach a report the
+        // TEE already produced for the higher quote.
+        uint256 minFee = _minPreviewFee;
+        if (pv.reclaimed && pv.fee > minFee) minFee = pv.fee;
+        if (fee < minFee) revert PreviewFeeTooLow(fee, minFee);
+        pv.fee = SafeCast.toUint128(fee);
+        pv.paidAt = uint64(block.timestamp);
+        pv.timeout = _previewTimeout;
+        pv.reclaimed = false;
+        pv.quoteHash = quoteHash;
+        _totalPreviewFees += fee;
+        if (fee != 0) token.safeTransferFrom(msg.sender, address(this), fee);
+        emit PreviewRequested(versionId, msg.sender, fee, quoteHash);
+    }
+
+    /// @notice Seller refund of an escrowed preview fee when no report was attached within the
+    ///         request's timeout. The version may `requestPreview` again afterwards.
+    function reclaimPreviewFee(uint256 versionId) external {
+        VersionTerms storage t = _versions[versionId];
+        if (t.seller == address(0)) revert UnknownVersion();
+        if (t.seller != msg.sender) revert Unauthorized();
+        if (t.reportHash != 0) revert ReportAlreadyAttached();
+        Preview storage pv = _previews[versionId];
+        if (pv.paidAt == 0 || pv.reclaimed) revert PreviewNotPaid();
+        if (block.timestamp <= uint256(pv.paidAt) + pv.timeout) revert DeadlineNotPassed();
+        pv.reclaimed = true;
+        uint256 fee = pv.fee;
+        _totalPreviewFees -= fee;
+        emit PreviewFeeReclaimed(versionId, msg.sender, fee);
+        _credit(msg.sender, fee);
+    }
+
+    /// @notice Anyone submits; sig by a runner; once per version; requires an outstanding paid preview,
+    ///         whose fee is released to `previewFeeRecipient`.
     function attachReport(uint256 versionId, bytes32 reportHash, bytes calldata runnerSig) external {
         VersionTerms storage t = _versions[versionId];
         if (t.seller == address(0)) revert UnknownVersion();
         if (t.reportHash != 0) revert ReportAlreadyAttached();
         if (reportHash == 0) revert ZeroValue();
+        Preview storage pv = _previews[versionId];
+        if (pv.paidAt == 0 || pv.reclaimed) revert PreviewNotPaid();
         address signer = _recover(previewReportDigest(versionId, t.bundleHash, reportHash), runnerSig);
         if (!isRunner[signer]) revert BadSignature();
         t.reportHash = reportHash;
+        pv.released = true;
+        uint256 fee = pv.fee;
+        _totalPreviewFees -= fee;
+        address recipient = _previewFeeRecipient;
         emit ReportAttached(versionId, reportHash, signer);
+        emit PreviewFeeReleased(versionId, recipient, fee);
+        _credit(recipient, fee);
     }
 
     // ============================================================= COLLATERAL

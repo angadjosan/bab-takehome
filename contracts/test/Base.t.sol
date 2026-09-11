@@ -34,6 +34,8 @@ abstract contract MarketBase is Test {
     bytes32 constant BUNDLE = keccak256("bundle");
     bytes32 constant CIPHER = keccak256("ciphertext");
     bytes32 constant REPORT = keccak256("report");
+    bytes32 constant QUOTE = keccak256("tee-quote");
+    uint256 constant PREVIEW_FEE = 1e6; // seller-paid preview inference fee used by _list
 
     function demoParams() internal pure returns (S.Params memory p) {
         p.challengeWindow = 300;
@@ -127,7 +129,15 @@ abstract contract MarketBase is Test {
         }
         vm.prank(s);
         vid = market.createListing(_input(taskCount, price, collateral));
+        _requestPreview(s, vid, PREVIEW_FEE);
         market.attachReport(vid, REPORT, _sign(runnerPk, market.previewReportDigest(vid, BUNDLE, REPORT)));
+    }
+
+    /// Seller pays the preview fee (minted to them first, so their net token balance is unchanged).
+    function _requestPreview(address s, uint256 vid, uint256 fee) internal {
+        _fund(s, fee);
+        vm.prank(s);
+        market.requestPreview(vid, fee, QUOTE);
     }
 
     function _listDefault() internal returns (uint256) {
@@ -204,8 +214,19 @@ abstract contract MarketBase is Test {
     function _checkConservation() internal view {
         uint256 bal = token.balanceOf(address(market));
         uint256 buckets = market.totalEscrow() + market.totalCollateral() + market.totalBonds()
-            + market.totalJurorStake() + market.treasury() + market.reserve() + market.totalClaimable();
+            + market.totalJurorStake() + market.treasury() + market.reserve() + market.totalClaimable()
+            + V.totalPreviewFees();
         assertEq(bal, buckets, "conservation: balance != buckets");
+
+        uint256 pf;
+        for (uint256 i = 1; i < market.nextVersionId(); ++i) {
+            (uint256 fee, uint256 paidAt,, bool released, bool reclaimed) = V.previewInfo(i);
+            assertFalse(released && reclaimed, "preview released and reclaimed");
+            if (paidAt != 0 && !released && !reclaimed) pf += fee;
+            // a report is attached iff its paid preview was released
+            assertEq(V.getVersion(i).reportHash != 0, released, "report <=> preview released");
+        }
+        assertEq(pf, V.totalPreviewFees(), "preview fees recompute");
 
         uint256 escrow;
         for (uint256 i = 1; i < market.nextPurchaseId(); ++i) {
@@ -242,6 +263,9 @@ abstract contract MarketBase is Test {
         for (uint256 i; i < jl.length; ++i) {
             cl += market.claimable(jl[i]);
         }
+        cl += market.claimable(address(this)); // owner = default preview fee recipient
+        address r = V.previewFeeRecipient();
+        if (r != address(this)) cl += market.claimable(r); // tests use a dedicated operator address
         assertEq(cl, market.totalClaimable(), "claimable recompute");
     }
 }

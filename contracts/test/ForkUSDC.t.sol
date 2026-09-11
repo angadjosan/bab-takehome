@@ -29,6 +29,9 @@ contract ForkUSDCTest is Test {
     IERC20 usdc = IERC20(USDC);
     address seller = makeAddr("fork-seller");
     address buyer = makeAddr("fork-buyer");
+    address operator = makeAddr("fork-tee-operator"); // preview fee recipient
+    uint256 constant PREVIEW_FEE = 200_000; // 0.2 USDC seller-paid preview inference
+    bytes32 constant QUOTE = keccak256("tee-quote");
     address signer;
     uint256 signerPk;
 
@@ -44,6 +47,8 @@ contract ForkUSDCTest is Test {
         market.setRunner(signer, true);
         market.setRelay(signer, true);
         market.setVerifier(signer, true);
+        market.setPreviewFeeRecipient(operator);
+        market.setMinPreviewFee(50_000); // mainnet default 0.05 USDC
         deal(USDC, seller, 10e6);
         deal(USDC, buyer, 10e6);
         vm.prank(seller);
@@ -62,19 +67,29 @@ contract ForkUSDCTest is Test {
         return abi.encodePacked(r, s, v);
     }
 
-    function _listBuyDeliver() internal returns (uint256 pid) {
+    function _listNoReport() internal returns (uint256 vid) {
         S.VersionInput memory v;
         v.bundleHash = BUNDLE;
         v.ciphertextHash = CIPHER;
         v.taskCount = 5;
         v.price = 500_000; // 0.5 USDC (5 USDC demo budget)
         v.collateral = 500_000; // >= caseFee 0.10 + 10% of price
-        vm.startPrank(seller);
-        market.depositCollateral(500_000);
-        uint256 vid = market.createListing(v);
-        vm.stopPrank();
+        vm.prank(seller);
+        vid = market.createListing(v);
+    }
+
+    function _attach(uint256 vid) internal {
         bytes32 rh = keccak256("report");
         market.attachReport(vid, rh, _sig(market.previewReportDigest(vid, BUNDLE, rh)));
+    }
+
+    function _listBuyDeliver() internal returns (uint256 pid) {
+        uint256 vid = _listNoReport();
+        vm.startPrank(seller);
+        market.depositCollateral(500_000);
+        market.requestPreview(vid, PREVIEW_FEE, QUOTE);
+        vm.stopPrank();
+        _attach(vid);
         vm.prank(buyer);
         pid = market.buy(vid, ENC, 500_000);
         bytes32 wk = keccak256("wk");
@@ -85,8 +100,40 @@ contract ForkUSDCTest is Test {
         assertEq(
             usdc.balanceOf(address(market)),
             market.totalEscrow() + market.totalCollateral() + market.totalBonds() + market.totalJurorStake()
-                + market.treasury() + market.reserve() + market.totalClaimable()
+                + market.treasury() + market.reserve() + market.totalClaimable() + V.totalPreviewFees()
         );
+    }
+
+    /// Seller-paid preview at the 0.5-USDC listing scale: 0.2 USDC fee escrowed, released to the TEE
+    /// operator on attachReport; a second version's fee is reclaimed after the timeout.
+    function testForkSellerPaysPreviewWithRealUsdc() public onlyFork {
+        uint256 vid = _listNoReport();
+        vm.prank(seller);
+        vm.expectRevert(abi.encodeWithSelector(S.PreviewFeeTooLow.selector, 40_000, 50_000));
+        market.requestPreview(vid, 40_000, QUOTE);
+        vm.prank(seller);
+        market.requestPreview(vid, PREVIEW_FEE, QUOTE);
+        assertEq(usdc.balanceOf(seller), 10e6 - PREVIEW_FEE);
+        assertEq(V.totalPreviewFees(), PREVIEW_FEE);
+        _conserved();
+        _attach(vid);
+        assertEq(market.claimable(operator), PREVIEW_FEE);
+        assertEq(V.totalPreviewFees(), 0);
+        vm.prank(operator);
+        market.withdraw();
+        assertEq(usdc.balanceOf(operator), PREVIEW_FEE);
+        _conserved();
+
+        uint256 vid2 = _listNoReport();
+        vm.prank(seller);
+        market.requestPreview(vid2, PREVIEW_FEE, QUOTE);
+        vm.warp(block.timestamp + 3601);
+        vm.prank(seller);
+        market.reclaimPreviewFee(vid2);
+        vm.prank(seller);
+        market.withdraw();
+        assertEq(usdc.balanceOf(seller), 10e6 - PREVIEW_FEE);
+        _conserved();
     }
 
     function testForkTokenIsRealUsdc() public onlyFork {
@@ -101,7 +148,8 @@ contract ForkUSDCTest is Test {
         assertEq(market.claimable(seller), 490_000); // 0.5 - 2%
         vm.prank(seller);
         market.withdraw();
-        assertEq(usdc.balanceOf(seller), 10e6 - 500_000 + 490_000);
+        assertEq(usdc.balanceOf(seller), 10e6 - PREVIEW_FEE - 500_000 + 490_000);
+        assertEq(market.claimable(operator), PREVIEW_FEE);
         _conserved();
     }
 

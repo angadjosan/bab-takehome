@@ -462,3 +462,36 @@ Chain watcher loop: on `Purchased` → build wrapper, wrap key, sign `DeliveryRe
   - **Local e2e:** it runs the forge Deploy script (as deploy.sh does) but writes `services/tee/.data-e2e/deployments/31337.json`, so parallel anvil runs are not clobbered. Anvil listens on :8555.
   - **Ports:** local dev defaults to :8787 (the agents' `TEE_URL` default); the image uses PORT=8080.
   - **Storage:** EigenCompute storage is ephemeral. Private records are encrypted under a key derived from the app's stable mnemonic, but a VM replacement loses them (re-upload needed). Sealed backup is future work.
+- **contracts: seller-paid previews (2026-09-10, founder requirement).** The seller pays on-chain for preview inference: the reference-model episodes and the validator, run by the EigenCompute TEE through Fireworks. Details and review: `contracts/SECURITY_REVIEW.md` (addendum, F-4).
+  - **Flow:**
+    1. The seller calls `GET /preview/quote/:versionId` on the TEE and gets a signed quote JSON. `quoteHash = sha256(quote JSON bytes)`.
+    2. The seller approves `fee` USDC, then calls `requestPreview(versionId, fee, quoteHash)`. The fee is escrowed.
+    3. The seller calls `POST /preview/:versionId`. The TEE reads `previewInfo(versionId)` and runs only if the preview is paid (`paidAt != 0`), not released, not reclaimed, has `fee ≥ quote`, and the quoteHash matches its quote.
+    4. `attachReport(versionId, reportHash, runnerSig)` keeps its signature and EIP-712 type. It now requires an outstanding paid preview (otherwise `PreviewNotPaid()`), and it moves the fee from escrow to `claimable(previewFeeRecipient)`.
+  - **New functions:**
+    - `requestPreview(uint256 versionId, uint256 fee, bytes32 quoteHash)`: version seller only.
+    - `reclaimPreviewFee(uint256 versionId)`: seller only. Allowed when no report is attached and `now > paidAt + timeout`. Credits the seller's `claimable`.
+    - Owner: `setPreviewFeeRecipient(address)`, `setMinPreviewFee(uint128)`, `setPreviewTimeout(uint32)`.
+    - Views (through the fallback):
+      - `previewInfo(uint256) → (uint256 fee, uint256 paidAt, bytes32 quoteHash, bool released, bool reclaimed)`
+      - `previewDeadline(uint256) → uint256`: reclaim needs `now >` this; 0 if never paid.
+      - `previewFeeRecipient()`, `minPreviewFee()`, `previewTimeout()`, `totalPreviewFees()`.
+  - **Events:**
+    - `PreviewRequested(uint256 indexed versionId, address indexed seller, uint256 fee, bytes32 quoteHash)`
+    - `PreviewFeeReleased(uint256 indexed versionId, address indexed recipient, uint256 fee)`, emitted by `attachReport` after `ReportAttached`
+    - `PreviewFeeReclaimed(uint256 indexed versionId, address indexed seller, uint256 fee)`
+    - `PreviewConfigUpdated(address recipient, uint256 minFee, uint32 timeout)`
+  - **Errors:** `PreviewNotPaid()`, `PreviewAlreadyPaid()`, `PreviewFeeTooLow(uint256 fee, uint256 minFee)`. The existing errors used are `Unauthorized`, `UnknownVersion`, `ReportAlreadyAttached` and `DeadlineNotPassed`.
+  - **Rules:**
+    - A paid `requestPreview` must always precede `attachReport`, even when `minPreviewFee == 0`. In that case fee 0 is allowed.
+    - One outstanding preview per version. A request after the report is attached reverts.
+    - The recipient is read at attach time.
+    - `previewTimeout` is snapshotted per request.
+    - An attach after the timeout is still valid until the seller reclaims.
+    - After a reclaim, the next request must pay at least the reclaimed fee. Report signatures do not bind the fee, so without this a seller could reclaim, re-request at the minimum, and attach a report the TEE already signed.
+    - Raising `minPreviewFee` does not affect previews that are already paid.
+    - The config lives outside `Params`. The constructor is unchanged; the defaults are recipient = initial owner, min 0, timeout 3600.
+  - **Invariant:** `balanceOf(market) == totalEscrow + totalCollateral + totalBonds + totalJurorStake + treasury + reserve + totalClaimable + totalPreviewFees`.
+  - **Deploy:** `PREVIEW_FEE_RECIPIENT` defaults to the first `RUNNER_ADDR`, else the deployer. `MIN_PREVIEW_FEE` defaults to 50000 (0.05 USDC) with mainnet params and 1e6 (1 tUSDC) with demo/anvil params. `PREVIEW_TIMEOUT` defaults to 3600. `deployments/<chainId>.json` gains `preview: {feeRecipient, minFee, timeout}`.
+  - **Off-chain callers must adapt:** anything that calls `attachReport` right after `createListing` now reverts `PreviewNotPaid()`. That covers the TEE `POST /preview/:id/attach`, the seller agent, and the local e2e scripts. The seller key must `requestPreview` first. The TEE should attach as soon as it signs, and should not start a run it cannot finish before `previewDeadline(versionId)`.
+  - **ABI change:** `packages/shared/src/abi/EnvMarket.json` gains the functions, events and errors above. No existing signature changed.

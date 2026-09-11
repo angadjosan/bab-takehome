@@ -164,6 +164,16 @@ abstract contract EnvMarketStorage {
         uint128 reserved;
     }
 
+    /// @dev Seller-paid preview (reference-model episodes + validator run by the TEE). One slot + quoteHash.
+    struct Preview {
+        uint128 fee; // escrowed until attachReport (→ previewFeeRecipient) or reclaimPreviewFee (→ seller)
+        uint64 paidAt; // 0 = never requested
+        uint32 timeout; // previewTimeout snapshotted at request; reclaim allowed once now > paidAt + timeout
+        bool released; // paid out to the fee recipient by attachReport
+        bool reclaimed; // refunded to the seller; the version may request again
+        bytes32 quoteHash; // sha256 of the TEE's signed quote JSON (off-chain)
+    }
+
     struct VersionStats {
         uint64 ratingSum;
         uint64 ratingCount;
@@ -219,7 +229,7 @@ abstract contract EnvMarketStorage {
     mapping(uint256 => VersionStats) internal _versionStats;
     mapping(address => SellerStats) internal _sellerStats;
 
-    // Accounting buckets (sum == token.balanceOf(this), see invariant tests)
+    // Accounting buckets (sum == token.balanceOf(this), see invariant tests; + _totalPreviewFees below)
     uint256 public totalEscrow; // prices of Funded/Delivered/Disputed purchases
     uint256 public totalCollateral; // Σ seller collateral totals
     uint256 public totalBonds; // Σ open dispute bonds
@@ -232,6 +242,13 @@ abstract contract EnvMarketStorage {
     ///         is credited here and withdrawn by its owner with `withdraw()`, so one blocked address
     ///         (e.g. a USDC-blacklisted recipient) can never brick settlement for anybody else.
     mapping(address => uint256) public claimable;
+
+    // Seller-paid previews (appended after the original layout; getters live in EnvMarketViews)
+    mapping(uint256 => Preview) internal _previews;
+    address internal _previewFeeRecipient; // TEE operator payout address (default: initial owner)
+    uint128 internal _minPreviewFee; // default 0
+    uint32 internal _previewTimeout; // default 3600 s
+    uint256 internal _totalPreviewFees; // accounting bucket: Σ escrowed (unreleased, unreclaimed) preview fees
 
     // ----------------------------------------------------------------- errors
     error Unauthorized();
@@ -271,5 +288,8 @@ abstract contract EnvMarketStorage {
     error JurorNotApproved();
     error TooManyJurors();
     error ZeroValue();
+    error PreviewNotPaid();
+    error PreviewAlreadyPaid();
+    error PreviewFeeTooLow(uint256 fee, uint256 minFee);
 
 }

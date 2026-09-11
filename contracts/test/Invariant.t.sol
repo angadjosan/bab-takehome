@@ -15,16 +15,23 @@ import {EnvMarketViews} from "../src/EnvMarketViews.sol";
 contract Handler is CommonBase, StdCheats, StdUtils {
     bytes32 constant ENC = keccak256("enc");
     bytes32 constant CIPHER = keccak256("ciphertext");
+    bytes32 constant BUNDLE = keccak256("bundle");
 
     EnvMarket market;
     EnvMarketViews V;
     TestUSDC token;
     uint256 relayPk;
     uint256 verifierPk;
+    uint256 public runnerPk;
     address[] sellers;
     address[] buyers;
     address[] jurors;
     uint256[] vids;
+    uint256[] pvids; // versions created by previewNew (seller-paid preview flow)
+
+    uint256 public previewsRequested;
+    uint256 public previewsAttached;
+    uint256 public previewsReclaimed;
 
     uint256 public calls;
     uint256 public bought;
@@ -53,6 +60,75 @@ contract Handler is CommonBase, StdCheats, StdUtils {
         buyers = buyers_;
         jurors = jurors_;
         vids = vids_;
+    }
+
+    function setRunnerPk(uint256 pk) external {
+        runnerPk = pk;
+    }
+
+    // ------------------------------------------------------ seller-paid previews
+    function previewNew(uint256 sSeed, uint256 fee) external {
+        calls++;
+        address s = sellers[sSeed % sellers.length];
+        S.VersionInput memory v;
+        v.bundleHash = BUNDLE;
+        v.ciphertextHash = CIPHER;
+        v.taskCount = 5;
+        v.price = 10e6;
+        v.collateral = 10e6; // >= caseFee 6 + 10% of price
+        vm.prank(s);
+        uint256 vid = market.createListing(v);
+        fee = bound(fee, 0, 5e6); // minPreviewFee is 0 here, so zero-fee requests are exercised too
+        _pay(s, fee);
+        vm.prank(s);
+        market.requestPreview(vid, fee, bytes32(fee));
+        pvids.push(vid);
+        previewsRequested++;
+    }
+
+    /// A version in `pvids` with an outstanding (paid, unreleased, unreclaimed) preview, or 0.
+    function _pendingPreview(uint256 seed, bool wantReclaimed) internal view returns (uint256) {
+        uint256 n = pvids.length;
+        if (n == 0) return 0;
+        uint256 start = seed % n;
+        for (uint256 i; i < n; ++i) {
+            uint256 vid = pvids[(start + i) % n];
+            (, uint256 paidAt,, bool released, bool reclaimed) = V.previewInfo(vid);
+            if (paidAt != 0 && !released && reclaimed == wantReclaimed) return vid;
+        }
+        return 0;
+    }
+
+    function previewAttach(uint256 seed) external {
+        calls++;
+        uint256 vid = _pendingPreview(seed, false);
+        if (vid == 0) return;
+        bytes32 rh = keccak256(abi.encode("report", vid));
+        market.attachReport(vid, rh, _sig(runnerPk, market.previewReportDigest(vid, BUNDLE, rh)));
+        vids.push(vid); // now buyable
+        previewsAttached++;
+    }
+
+    function previewReclaim(uint256 seed) external {
+        calls++;
+        uint256 vid = _pendingPreview(seed, false);
+        if (vid == 0 || block.timestamp <= V.previewDeadline(vid)) return;
+        vm.prank(V.getVersion(vid).seller);
+        market.reclaimPreviewFee(vid);
+        previewsReclaimed++;
+    }
+
+    function previewReRequest(uint256 seed, uint256 extra) external {
+        calls++;
+        uint256 vid = _pendingPreview(seed, true);
+        if (vid == 0) return;
+        (uint256 old,,,,) = V.previewInfo(vid);
+        uint256 fee = old + bound(extra, 0, 1e6); // must pay at least the reclaimed fee
+        address s = V.getVersion(vid).seller;
+        _pay(s, fee);
+        vm.prank(s);
+        market.requestPreview(vid, fee, bytes32(fee));
+        previewsRequested++;
     }
 
     function _sig(uint256 pk, bytes32 digest) internal pure returns (bytes memory) {
@@ -292,9 +368,16 @@ contract InvariantTest is MarketBase {
         bs[0] = buyer;
         bs[1] = buyer2;
         h = new Handler(market, token, relayPk, verifierPk, ss, bs, jurors, vids);
+        h.setRunnerPk(runnerPk);
+        market.setPreviewTimeout(300); // reachable within one or two warp() calls
+        market.setPreviewFeeRecipient(makeAddr("tee-operator"));
         token.transferOwnership(address(h));
         targetContract(address(h));
-        bytes4[] memory sel = new bytes4[](14);
+        bytes4[] memory sel = new bytes4[](18);
+        sel[14] = Handler.previewNew.selector;
+        sel[15] = Handler.previewAttach.selector;
+        sel[16] = Handler.previewReclaim.selector;
+        sel[17] = Handler.previewReRequest.selector;
         sel[0] = Handler.buy.selector;
         sel[1] = Handler.deliver.selector;
         sel[2] = Handler.warp.selector;
@@ -323,6 +406,32 @@ contract InvariantTest is MarketBase {
         console2.log("finalized", h.settled());
         console2.log("mech opened/resolved", h.mechOpened(), h.mechResolved());
         console2.log("jury cases resolved", h.juryResolved());
+        console2.log("previews requested/attached", h.previewsRequested(), h.previewsAttached());
+        console2.log("previews reclaimed", h.previewsReclaimed());
+    }
+
+    /// Deterministic walk through the preview handler paths.
+    function test_handlerPreviewSmoke() public {
+        h.previewNew(0, 3e6); // vid 4
+        h.previewNew(1, 2e6); // vid 5
+        assertEq(h.previewsRequested(), 2);
+        _checkConservation();
+        h.previewAttach(0);
+        assertEq(h.previewsAttached(), 1);
+        h.previewReclaim(0); // too early: no-op
+        assertEq(h.previewsReclaimed(), 0);
+        h.warp(400);
+        h.warp(400);
+        h.previewReclaim(0);
+        assertEq(h.previewsReclaimed(), 1);
+        _checkConservation();
+        h.previewReRequest(0, 5e5);
+        assertEq(h.previewsRequested(), 3);
+        h.previewAttach(0);
+        assertEq(h.previewsAttached(), 2);
+        h.buy(3, 0); // vids[3] = first attached preview version
+        assertEq(h.bought(), 1);
+        _checkConservation();
     }
 
     /// Deterministic walk through every handler path, proving none of them silently no-ops.
