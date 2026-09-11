@@ -93,6 +93,24 @@ export type ModelResult = {
 };
 export type JobStatus = "scheduled" | "running" | "succeeded" | "failed" | "infra_failure" | "superseded" | "cancelled";
 
+type Screening = { passed: boolean; reasons: string[] };
+/** envmarket.validator.v1: one screened explanation. */
+export type ValidatorV1 = { model: string; promptVersion: string; promptHash: Hex; explanation: string; screening: Screening };
+export type ClaimVerdict = "supported" | "contradicted" | "unverifiable";
+/** envmarket.validator.v2: a verdict per seller claim; basis/notes are screened free text ("" when blanked). */
+export type ValidatorV2 = {
+  model: string;
+  promptVersion: "envmarket.validator.v2";
+  promptHash: Hex;
+  claims: { id: string; verdict: ClaimVerdict; basis: string }[];
+  overall: "matches_description" | "partly_matches" | "does_not_match" | null;
+  skills: string[];
+  quality: "high" | "medium" | "low" | null;
+  notes: string;
+  screening: Screening;
+};
+export const isValidatorV2 = (v: ValidatorV1 | ValidatorV2): v is ValidatorV2 => v.promptVersion === "envmarket.validator.v2";
+
 /** envmarket.report.v1 exactly as packages/shared reportSchema defines it (strict: no extra keys). */
 export type PreviewReport = {
   type: "envmarket.report.v1";
@@ -115,7 +133,7 @@ export type PreviewReport = {
   };
   models: ModelResult[];
   uncertainty: string;
-  validator: { model: string; promptVersion: string; promptHash: Hex; explanation: string; screening: { passed: boolean; reasons: string[] } };
+  validator: ValidatorV1 | ValidatorV2;
   jobs: { jobId: string; startedAt: string; finishedAt: string | null; status: JobStatus }[];
   runtime: { imageDigest: Hex; sandbox: string; network: "none" };
   attestation: { kind: "eigencompute-tdx" | "phala-dstack-tdx" | "none-local-dev"; appId: string | null; signer: Address; quoteDigest: string | null; verifyUrl: string | null };
@@ -138,6 +156,7 @@ const KEYS: Record<string, string[]> = {
   model: ["requested", "resolved", "provider", "status", "purchased", "audit", "infraFailures"],
   outcome: ["attempted", "solved", "pass1Rounded"],
   validator: ["model", "promptVersion", "promptHash", "explanation", "screening"],
+  validatorV2: ["model", "promptVersion", "promptHash", "claims", "overall", "skills", "quality", "notes", "screening"],
   job: ["jobId", "startedAt", "finishedAt", "status"],
   runtime: ["imageDigest", "sandbox", "network"],
   attestation: ["kind", "appId", "signer", "quoteDigest", "verifyUrl"],
@@ -203,11 +222,28 @@ export function checkReportSchema(r: unknown): string[] {
         if (o.pass1Rounded !== expectedPass1(o.solved, o.attempted)) out.push(`models[${i}].${part}.pass1Rounded ${o.pass1Rounded} ≠ rounded ${o.solved}/${o.attempted}`);
       }
     });
-  if (obj(x.validator, "validator", KEYS.validator)) {
-    if (typeof x.validator.explanation !== "string") out.push("validator.explanation is not a string");
+  const v2 = !!x.validator && typeof x.validator === "object" && (x.validator as { promptVersion?: unknown }).promptVersion === "envmarket.validator.v2";
+  if (v2 && obj(x.validator, "validator", KEYS.validatorV2)) {
+    const v = x.validator as ValidatorV2;
+    const within = (s: unknown, w: number, b: number) => typeof s === "string" && (s.trim() ? s.trim().split(/\s+/).length : 0) <= w && utf8(s).length <= b;
+    if (!Array.isArray(v.claims) || v.claims.length > 99) out.push("validator.claims is not a list of at most 99");
+    else
+      v.claims.forEach((c, i) => {
+        if (!obj(c, `validator.claims[${i}]`, ["id", "verdict", "basis"])) return;
+        if (!/^C[1-9][0-9]?$/.test(String(c.id))) out.push(`validator.claims[${i}].id is not a claim id`);
+        if (!["supported", "contradicted", "unverifiable"].includes(c.verdict)) out.push(`validator.claims[${i}].verdict is ${String(c.verdict)}`);
+        if (!within(c.basis, 12, 160)) out.push(`validator.claims[${i}].basis is over 12 words / 160 bytes`);
+      });
+    if (v.overall !== null && !["matches_description", "partly_matches", "does_not_match"].includes(v.overall)) out.push(`validator.overall is ${String(v.overall)}`);
+    if (v.quality !== null && !["high", "medium", "low"].includes(v.quality)) out.push(`validator.quality is ${String(v.quality)}`);
+    if (!Array.isArray(v.skills) || v.skills.length > 5) out.push("validator.skills is not a list of at most 5");
+    if (!within(v.notes, 40, 400)) out.push("validator.notes is over 40 words / 400 bytes");
+  } else if (!v2 && obj(x.validator, "validator", KEYS.validator)) {
+    const v = x.validator as ValidatorV1;
+    if (typeof v.explanation !== "string") out.push("validator.explanation is not a string");
     else {
-      const words = x.validator.explanation.trim() ? x.validator.explanation.trim().split(/\s+/).length : 0;
-      if (words > EXPLANATION_MAX_WORDS || utf8(x.validator.explanation).length > EXPLANATION_MAX_BYTES) out.push("validator.explanation is over the report schema's length limit");
+      const words = v.explanation.trim() ? v.explanation.trim().split(/\s+/).length : 0;
+      if (words > EXPLANATION_MAX_WORDS || utf8(v.explanation).length > EXPLANATION_MAX_BYTES) out.push("validator.explanation is over the report schema's length limit");
     }
   }
   if (!Array.isArray(x.jobs)) out.push("jobs is not an array");

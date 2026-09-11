@@ -6,7 +6,7 @@ import { eqHash } from "@/lib/crypto";
 import { isZeroHash, type Version } from "@/lib/market";
 import { fmtTime, fmtUsdc } from "@/lib/format";
 import { modelName, REFERENCE_MODELS_NOTE } from "@/lib/models";
-import type { Outcome } from "@/lib/tee";
+import { isValidatorV2, type Outcome, type ValidatorV2 } from "@/lib/tee";
 import { PhalaVerification } from "./phala-attestation";
 import { AddressLink, Chip, cx, DetailSection, HashValue, IconExternal, Notice, Skeleton, Spinner, TxLink, Verified } from "./ui";
 
@@ -137,12 +137,42 @@ export function ReportScores({ v }: { v: Version }) {
         <h2 id="note-title" className="text-base font-semibold text-ink">
           Reviewer’s note
         </h2>
-        {r.validator.explanation ? (
+        {isValidatorV2(r.validator) ? (
+          <ClaimChecks v={r.validator} />
+        ) : r.validator.explanation ? (
           <blockquote className="border-l-2 border-line-strong pl-4 text-[15px] leading-relaxed text-ink">{r.validator.explanation}</blockquote>
         ) : (
           <p className="text-[13px] text-muted">{screening.passed ? "The reviewer left no note." : "The reviewer’s note was withheld because it could have revealed task content."}</p>
         )}
       </section>
+    </div>
+  );
+}
+
+const VERDICT_TONE = { contradicted: "bad", unverifiable: "neutral", supported: "ok" } as const;
+const VERDICT_ORDER = { contradicted: 0, unverifiable: 1, supported: 2 } as const;
+
+/** envmarket.validator.v2: the seller's claims checked one by one (contradicted first); no task content. */
+function ClaimChecks({ v }: { v: ValidatorV2 }) {
+  if (v.overall === null) return <p className="text-[13px] text-muted">No claim check is available: the reviewer produced no usable result.</p>;
+  const count = (k: keyof typeof VERDICT_ORDER) => v.claims.filter((c) => c.verdict === k).length;
+  const claims = [...v.claims].sort((a, b) => VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict]);
+  const blanked = (id: string) => v.screening.reasons.some((x) => x.startsWith(`${id} basis blanked`));
+  return (
+    <div className="space-y-3">
+      <p className="text-[15px] leading-relaxed text-ink">
+        Checked against the seller’s claims: {count("supported")} supported · {count("contradicted")} contradicted · {count("unverifiable")} unverifiable
+      </p>
+      <ul className="divide-y divide-line border-y border-line">
+        {claims.map((c) => (
+          <li key={c.id} className="flex items-baseline gap-2 py-1.5 text-[13px]">
+            <Chip tone={VERDICT_TONE[c.verdict]}>{c.verdict}</Chip>
+            <span className="w-8 shrink-0 font-mono text-xs text-muted">{c.id}</span>
+            {c.basis ? <span className="text-ink">{c.basis}</span> : <span className="text-faint">{blanked(c.id) ? "reason withheld by screening" : "—"}</span>}
+          </li>
+        ))}
+      </ul>
+      {v.notes && <p className="text-[13px] leading-relaxed text-muted">{v.notes}</p>}
     </div>
   );
 }
