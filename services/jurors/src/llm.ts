@@ -37,12 +37,36 @@ export const DEFAULT_FAMILIES: Record<number, string[]> = {
   2: ['llama'],
   3: ['gpt-oss'],
 };
-/** Local Ollama defaults (models commonly pulled for local dev). */
-export const DEFAULT_LOCAL_MODELS: Record<number, string> = {
-  1: 'gpt-oss:20b',
-  2: 'gemma4:latest',
-  3: 'gpt-oss:20b',
+/**
+ * Local Ollama preferences per juror (first installed model that answers a probe wins). Local
+ * installs rarely have three families, so local runs record reduced model diversity.
+ */
+export const LOCAL_PREFERENCES: Record<number, string[]> = {
+  1: ['gpt-oss:20b', 'gemma4:latest'],
+  2: ['gemma4:latest', 'gpt-oss:20b'],
+  3: ['gpt-oss:20b', 'gemma4:latest'],
 };
+
+/** First model in `prefs` (then any installed non-cloud model) that completes a 1-token probe. */
+export async function pickWorkingLocalModel(client: LlmClient, prefs: string[]): Promise<string> {
+  let installed: string[] = [];
+  try {
+    installed = (await client.listModels()).map((m) => m.id);
+  } catch {
+    /* fall through to probing the preferences directly */
+  }
+  const candidates = [...prefs.filter((m) => !installed.length || installed.includes(m)), ...installed.filter((m) => !prefs.includes(m) && !/cloud/i.test(m))];
+  const failures: string[] = [];
+  for (const model of candidates) {
+    try {
+      await client.chat({ model, messages: [{ role: 'user', content: 'Reply with OK.' }], maxTokens: 16, timeoutMs: 120_000 });
+      return model;
+    } catch (e) {
+      failures.push(`${model}: ${(e as Error).message.slice(0, 120)}`);
+    }
+  }
+  throw new Error(`no working local model (${failures.join('; ') || 'none installed'}); set JUROR{n}_MODEL or FIREWORKS_API_KEY`);
+}
 /** Never used for jurors: non-chat variants and the reference-panel families. */
 export const JUROR_MODEL_EXCLUDE = /(guard|vision|embed|rerank|whisper|audio|image|tts|ocr|flux|-vl(-|$)|glm|kimi|qwen)/i;
 
@@ -84,8 +108,8 @@ export async function resolveJurorLlm(index: number, env: Env, opts: { models?: 
     return { ...p, requested: `env:${explicitKey}`, model, client: client.with({ model }) };
   }
   if (p.kind === 'ollama-local') {
-    const model = DEFAULT_LOCAL_MODELS[index] ?? DEFAULT_LOCAL_MODELS[1]!;
-    return { ...p, requested: 'local-default', model, client: client.with({ model }) };
+    const model = await pickWorkingLocalModel(client, LOCAL_PREFERENCES[index] ?? LOCAL_PREFERENCES[1]!);
+    return { ...p, requested: `local-default:${(LOCAL_PREFERENCES[index] ?? []).join('|')}`, model, client: client.with({ model }) };
   }
   const families = familiesFor(index, env);
   const models = opts.models ?? (await client.listModels());

@@ -167,7 +167,7 @@ export interface ScreenResult {
 
 const CODE_PATTERNS: Array<[RegExp, string]> = [
   [/`/, 'backticks'],
-  [/[{}<>;]|\[\s*\]|==|!=|=>|->|::|&&|\|\|/, 'code-like punctuation'],
+  [/[{}<>]|;\s*$|\[\s*\]|==|!=|=>|->|::|&&|\|\|/m, 'code-like punctuation'],
   [/\b(def|lambda|fn|func)\s+\w+/, 'function definition'],
   [/\b\w+\s*\([^)]*\)\s*[:{]/, 'call or signature'],
   [/\b[\w$]+\.[a-zA-Z_]\w*\s*\(/, 'method call'],
