@@ -40,9 +40,12 @@ demo path.
   juror3 `accounts/fireworks/models/glm-5p2`.
 - Env names: `BASE_RPC=https://mainnet.base.org`, `CHAIN_ID=8453`. Local tests: anvil 31337.
 
-Mainnet params (override the demo table below on 8453): price 2 USDC, collateral 2 USDC per sale,
-bondFloor 0.25, bondCap 2, caseFee 0.30, participationFee 0.05, jurorStake 1 USDC, other bps/
-windows unchanged (challenge 300 s, delivery 600 s, commit/reveal 180 s each).
+Mainnet params (override the demo table below on 8453) — sized for a 5 USDC total demo budget
+(founder funded 5 USDC): listing price 0.5 USDC, collateral 0.5 USDC per sale, bondFloor 0.05,
+bondCap 0.5, caseFee 0.10, participationFee 0.02, jurorStake 0.25 USDC, other bps/windows
+unchanged (challenge 300 s, delivery 600 s, commit/reveal 180 s each). Demo funding plan from the
+DEPLOYER's 5 USDC: seller 1.0 (collateral for 2 concurrent sales), buyer 0.7, buyer2 0.6, jurors
+0.3 each (0.9), spare ~1.8.
 
 ## Repo layout
 
