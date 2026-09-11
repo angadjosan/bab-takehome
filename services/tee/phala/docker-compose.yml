@@ -1,0 +1,36 @@
+# EnvMarket TEE service on Phala Cloud (dstack CVM, Intel TDX). Deployed by services/tee/scripts/phala-deploy.sh.
+#
+# This file is PUBLIC and ATTESTED: dstack hashes the app-compose that embeds it (compose_hash, the
+# RTMR3 "compose-hash" event), so the image digest below pins the exact code the quote covers.
+# phala-deploy.sh rewrites the image line after each push; commit the result (that commit is the
+# "published compose" verifiers compare against).
+#
+# ${VAR} values come from the SEALED env file (`phala deploy -e <file>`), encrypted client-side to the
+# CVM's KMS key and decrypted only inside the TDX guest. Never put secrets in plain values here.
+services:
+  tee:
+    image: docker.io/angadsinghjosan/envmarket-tee@sha256:8afca4d86d41115a8d34cfbb2cc5faff72e034533fcd27530f7b7ca35f587ad4
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # dstack guest agent: GetKey (signer), GetQuote (attestation), Info (app id, compose hash)
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      # service data (blobs, encrypted private records, preview cache); CVM disk is encrypted by dstack
+      - tee-data:/data
+    # The in-TEE sandbox uses `unshare --net --pid` for seller code (plus the seccomp launcher).
+    # Docker's default seccomp profile and capability set block unshare; the trust boundary is the CVM.
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      TEE_VENDOR: phala
+      CHAIN_ID: ${CHAIN_ID}
+      BASE_SEPOLIA_RPC: ${BASE_SEPOLIA_RPC}
+      MARKET_ADDRESS: ${MARKET_ADDRESS}
+      START_BLOCK: ${START_BLOCK}
+      FIREWORKS_API_KEY: ${FIREWORKS_API_KEY}
+      PUBLIC_URL: ${PUBLIC_URL}
+volumes:
+  tee-data:
