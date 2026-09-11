@@ -88,10 +88,15 @@ function eventDigest(e: EventLogEntry): string {
   return sha("sha384", Buffer.concat([t, Buffer.from(":"), Buffer.from(e.event, "utf8"), Buffer.from(":"), Buffer.from(e.event_payload, "hex")])).toString("hex");
 }
 
+/**
+ * Replay an RTMR. dstack 0.5.9 serves RTMR3 events with an EMPTY digest field; the verifier must
+ * recompute each digest from (event_type, event, payload), which binds the payloads (app-id,
+ * compose-hash, os-image-hash, ...) to the quote. A digest that is present must match the recomputed one.
+ */
 function replayRtmr(events: EventLogEntry[]): string {
   let mr = Buffer.alloc(48);
   for (const e of events) {
-    let d = Buffer.from(hex(e.digest), "hex");
+    let d = Buffer.from(e.digest ? hex(e.digest) : eventDigest(e), "hex");
     if (d.length < 48) d = Buffer.concat([d, Buffer.alloc(48 - d.length)]);
     mr = sha("sha384", Buffer.concat([mr, d]));
   }
@@ -177,7 +182,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   // 4: RTMR3 replay, app-id and compose-hash events
   const events: EventLogEntry[] = Array.isArray(att.eventLog) ? (att.eventLog as EventLogEntry[]) : [];
   const r3 = events.filter((e) => e.imr === 3);
-  const badDigest = r3.find((e) => eventDigest(e) !== hex(e.digest));
+  const badDigest = r3.find((e) => !!e.digest && eventDigest(e) !== hex(e.digest));
   const quoteRtmr3 = slice(quote, RTMR3_OFF, 48);
   const replay = replayRtmr(r3);
   add(
