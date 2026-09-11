@@ -10,7 +10,7 @@
  *                     ("envmarket.keywrap.v1" also accepted)
  *   wrappedAuditKey   same, same salt (sha256 of the audit ciphertext also accepted)
  *   encryptedSalts    EMENC1(K_audit, salts.json)  — or EMENC1(K_salts) with `wrappedSaltsKey`
- *   wrappedSaltsKey?  optional EMKW1 of K_salts (same salt/info rules)
+ *   wrappedSaltsKey?  optional EMKW2 of K_salts (same aad/info rules)
  *   publicDocs        { "description.json", "manifest.json", "description.md"?, "license"? } (utf8 text or {base64})
  *   claims?           { bundleHash, taskRoot, auditRoot, taskCount, auditTaskCount, environmentVersion,
  *                       descriptionHash, manifestHash, licenseHash, imageDigest } — every given field is checked

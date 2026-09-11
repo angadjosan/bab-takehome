@@ -8,7 +8,7 @@
  *
  * Source keys: MNEMONIC (if set) else RUNNER_PK from the repo .env — i.e. the same key material
  * the source service used for its encrypted store. Each entry is written as <out>/<key>.json
- * (EMENC1 + EMKW1 to the recipient's X25519 key). With --post (requires --to-url) each file is
+ * (EMENC1 + EMKW2/HPKE to the recipient's X25519 key). With --post (requires --to-url) each file is
  * POSTed to <url>/preview-cache/import. The recipient accepts only entries signed by itself or by
  * an address in its PREVIEW_CACHE_TRUSTED_SIGNERS; rebuilt reports carry `cachedFrom` and keep the
  * original run's attestation kind (a local-dev run stays labeled none-local-dev).

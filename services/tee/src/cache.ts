@@ -9,7 +9,7 @@
  * (unrounded per-episode outcomes, final workspaces for deterministic re-grading).
  *
  * Portability: an entry is signed (EIP-191 over its sha256) by the runner that produced it and can
- * be exported SEALED to another service's X25519 key (EMENC1 + EMKW1, HKDF info
+ * be exported SEALED to another service's X25519 key (EMENC1 + EMKW2/HPKE, info
  * "envmarket.cache-export.v1", salt = sha256(ciphertext)). The importer only accepts entries
  * signed by itself or by PREVIEW_CACHE_TRUSTED_SIGNERS. A report rebuilt from an entry keeps the
  * original run's jobs/dates and records `cachedFrom`; if the original run was not attested
@@ -135,7 +135,7 @@ export interface SealedCacheExport {
   producer: string;
   recipientEncPubKey: Hex;
   ciphertext: string; // base64 EMENC1(K, canonical entry JSON)
-  wrappedKey: string; // base64 EMKW1(K) to recipientEncPubKey, salt = sha256(ciphertext)
+  wrappedKey: string; // base64 EMKW2(K) to recipientEncPubKey, aad = sha256(ciphertext)
   exportedAt: string;
 }
 

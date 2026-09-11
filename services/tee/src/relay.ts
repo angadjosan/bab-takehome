@@ -25,7 +25,7 @@ export interface DeliveryRecord {
   buyerEncPubKey: Hex;
   wrapperJson: string;
   wrapperHash: Hex;
-  wrappedKey: string; // base64 EMKW1
+  wrappedKey: string; // base64 EMKW2 (HPKE, aad = wrapperHash)
   wrappedKeyHash: Hex;
   ciphertextHash: Hex;
   bundleHash: Hex;
