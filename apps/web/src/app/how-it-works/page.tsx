@@ -30,8 +30,9 @@ export default function HowItWorks() {
             and collateral. The encrypted bundle goes to the TEE service.
           </Flow>
           <Flow n={2} t="TEE preview">
-            Inside the TEE, the runner checks the bundle against its commitments, runs the reference panel (requested: GLM 5.3, Kimi K3, Qwen 3.8, resolved to the exact model IDs served) for one episode
-            per task with the network off, and a separate validator model writes a short screened explanation. The report is signed with EIP-712 and its hash attached on-chain.
+            Inside the TEE, the runner checks the bundle against its commitments, runs the reference panel (GLM 5.3, Kimi K3 and Qwen 3.8, pinned to the Fireworks model IDs glm-5p3, kimi-k3 and
+            qwen3p8-max and recorded exactly in the report) for one episode per task with the sandbox network off. A validator from a different model family
+            (deepseek-v4-pro) writes a short screened explanation. The report is signed with EIP-712 and its hash attached on-chain.
           </Flow>
           <Flow n={3} t="Buyer pays into escrow">
             The price is locked in the contract and the seller’s collateral is reserved. The buyer supplies an X25519 encryption public key.

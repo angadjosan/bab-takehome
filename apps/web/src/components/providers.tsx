@@ -23,6 +23,8 @@ const metaAbi = parseAbi([
   "function faucetAvailableAt(address) view returns (uint256)",
 ]);
 
+const tokenGetterAbi = parseAbi(["function token() view returns (address)"]);
+
 const TokenCtx = createContext(0);
 
 /** Token metadata as read from the payment-token contract (re-renders consumers when loaded). */
@@ -43,6 +45,17 @@ function TokenMeta({ children }: { children: ReactNode }) {
     if (!deployment) return;
     let cancelled = false;
     (async () => {
+      // The market's own token() is authoritative; the deployment file is only a first guess.
+      let tokenChanged = false;
+      try {
+        const onchain = (await publicClient.readContract({ address: deployment!.market, abi: tokenGetterAbi, functionName: "token" })) as `0x${string}`;
+        if (onchain && onchain.toLowerCase() !== deployment!.token.toLowerCase()) {
+          deployment!.token = onchain;
+          tokenChanged = true;
+        }
+      } catch {
+        /* market unreachable; keep the deployment file's value */
+      }
       const r = (fn: "symbol" | "decimals" | "name") =>
         publicClient.readContract({ address: deployment!.token, abi: metaAbi, functionName: fn }).catch(() => undefined);
       const [symbol, decimals, name] = await Promise.all([r("symbol"), r("decimals"), r("name")]);
@@ -59,7 +72,7 @@ function TokenMeta({ children }: { children: ReactNode }) {
         decimals: decimals === undefined ? tokenMeta.decimals : Number(decimals),
         name: typeof name === "string" ? name : "",
       };
-      const changed = next.symbol !== tokenMeta.symbol || next.decimals !== tokenMeta.decimals;
+      const changed = tokenChanged || next.symbol !== tokenMeta.symbol || next.decimals !== tokenMeta.decimals;
       setTokenMeta({ ...next, hasFaucet, loaded: true });
       if (changed) setRemount((x) => x + 1);
       setVer((x) => x + 1);

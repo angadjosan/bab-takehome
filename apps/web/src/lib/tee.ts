@@ -1,5 +1,5 @@
 import type { Hex } from "viem";
-import { TEE_URL } from "./config";
+import { CHAIN_ID, TEE_URL } from "./config";
 import { base64ToBytes, canonicalJson, sha256Hex, utf8 } from "./crypto";
 
 /** Client for the TEE service HTTP API (docs/BUILD_SPEC.md "TEE service HTTP API"). */
@@ -154,6 +154,39 @@ export async function getDelivery(purchaseId: bigint | number): Promise<Delivery
     wrappedKey: base64ToBytes(String(raw.wrappedKey ?? "")),
     ciphertextUrl,
   };
+}
+
+/**
+ * Send dispute evidence privately to the TEE (it builds the reviewers' case packet). Evidence is
+ * never put in the public blob store: it may describe purchased task content.
+ */
+export async function uploadEvidence(a: { disputeId: bigint; purchaseId: bigint; evidenceHash: Hex; text: string }): Promise<boolean> {
+  try {
+    const res = await fetch(url("/evidence-upload"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ disputeId: a.disputeId.toString(), purchaseId: a.purchaseId.toString(), evidenceHash: a.evidenceHash, evidence: a.text }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+const evKey = (id: bigint | string) => `envmarket.evidence.${CHAIN_ID}.${id}`;
+export function saveLocalEvidence(disputeId: bigint, text: string) {
+  try {
+    window.localStorage.setItem(evKey(disputeId), text);
+  } catch {
+    /* storage blocked */
+  }
+}
+export function loadLocalEvidence(disputeId: bigint): string | null {
+  try {
+    return window.localStorage.getItem(evKey(disputeId));
+  } catch {
+    return null;
+  }
 }
 
 export async function putBlob(bytes: Uint8Array): Promise<string | null> {

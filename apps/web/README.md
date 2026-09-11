@@ -1,36 +1,43 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# RL Environment Market — web app
 
-## Getting Started
+Next.js (App Router) front end for the market in `docs/RL_ENV_MARKET.md`. Everything it shows is read
+live from the EnvMarket contract and the TEE service; hashes, EIP-712 signatures, key unwrapping and
+decryption are checked in the browser. There is no mock data path.
 
-First, run the development server:
+## Run
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# from the repo root: copy ABIs + deployment addresses into src/generated/
+./scripts/sync-web.sh
+
+cd apps/web
+npm install
+NEXT_PUBLIC_TEE_URL=https://<tee-host> npm run dev     # http://localhost:3000
+npm run build && npm run lint
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+If `deployments/<chainId>.json` does not exist yet, the app renders a "not deployed on this chain"
+state instead of listings.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable | Default | Meaning |
+|---|---|---|
+| `NEXT_PUBLIC_CHAIN_ID` | `8453` | 8453 Base mainnet, 84532 Base Sepolia, 31337 local Anvil |
+| `NEXT_PUBLIC_RPC_URL` | public RPC for the chain | JSON-RPC endpoint (log reads are chunked to 9k blocks) |
+| `NEXT_PUBLIC_TEE_URL` | none | TEE service base URL (`/health`, `/attestation`, `/reports/:id`, `/blobs/:sha256`, `/deliveries/:id`) |
 
-## Learn More
+Contract addresses and the log start block come from the synced deployment file. The payment token is
+read from the market's `token()`, and its symbol/decimals from the token itself. The faucet button only
+appears when the token has `faucet()` (local TestUSDC).
 
-To learn more about Next.js, take a look at the following resources:
+## Routes
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `/` — listings with in-browser description hash checks, seller cold-start badge, stake, ratings, disputes
+- `/listing/[id]` — description and claims, signed preview report (hash, signer, runner role, attestation), manifest, commitments, terms, buy flow
+- `/purchase/[id]` — timeline with deadlines, download/verify/decrypt, dispute form, finalize, refund-undelivered, rating, settlement
+- `/dispute/[id]` — claim, jury draw (on-chain randomness), commit/reveal per seat, tally, mechanical findings, payouts
+- `/seller/[address]` — stake, qualifying transactions, money-weighted score, counterparty concentration, sales and purchases
+- `/activity` — every market event with explorer links
+- `/keys` — buyer X25519 encryption keys held in this browser
+- `/how-it-works` — trust assumptions, what is and isn't proven, live parameters

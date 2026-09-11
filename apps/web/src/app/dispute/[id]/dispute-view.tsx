@@ -27,6 +27,8 @@ import {
   type Seat,
 } from "@/lib/market";
 import type { MarketEvent } from "@/lib/client";
+import { eqHash, sha256Hex } from "@/lib/crypto";
+import { loadLocalEvidence } from "@/lib/tee";
 import { ClaimBanner, StateBadge } from "../../purchase/[id]/purchase-view";
 
 function parseId(id: string): bigint | null {
@@ -117,6 +119,8 @@ function Body({ d, p }: { d: Dispute; p: Purchase }) {
 
 function ClaimCard({ d, p }: { d: Dispute; p: Purchase }) {
   const ev = useDoc("", isZeroHash(d.evidenceHash) ? undefined : d.evidenceHash);
+  const local = loadLocalEvidence(d.id);
+  const localOk = local !== null && eqHash(sha256Hex(local), d.evidenceHash);
   return (
     <Card title="The claim" subtitle={`Opened ${fmtTime(d.openedAt)} by the buyer before the challenge deadline.`}>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -130,7 +134,12 @@ function ClaimCard({ d, p }: { d: Dispute; p: Purchase }) {
         <div className="mt-1 text-xs text-muted">
           evidenceHash <HashValue value={d.evidenceHash} />
         </div>
-        {ev.data ? (
+        {local && localOk ? (
+          <div className="mt-2 rounded-lg border border-line bg-panel-2 p-3">
+            <div className="mb-1 text-[11px] text-muted">✓ your copy, kept in this browser; matches the on-chain evidenceHash. Reviewers get it privately from the TEE.</div>
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs">{local}</pre>
+          </div>
+        ) : ev.data ? (
           <div className="mt-2 rounded-lg border border-line bg-panel-2 p-3">
             <div className="mb-1 text-[11px] text-muted">{ev.data.ok ? "✓ text matches the on-chain evidenceHash" : "✗ text does not match evidenceHash"}</div>
             <pre className="whitespace-pre-wrap break-words font-mono text-xs">{ev.data.text}</pre>

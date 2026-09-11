@@ -30,7 +30,7 @@ import {
   type Purchase,
   type Version,
 } from "@/lib/market";
-import { fetchUrlBytes, getDelivery, putBlob } from "@/lib/tee";
+import { fetchUrlBytes, getDelivery, putBlob, saveLocalEvidence, uploadEvidence } from "@/lib/tee";
 import type { MarketEvent } from "@/lib/client";
 
 function parseId(id: string): bigint | null {
@@ -531,7 +531,6 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
   const [ground, setGround] = useState<number>(0);
   const [mask, setMask] = useState<bigint>(0n);
   const [evidence, setEvidence] = useState("");
-  const [publish, setPublish] = useState(true);
   const [stored, setStored] = useState<string | null>(null);
   const approve = useTx();
   const open = useTx();
@@ -550,15 +549,15 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
   const ready = ground > 0 && selected > 0 && evidence.trim().length > 0;
 
   async function submit() {
-    if (publish && evidence.trim()) {
-      const h = await putBlob(utf8(evidence));
-      setStored(h ? "published to the TEE blob store" : "could not be published (TEE unreachable); keep a copy, only its hash is on-chain");
-    }
     const r = await open.run("Open dispute", { address: m, abi: marketAbi, functionName: "openDispute", args: [p.id, ground, mask, evidenceHash] });
     if (!r) return;
     const logs = parseEventLogs({ abi: marketAbi, logs: r.logs, eventName: "DisputeOpened" as never });
     const did = (logs[0] as { args?: { disputeId?: bigint } } | undefined)?.args?.disputeId;
-    if (did !== undefined) router.push(`/dispute/${did}`);
+    if (did === undefined) return;
+    saveLocalEvidence(did, evidence);
+    const ok = await uploadEvidence({ disputeId: did, purchaseId: p.id, evidenceHash, text: evidence });
+    setStored(ok ? "sent privately to the TEE for the reviewers’ case packet" : "could not be sent to the TEE; a copy is kept in this browser and only its hash is on-chain");
+    router.push(`/dispute/${did}`);
   }
 
   return (
@@ -618,9 +617,7 @@ function DisputeForm({ p, v, tar }: { p: Purchase; v: Version; tar: TarEntry[] |
           <span>
             evidenceHash = sha256(text): <HashValue value={evidenceHash} />
           </span>
-          <label className="flex items-center gap-1.5">
-            <input type="checkbox" checked={publish} onChange={(e) => setPublish(e.target.checked)} /> publish text to the TEE blob store for reviewers (public by hash; don’t paste task content)
-          </label>
+          <span>Only the hash goes on-chain. After the dispute opens, the text is sent privately to the TEE for reviewers, and a copy stays in this browser.</span>
         </div>
       </fieldset>
 

@@ -1,4 +1,4 @@
-import { defineChain, getAddress, isAddress, type Address, type Chain } from "viem";
+import { defineChain, getAddress, isAddress, zeroAddress, type Address, type Chain } from "viem";
 import { base, baseSepolia, foundry } from "viem/chains";
 import { generatedDeployments } from "@/generated/contracts";
 
@@ -42,12 +42,14 @@ export const txUrl = (hash: string) => (EXPLORER ? `${EXPLORER}/tx/${hash}` : nu
 export const addressUrl = (addr: string) => (EXPLORER ? `${EXPLORER}/address/${addr}` : null);
 export const blockUrl = (n: bigint | number) => (EXPLORER ? `${EXPLORER}/block/${n}` : null);
 
-/** Native USDC on Base mainnet; used when the deployment file does not name a token. */
-export const BASE_USDC: Address = "0x833589fCD6eDb6E08f4c7C32D19b0Ed1f2bD6E9";
-
 export type Deployment = {
   chainId: number;
   market: Address;
+  /**
+   * Payment token. Taken from the deployment file when present; in all cases the
+   * TokenMetaProvider replaces it with the market contract's own `token()` at startup, so the
+   * address is never hardcoded in the app.
+   */
   token: Address;
   startBlock: bigint;
   raw: Record<string, unknown>;
@@ -72,8 +74,8 @@ function loadDeployment(): Deployment | null {
   const raw = generatedDeployments[String(CHAIN_ID)];
   if (!raw) return null;
   const market = pickAddress(raw, ["EnvMarket", "envMarket", "market", "Market"]);
-  const token = pickAddress(raw, ["token", "TestUSDC", "testUSDC", "testUsdc", "USDC", "usdc"]) ?? (CHAIN_ID === 8453 ? getAddress(BASE_USDC) : null);
-  if (!market || !token) return null;
+  const token = pickAddress(raw, ["token", "TestUSDC", "testUSDC", "testUsdc", "USDC", "usdc"]) ?? zeroAddress;
+  if (!market) return null;
   const sb = raw.startBlock ?? raw.deployBlock ?? raw.blockNumber ?? 0;
   return { chainId: CHAIN_ID, market, token, startBlock: BigInt(String(sb)), raw };
 }
