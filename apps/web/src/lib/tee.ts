@@ -1,5 +1,5 @@
 import { recoverMessageAddress, type Address, type Hex } from "viem";
-import { CHAIN_ID, deployment, TEE_URL } from "./config";
+import { CHAIN_ID, deployment, TEE_URL, TEE_VIA_PROXY } from "./config";
 import { base64ToBytes, canonicalJson, eqHash, sha256Hex, utf8 } from "./crypto";
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -306,8 +306,21 @@ export async function getReportBlob(uri: string, reportHash: Hex): Promise<Signe
  * juror rationales...) from the version's `uri` base (the TEE's `<publicUrl>/blobs/`), falling back
  * to this app's TEE. Returns raw bytes; callers check sha256 against the on-chain commitment.
  */
+/** A plain-http URL can't be fetched from an https page (mixed content); those go through /api/tee. */
+function reachable(u: string): boolean {
+  if (typeof window === "undefined") return true;
+  return !(window.location.protocol === "https:" && u.startsWith("http://"));
+}
+
+/** Route a TEE blob URL (e.g. the on-chain uri or a delivery's ciphertextUrl) through TEE_URL when it isn't reachable directly. */
+export function blobUrlViaTee(u: string): string {
+  if (reachable(u) && !TEE_VIA_PROXY) return u;
+  const m = u.match(/\/blobs\/(?:0x)?([0-9a-fA-F]{64})$/);
+  return m ? `${TEE_URL}/blobs/${m[1].toLowerCase()}` : u;
+}
+
 export async function fetchBlob(uriBase: string, hash: Hex): Promise<{ bytes: Uint8Array; url: string }> {
-  const bases = [...new Set([uriBase, TEE_URL ? `${TEE_URL}/blobs/` : ""].filter(Boolean).map((b) => (b.endsWith("/") ? b : `${b}/`)))];
+  const bases = [...new Set([uriBase, `${TEE_URL}/blobs/`].filter((b) => !!b && reachable(b)).map((b) => (b.endsWith("/") ? b : `${b}/`)))];
   const hex = hash.replace(/^0x/, "").toLowerCase();
   const errors: string[] = [];
   for (const b of bases) {
@@ -357,7 +370,7 @@ export async function getDelivery(purchaseId: bigint | number): Promise<Delivery
   const raw = await getJson<Record<string, unknown>>(`/deliveries/${purchaseId}`);
   const wrapperStr = typeof raw.wrapper === "string" ? raw.wrapper : canonicalJson(raw.wrapper);
   const ct = String(raw.ciphertextUrl ?? "");
-  const ciphertextUrl = /^https?:\/\//.test(ct) ? ct : `${TEE_URL}${ct.startsWith("/") ? "" : "/"}${ct}`;
+  const ciphertextUrl = /^https?:\/\//.test(ct) ? blobUrlViaTee(ct) : `${TEE_URL}${ct.startsWith("/") ? "" : "/"}${ct}`;
   return {
     wrapperBytes: utf8(wrapperStr),
     wrapper: JSON.parse(wrapperStr),

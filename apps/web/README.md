@@ -25,7 +25,8 @@ renders a "not deployed on this chain" state instead of listings.
 |---|---|---|
 | `NEXT_PUBLIC_CHAIN_ID` | `84532` | 84532 Base Sepolia (the public testnet deployment, TestUSDC with a faucet), 31337 local Anvil; 8453 Base mainnet stays supported but unused |
 | `NEXT_PUBLIC_RPC_URL` | public RPC for the chain | JSON-RPC endpoint (log reads are chunked to 9k blocks) |
-| `NEXT_PUBLIC_TEE_URL` | none | TEE service base URL (see "TEE API used" below) |
+| `NEXT_PUBLIC_TEE_URL` | none | TEE service base URL, used directly by the browser only when it is `https://` (see "TEE API used" below). Otherwise the browser calls the same-origin proxy `/api/tee/…` |
+| `TEE_URL` | `NEXT_PUBLIC_TEE_URL` | **Server-only.** Upstream for the `/api/tee/[...path]` proxy, e.g. the EigenCompute app's `http://<ip>:8080`. The proxy forwards only the TEE paths the app uses (health, attestation, protocol, reports, blobs, deliveries, findings, evidence-upload, juror evidence, preview quote/start), caps request bodies, times out after 55 s and marks private responses `no-store`. It is not trusted for integrity: the browser checks every document against its on-chain hash and every signature itself |
 | `NEXT_PUBLIC_MARKET_ADDRESS` | from the synced deployment | Overrides the deployment file: market address (with `NEXT_PUBLIC_START_BLOCK`, optional `NEXT_PUBLIC_TOKEN_ADDRESS`). Used for throwaway local chains so they never land in `src/generated/` |
 
 Contract addresses and the log start block come from the synced deployment file (or the override). The

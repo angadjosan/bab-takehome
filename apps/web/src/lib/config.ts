@@ -18,7 +18,15 @@ const DEFAULT_RPC: Record<number, string> = {
 };
 
 export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || DEFAULT_RPC[CHAIN_ID] || "";
-export const TEE_URL = (process.env.NEXT_PUBLIC_TEE_URL || "").replace(/\/+$/, "");
+const PUBLIC_TEE_URL = (process.env.NEXT_PUBLIC_TEE_URL || "").replace(/\/+$/, "");
+/**
+ * Base URL the browser uses for the TEE API: the TEE itself when it is served over https, otherwise
+ * this app's same-origin proxy (/api/tee → server-only TEE_URL). The EigenCompute TEE is plain http,
+ * which an https page cannot call. Integrity never depends on the proxy: every document is hash-checked
+ * against the chain in the browser.
+ */
+export const TEE_URL = /^https:\/\//.test(PUBLIC_TEE_URL) ? PUBLIC_TEE_URL : "/api/tee";
+export const TEE_VIA_PROXY = TEE_URL === "/api/tee";
 
 const KNOWN: Record<number, Chain> = { 8453: base, 84532: baseSepolia, 31337: foundry };
 const baseChain: Chain =

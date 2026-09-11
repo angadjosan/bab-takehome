@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { useTokenInfo } from "@/components/providers";
 import { AddressLink, Card } from "@/components/ui";
-import { CHAIN_ID, CHAIN_NAME, IS_MAINNET, deployment, TEE_URL } from "@/lib/config";
+import { CHAIN_ID, CHAIN_NAME, IS_MAINNET, deployment, TEE_URL, TEE_VIA_PROXY } from "@/lib/config";
 import { useAttestation, useHealth } from "@/lib/docs";
 import { fmtUsdc, fmtWindow, pct } from "@/lib/format";
 import { useMarketParams } from "@/lib/market";
@@ -90,8 +90,9 @@ export default function HowItWorks() {
               : `${token.symbol} is a test token with no monetary value; balances demonstrate accounting, not economic deterrence.`}
           </Trust>
           <Trust t="This website">
-            It reads the chain and the TEE service directly from your browser and verifies hashes, signatures, and decryption locally, but you are trusting the JavaScript it serves. Every check can be
-            repeated with the open-source CLI agents.
+            It reads the chain and the TEE service from your browser and verifies hashes, signatures, and decryption locally, but you are trusting the JavaScript it serves. Every check can be
+            repeated with the open-source CLI agents. Because the TEE serves plain http, the browser reaches it through this site’s /api/tee proxy; the proxy only relays bytes and is not trusted
+            for integrity, since every document is checked against its on-chain hash and every signature is verified here.
           </Trust>
         </div>
       </Card>
@@ -234,7 +235,7 @@ function LiveDeployment() {
         <dt>Payment token</dt>
         <dd>{deployment ? <AddressLink address={deployment.token} /> : "—"}</dd>
         <dt>TEE service</dt>
-        <dd className="break-all">{TEE_URL || "not configured"}</dd>
+        <dd className="break-all">{TEE_VIA_PROXY ? "reached through this site’s /api/tee proxy (the TEE serves plain http; the proxy only relays bytes)" : TEE_URL}</dd>
         <dt>TEE signer</dt>
         <dd>{health.data?.signer ? <AddressLink address={health.data.signer} /> : health.error ? <span className="text-bad">unreachable</span> : "…"}</dd>
         <dt>Attestation</dt>
