@@ -20,7 +20,9 @@ export function friendlyError(e: unknown): string {
   if (e instanceof BaseError) {
     const revert = e.walk((x) => x instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null;
     if (revert?.data?.errorName) {
-      const args = revert.data.args?.length ? `(${revert.data.args.map(String).join(", ")})` : "";
+      // name each decoded argument from the error's ABI entry, e.g. CollateralBelowRequirement(collateral: 1, required: 2)
+      const inputs = (revert.data.abiItem as { inputs?: readonly { name?: string }[] } | undefined)?.inputs;
+      const args = revert.data.args?.length ? `(${revert.data.args.map((a, i) => (inputs?.[i]?.name ? `${inputs[i].name}: ${String(a)}` : String(a))).join(", ")})` : "";
       return `Contract reverted: ${revert.data.errorName}${args}`;
     }
     if (/User rejected|denied/i.test(e.message)) return "Transaction rejected in wallet.";
@@ -128,7 +130,8 @@ export function RequireWallet({ children, why }: { children: ReactNode; why?: st
   }
   return (
     <>
-      {noGas && (
+      {/* hosted builds top up fees from /api/faucet automatically before the first signature */}
+      {noGas && CHAIN_ID === 31337 && (
         <div className="mb-3 text-xs" role="status">
           <p className="text-warn">
             This wallet has no {CHAIN_NAME} {chain.nativeCurrency.symbol} for network fees.
