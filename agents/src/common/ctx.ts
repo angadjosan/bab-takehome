@@ -119,6 +119,21 @@ export function setTxLogger(fn: (line: string) => void): void {
   logFn = fn;
 }
 
+/**
+ * Behind a load-balanced public RPC (e.g. https://sepolia.base.org) a read issued right after a receipt
+ * can land on a backend that has not imported that block yet, so post-tx checks see pre-tx state (a
+ * just-created version reads as zeros; a fresh allowance reads as 0 and the next simulate reverts).
+ * Wait until several consecutive calls report a head at or past the receipt's block (bounded, ~20 s).
+ */
+async function waitForReadsAt(pc: Clients['publicClient'], block: bigint): Promise<void> {
+  let ok = 0;
+  for (let i = 0; i < 20 && ok < 3; i++) {
+    const head = await pc.getBlockNumber({ cacheTime: 0 }).catch(() => 0n);
+    ok = head >= block ? ok + 1 : 0;
+    if (ok < 3) await new Promise((r) => setTimeout(r, ok ? 300 : 1000));
+  }
+}
+
 /** Simulate (readable revert reasons), send, wait, log with explorer link, record. */
 export async function send(c: Clients, req: SendReq): Promise<Sent> {
   assertTxAllowed(c.chain.id);
@@ -131,6 +146,7 @@ export async function send(c: Clients, req: SendReq): Promise<Sent> {
   } as never);
   const hash = await c.walletClient.writeContract((req.nonce === undefined ? request : { ...(request as object), nonce: req.nonce }) as never);
   const receipt = await c.publicClient.waitForTransactionReceipt({ hash, timeout: 180_000 });
+  await waitForReadsAt(c.publicClient, receipt.blockNumber);
   const url = explorerTx(c.chain.id, hash);
   const label = req.label ?? req.functionName;
   const line = `  ⛓  ${label.padEnd(28)} ${url ?? hash}  [${receipt.status}, block ${receipt.blockNumber}, gas ${receipt.gasUsed}]`;
