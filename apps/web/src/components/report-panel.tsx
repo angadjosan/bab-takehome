@@ -5,6 +5,7 @@ import { fmtPass, modelRuns, useAttestation, useReportState, useVerifiedReport, 
 import { eqHash } from "@/lib/crypto";
 import { isZeroHash, type Version } from "@/lib/market";
 import { fmtTime, fmtUsdc } from "@/lib/format";
+import { modelName, REFERENCE_MODELS_NOTE } from "@/lib/models";
 import type { Outcome } from "@/lib/tee";
 import { PhalaVerification } from "./phala-attestation";
 import { AddressLink, Chip, cx, DetailSection, HashValue, IconExternal, Notice, Skeleton, Spinner, TxLink, Verified } from "./ui";
@@ -87,9 +88,12 @@ export function ReportScores({ v }: { v: Version }) {
   return (
     <div className="space-y-10">
       <section aria-labelledby="scores-title" className="space-y-3">
-        <h2 id="scores-title" className="text-base font-semibold text-ink">
-          Reference model scores
-        </h2>
+        <div className="space-y-1">
+          <h2 id="scores-title" className="text-base font-semibold text-ink">
+            Reference models
+          </h2>
+          <p className="max-w-[72ch] text-[13px] leading-relaxed text-muted">{REFERENCE_MODELS_NOTE}</p>
+        </div>
         <div className="overflow-x-auto">
           <table className="data-table min-w-[560px]">
             <thead>
@@ -108,7 +112,7 @@ export function ReportScores({ v }: { v: Version }) {
                 return (
                   <tr key={m.requested + (m.resolved ?? "")}>
                     <td>
-                      <div className="text-ink">{m.requested}</div>
+                      <div className="text-ink">{modelName(m.requested)}</div>
                       <div className="font-mono text-[11px] text-muted">
                         {m.resolved ?? "—"}
                         {m.provider ? ` · ${m.provider}` : ""}
@@ -131,16 +135,13 @@ export function ReportScores({ v }: { v: Version }) {
 
       <section aria-labelledby="note-title" className="space-y-3">
         <h2 id="note-title" className="text-base font-semibold text-ink">
-          Validator explanation
+          Reviewer’s note
         </h2>
         {r.validator.explanation ? (
           <blockquote className="border-l-2 border-line-strong pl-4 text-[15px] leading-relaxed text-ink">{r.validator.explanation}</blockquote>
         ) : (
-          <p className="text-[13px] text-muted">{screening.passed ? "Empty." : `Withheld by screening${screening.reasons.length ? `: ${screening.reasons.join("; ")}` : ""}.`}</p>
+          <p className="text-[13px] text-muted">{screening.passed ? "The reviewer left no note." : "The reviewer’s note was withheld because it could have revealed task content."}</p>
         )}
-        <p className="font-mono text-xs text-muted">
-          {r.validator.model} · prompt {r.validator.promptVersion}
-        </p>
       </section>
     </div>
   );
@@ -315,7 +316,7 @@ export function ReportDetails({ v }: { v: Version }) {
               </Row>
             </dl>
           </DetailSection>
-          <DetailSection title="validator">
+          <DetailSection title="reviewer’s note (validator)">
             <dl className="kv">
               <Row k="model">
                 <Mono>{r.validator.model}</Mono>
