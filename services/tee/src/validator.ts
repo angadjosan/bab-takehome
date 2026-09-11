@@ -104,6 +104,8 @@ export function renderExplanation(v: ValidatorOutput): { text: string; dropped: 
 export interface ScreeningCorpus {
   files: Array<{ path: string; text: string }>;
   taskIds: string[];
+  /** Already-public documents (description.json/.md, manifest.json): their words and spans are not secrets. */
+  publicTexts?: string[];
 }
 
 export interface ScreeningIndex {
@@ -112,6 +114,7 @@ export interface ScreeningIndex {
   paths: Set<string>;
   taskIds: string[];
   injectionGrams: Set<string>;
+  publicWords: Set<string>;
 }
 
 const N = 8;
@@ -133,7 +136,8 @@ export function buildScreeningIndex(corpus: ScreeningCorpus): ScreeningIndex {
   for (const f of corpus.files) {
     for (const g of grams(tokens(f.text), N)) ngrams.add(g);
     paths.add(f.path);
-    for (const seg of f.path.split('/')) if (/_|\.[a-z]+$/.test(seg) && seg.length >= 4) identifiers.add(seg.replace(/\.[a-z]+$/, ''));
+    // distinctive snake_case path segments only (e.g. test_hidden, visible_tests); not generic names like "pytest"
+    for (const seg of f.path.split('/')) if (seg.includes('_') && seg.replace(/\.[a-z]+$/, '').length >= 4) identifiers.add(seg.replace(/\.[a-z]+$/, ''));
     if (f.path.endsWith('.py')) {
       for (const m of f.text.matchAll(/\b(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)/g)) {
         const id = m[1]!;
@@ -147,7 +151,17 @@ export function buildScreeningIndex(corpus: ScreeningCorpus): ScreeningIndex {
   for (const top of new Set(corpus.files.filter((f) => f.path.startsWith('src/')).map((f) => f.path.split('/')[1]!))) {
     if (top && !top.includes('.')) identifiers.add(top);
   }
-  return { ngrams, identifiers, paths, taskIds: corpus.taskIds, injectionGrams };
+  // Anything the seller already published (description, manifest) is not a secret: allow it.
+  const publicWords = new Set<string>();
+  for (const t of corpus.publicTexts ?? []) {
+    for (const w of t.match(/[A-Za-z_][A-Za-z0-9_.-]*[A-Za-z0-9_]/g) ?? []) {
+      publicWords.add(w);
+      publicWords.add(w.replace(/\.[A-Za-z]+$/, ''));
+    }
+    for (const g of grams(tokens(t), N)) ngrams.delete(g);
+  }
+  for (const w of publicWords) identifiers.delete(w);
+  return { ngrams, identifiers, paths, taskIds: corpus.taskIds, injectionGrams, publicWords };
 }
 
 const CODE_PATTERNS: Array<[RegExp, string]> = [
@@ -155,7 +169,7 @@ const CODE_PATTERNS: Array<[RegExp, string]> = [
   [/\b(def|class|import|lambda|return|assert|elif|except)\s+[A-Za-z_(]/, 'python keywords in code position'],
   [/\bfrom\s+[a-z_][\w.]*\s+import\b/, 'import statement'],
   [/[A-Za-z_]\w*\([^)]*\)/, 'function-call syntax'],
-  [/[{};]|==|!=|<=|>=|->|=>|\+=|\*\*/, 'code operators or braces'],
+  [/[{}]|==|!=|->|=>|\+=|\*\*/, 'code operators or braces'],
   [/\b[A-Za-z_]\w*\.[A-Za-z_]\w*\.[A-Za-z_]\w*\b/, 'dotted identifier path'],
   [/\b[a-z]+_[a-z0-9_]+\b/, 'snake_case identifier'],
 ];
@@ -175,7 +189,8 @@ export function screenExplanation(text: string, idx: ScreeningIndex): { passed: 
   const tok = tokens(text);
   if (grams(tok, N).some((g) => idx.ngrams.has(g))) reasons.push(`copied span of >= ${N} tokens from environment files`);
   for (const [re, why] of CODE_PATTERNS) if (re.test(text)) reasons.push(`code: ${why}`);
-  if (PATH_PATTERNS.some((re) => re.test(text)) || [...idx.paths].some((p) => p.includes('/') && text.includes(p))) reasons.push('file path');
+  const pathHits = PATH_PATTERNS.flatMap((re) => [...text.matchAll(new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g'))].map((m) => m[0].trim()));
+  if (pathHits.some((h) => !idx.publicWords.has(h)) || [...idx.paths].some((p) => p.includes('/') && text.includes(p) && !idx.publicWords.has(p))) reasons.push('file path');
   const idRe = idx.taskIds.length ? new RegExp(`\\b(${idx.taskIds.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`) : null;
   if ((idRe && idRe.test(text)) || /\b[TA]\d{1,3}\b/.test(text)) reasons.push('task identifier');
   const wordsInText = new Set(text.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []);

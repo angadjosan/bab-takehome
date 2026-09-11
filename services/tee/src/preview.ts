@@ -416,7 +416,8 @@ async function runFresh(ctx: Ctx, versionId: bigint, terms: VersionTerms, upload
 
     const payloadFiles = collectFiles(payloadDir);
     const auditFiles = collectFiles(auditDir, 'audit/');
-    const idx = buildScreeningIndex({ files: [...payloadFiles, ...auditFiles], taskIds: [...upload.taskIds, ...upload.auditTaskIds] });
+    const publicTexts = [upload.descriptionHash, upload.descriptionMdHash, upload.manifestHash].map((h) => (h ? ctx.blobs.getText(h) : null)).filter((t): t is string => !!t);
+    const idx = buildScreeningIndex({ files: [...payloadFiles, ...auditFiles], taskIds: [...upload.taskIds, ...upload.auditTaskIds], publicTexts });
     const validatorInput = buildValidatorInput({
       files: payloadFiles.filter((f) => !f.path.startsWith('solutions/')),
       descriptionJson: ctx.blobs.getText(upload.descriptionHash) ?? '{}',

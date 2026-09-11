@@ -184,11 +184,11 @@ network but runs no seller code; everything after it is offline.
 |---|---|---|
 | `MNEMONIC` | injected by EigenCompute KMS | The app wallet; the service derives all keys from it. Never set it yourself in the TEE. |
 | `FIREWORKS_API_KEY` | sealed `.env` | Inference for the panel and the validator. |
-| `CHAIN_ID` | sealed `.env` | `8453` (Base mainnet); `31337` for anvil. |
-| `BASE_RPC` / `RPC_URL` | sealed `.env` | RPC endpoint. |
+| `CHAIN_ID` | sealed `.env` | `84532` (Base Sepolia, the demo target); `8453` (Base mainnet) is still supported; `31337` for anvil. |
+| `BASE_SEPOLIA_RPC` / `BASE_RPC` / `RPC_URL` | sealed `.env` | RPC endpoint (84532 / 8453 / explicit override). |
 | `MARKET_ADDRESS`, `START_BLOCK` | sealed `.env` | EnvMarket address and the watcher's start block. They can also come from `deployments/<chainId>.json` via `DEPLOYMENTS_DIR`. |
 | `PUBLIC_URL` | sealed `.env` | Base URL advertised for blobs (listing `uri`), e.g. `https://<domain>` or `http://<app ip>:8080`. |
-| `EIGEN_APP_ID` (or `EIGEN_APP_ID_PUBLIC`), `EIGEN_IMAGE_DIGEST`, `EIGEN_ENVIRONMENT`, `EIGEN_VERIFY_URL` | public `.env` | Shown in reports and `/attestation`. |
+| `EIGEN_APP_ID` (or `EIGEN_APP_ID_PUBLIC`), `EIGEN_IMAGE_DIGEST`, `EIGEN_ENVIRONMENT` (`sepolia` default \| `mainnet-alpha`; selects dashboard + AppController), `EIGEN_VERIFY_URL` | public `.env` | Shown in reports and `/attestation`. |
 | `KMS_SERVER_URL`, `KMS_PUBLIC_KEY` | injected by EigenCompute | Used for the runtime attestation JWT. |
 | `PORT` (8080 in the image, 8787 locally), `HOST`, `DATA_DIR` (`/data` in the image, `./.data` locally) | image | HTTP port, bind host and storage directory. |
 | `SUBMIT_TXS` (1), `WATCHER` (1), `POLL_MS` | optional | Transaction submission, chain watcher and poll interval. |
@@ -223,7 +223,12 @@ packager, runs this service in local-dev mode, and walks the flow in this order:
 6. BrokenOrHashMismatch dispute, resolved;
 7. FalseDescription dispute, jurors selected, case packet.
 
-## Deploy to EigenCompute (mainnet-alpha)
+## Deploy to EigenCompute (`sepolia`, the demo target)
+
+All testnet (BUILD_SPEC "Deployment target — FINAL"). Contracts are on Base Sepolia (84532, TestUSDC with
+a faucet). The TEE runs in EigenCompute's `sepolia` environment: the AppController is on Ethereum Sepolia,
+and it's the same real Intel TDX + KMS + attestation. Every environment-specific value comes from
+`EIGEN_ENVIRONMENT`, so `mainnet-alpha` works by changing that one variable.
 
 The CLI is `ecloud` (`@layr-labs/ecloud-cli@1.0.0`, run with `npx -y @layr-labs/ecloud-cli@1.0.0 …`).
 `ecloud --help` and `ecloud compute app deploy --help` were checked. **Nothing was deployed or paid for.**
@@ -232,8 +237,8 @@ The CLI is `ecloud` (`@layr-labs/ecloud-cli@1.0.0`, run with `npx -y @layr-labs/
    - `docker login` to a registry EigenCompute can pull from;
    - `ecloud auth login` (or `ecloud auth migrate` from eigenx);
    - `ecloud billing subscribe` (card or USDC);
-   - `ecloud compute env set mainnet-alpha`;
-   - a little ETH on Ethereum mainnet for the AppController txs.
+   - `ecloud compute env set sepolia`;
+   - a little Sepolia ETH in the eigen wallet for the AppController txs (billing credits are wallet-wide).
 2. Build and push from the **repo root** (linux/amd64):
    ```bash
    docker buildx build --platform linux/amd64 -f services/tee/Dockerfile -t docker.io/<you>/envmarket-tee:v1 --push .
@@ -241,25 +246,25 @@ The CLI is `ecloud` (`@layr-labs/ecloud-cli@1.0.0`, run with `npx -y @layr-labs/
 3. Write a sealed env file, `services/tee/.env.tee`. It is gitignored by the repo's `.env.*` rule; never commit it.
    ```bash
    FIREWORKS_API_KEY=...
-   CHAIN_ID=8453
-   BASE_RPC=https://mainnet.base.org
-   MARKET_ADDRESS=0x...          # from deployments/8453.json
+   CHAIN_ID=84532
+   BASE_SEPOLIA_RPC=https://sepolia.base.org
+   MARKET_ADDRESS=0x...          # from deployments/84532.json
    START_BLOCK=...
    PUBLIC_URL=http://<ip>:8080   # fill after first deploy, then upgrade
-   EIGEN_ENVIRONMENT=mainnet-alpha
+   EIGEN_ENVIRONMENT=sepolia
    ```
 4. Deploy (TDX SKU):
    ```bash
    npx -y @layr-labs/ecloud-cli@1.0.0 compute app deploy --non-interactive --name envmarket-tee \
      --image-ref docker.io/<you>/envmarket-tee:v1 --env-file services/tee/.env.tee \
-     --instance-type g1-standard-4t --log-visibility public --environment mainnet-alpha
-   npx -y @layr-labs/ecloud-cli@1.0.0 compute app info envmarket-tee --address-count 1   # app id, IP, EVM address
+     --instance-type g1-standard-4t --log-visibility public --environment sepolia
+   npx -y @layr-labs/ecloud-cli@1.0.0 compute app info envmarket-tee --address-count 1 --environment sepolia   # app id, IP, EVM address
    ```
 5. Check the deployment:
    - `curl http://<ip>:8080/health`: `signer` must equal the EVM address from `app info`.
    - `curl http://<ip>:8080/attestation?refresh=1`: must show `kind: "eigencompute-tdx"`, a JWT and `quoteDigest`.
-6. As the EnvMarket owner on Base, run `setRunner(signer,true)`, `setRelay(signer,true)` and
-   `setVerifier(signer,true)`. Then send the signer a little Base ETH for gas; it submits
+6. As the EnvMarket owner on Base Sepolia, run `setRunner(signer,true)`, `setRelay(signer,true)` and
+   `setVerifier(signer,true)`. Then send the signer a little Base Sepolia ETH for gas; it submits
    `attachReport`, `recordDelivery` and `resolveMechanical`.
 7. Add `EIGEN_APP_ID_PUBLIC=<app id>`, `EIGEN_IMAGE_DIGEST=<digest>` and `PUBLIC_URL` to the env
    file, then run `ecloud compute app upgrade envmarket-tee --image-ref … --env-file …`. The same
@@ -267,9 +272,12 @@ The CLI is `ecloud` (`@layr-labs/ecloud-cli@1.0.0`, run with `npx -y @layr-labs/
 8. Optionally, add TLS with `ecloud compute app configure tls` (needs `DOMAIN` and an A record).
 
 **Verifying attestation:**
-- The app id and image digest are on the dashboard: `https://verify.eigencloud.xyz/app/<appId>`.
-  That URL pattern is an assumption; the dashboard lists app id, releases and digests.
-- Read AppController `0xc38d35Fc995e75342A21CBd6D770305b142Fbe67` (mainnet-alpha).
+- The app id and image digest are on the dashboard: `https://verify-sepolia.eigencloud.xyz/app/<appId>`
+  (`/attestation` shows `verifyUrl`). That URL pattern is an assumption; the dashboard lists app id,
+  releases and digests.
+- Read AppController `0x0dd810a6ffba6a9820a10d97b659f07d8d23d4E2` on Ethereum Sepolia (for
+  `mainnet-alpha`: `0xc38d35Fc995e75342A21CBd6D770305b142Fbe67` on Ethereum mainnet). `/attestation`
+  reports `appController` and `appControllerChainId`.
 - Check the JWT from `/attestation`: validate its signature against `kmsPublicKey`, check
   `aud = "envmarket-tee"`, and recompute `sha512(binding)` against the token's extra-data claim.
   `binding` names the signer, the X25519 key, the chain and the market.

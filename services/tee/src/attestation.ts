@@ -92,8 +92,28 @@ export function sha512(data: string | Uint8Array): Buffer {
   return createHash('sha512').update(data).digest();
 }
 
+/**
+ * EigenCompute environments (ecloud `--environment`). The demo target is `sepolia` (BUILD_SPEC
+ * "Deployment target — FINAL"): AppController on Ethereum Sepolia, same Intel TDX + KMS + attestation.
+ * Selected by EIGEN_ENVIRONMENT (default "sepolia"); nothing else hardcodes an environment.
+ */
+export const EIGEN_ENVIRONMENTS = {
+  sepolia: { dashboard: 'https://verify-sepolia.eigencloud.xyz', appController: '0x0dd810a6ffba6a9820a10d97b659f07d8d23d4E2', controlChainId: 11155111 },
+  'mainnet-alpha': { dashboard: 'https://verify.eigencloud.xyz', appController: '0xc38d35Fc995e75342A21CBd6D770305b142Fbe67', controlChainId: 1 },
+} as const;
+export type EigenEnvironment = keyof typeof EIGEN_ENVIRONMENTS;
+export const DEFAULT_EIGEN_ENVIRONMENT: EigenEnvironment = 'sepolia';
+
+export function eigenEnvironment(name: string | undefined): { name: EigenEnvironment } & (typeof EIGEN_ENVIRONMENTS)[EigenEnvironment] {
+  const n = (name && name in EIGEN_ENVIRONMENTS ? name : DEFAULT_EIGEN_ENVIRONMENT) as EigenEnvironment;
+  return { name: n, ...EIGEN_ENVIRONMENTS[n] };
+}
+
 export interface AttestationState {
   kind: 'eigencompute-tdx' | 'none-local-dev';
+  eigenEnvironment: EigenEnvironment;
+  appController: string;
+  appControllerChainId: number;
   appId: string | null;
   imageDigest: string | null;
   signer: Address;
@@ -126,7 +146,8 @@ export interface AttestationEnv {
   EIGEN_APP_ID_PUBLIC?: string;
   EIGEN_IMAGE_DIGEST?: string;
   EIGEN_VERIFY_URL?: string;
-  EIGEN_ENVIRONMENT?: string; // mainnet-alpha | sepolia
+  EIGEN_ENVIRONMENT?: string; // sepolia (default) | mainnet-alpha
+  EIGEN_ENVIRONMENT_PUBLIC?: string;
   ATTEST_SOCKET_PATH?: string;
 }
 
@@ -142,7 +163,8 @@ export class Attestor {
     market: Address | null,
   ) {
     const appId = env.EIGEN_APP_ID || env.EIGEN_APP_ID_PUBLIC || null;
-    const dash = env.EIGEN_ENVIRONMENT === 'sepolia' ? 'https://verify-sepolia.eigencloud.xyz' : 'https://verify.eigencloud.xyz';
+    const eigenEnv = eigenEnvironment(env.EIGEN_ENVIRONMENT || env.EIGEN_ENVIRONMENT_PUBLIC);
+    const dash = eigenEnv.dashboard;
     const binding = canonicalJson({
       type: 'envmarket.tee.binding.v1',
       signer: signer.toLowerCase(),
@@ -157,6 +179,9 @@ export class Attestor {
         : null;
     this.state = {
       kind: 'none-local-dev',
+      eigenEnvironment: eigenEnv.name,
+      appController: eigenEnv.appController,
+      appControllerChainId: eigenEnv.controlChainId,
       appId,
       imageDigest: env.EIGEN_IMAGE_DIGEST || null,
       signer,
