@@ -92,6 +92,13 @@
 html {
   background: var(--bg);
   -webkit-text-size-adjust: 100%;
+  /* keep focused and anchored elements clear of the sticky header (taller on phones: nav row + test strip) */
+  scroll-padding-top: 10rem;
+}
+@media (min-width: 48rem) {
+  html {
+    scroll-padding-top: 7rem;
+  }
 }
 
 body {
