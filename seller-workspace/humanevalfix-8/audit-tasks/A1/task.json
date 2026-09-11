@@ -1,0 +1,37 @@
+{
+  "taskId": "A1",
+  "set": "audit",
+  "title": "largest_divisor() disagrees with its docstring",
+  "statement": "hefix.largest_divisor.largest_divisor() does not do what its docstring says. One of the docstring's own examples fails:\n\n    assert largest_divisor(15) == 5\n\nThe docstring in hefix/largest_divisor.py is the specification. Fix the implementation so the function matches the docstring for all valid inputs, not just this example. Keep the function name and signature unchanged. Only files matching hefix/*.py are graded.",
+  "targetSkill": "single-function bug repair against a docstring specification",
+  "difficulty": "easy",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": [
+    "hefix/*.py"
+  ],
+  "startingState": {
+    "mechanism": "overlay",
+    "base": "src/",
+    "overlayDir": "overlay/"
+  },
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass",
+  "upstream": {
+    "dataset": "bigcode/humanevalpack",
+    "revision": "9a41762f73a8cb23bb5811b73d5aab164efcf378",
+    "config": "python",
+    "split": "test",
+    "taskId": "Python/24",
+    "humanEvalId": "HumanEval/24",
+    "entryPoint": "largest_divisor",
+    "bugType": "operator misuse",
+    "failureSymptoms": "incorrect output",
+    "hiddenAssertCount": 5,
+    "visibleExampleCount": 1,
+    "modified": "converted to repair-episode format"
+  }
+}

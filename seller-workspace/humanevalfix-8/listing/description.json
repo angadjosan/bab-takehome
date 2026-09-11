@@ -1,0 +1,130 @@
+{
+  "type": "envmarket.description.v1",
+  "environmentId": "humanevalfix-8",
+  "environmentVersion": "humanevalfix-8@1.0.0",
+  "title": "humanevalfix-8: 8 HumanEvalFix Python bug-repair tasks as RL episodes",
+  "summary": "Eight single-function Python bug-repair tasks from HumanEvalFix (bigcode/humanevalpack, Python split, MIT), converted to the py-repair-kit episode format. In each episode an agent reads files, fixes one buggy function against its docstring, runs a visible test and submits. The upstream HumanEvalPack test function, run as a hidden pytest test, grades the final workspace offline and deterministically.",
+  "environmentType": "coding",
+  "claims": [
+    {
+      "id": "C1",
+      "category": "taskCount",
+      "text": "The purchased product contains exactly 8 tasks (T1 to T8). A separate set of 2 audit tasks is disclosed. It is not delivered and is not counted in the 8.",
+      "check": "tasks/ contains exactly eight task directories, each with a task.json; manifest taskCount = 8, auditTaskCount = 2."
+    },
+    {
+      "id": "C2",
+      "category": "source",
+      "text": "Every task is converted from one row of HumanEvalPack (https://huggingface.co/datasets/bigcode/humanevalpack), config python, split test, dataset revision 9a41762f73a8cb23bb5811b73d5aab164efcf378. Mapping: T1 Python/3 below_zero, T2 Python/20 find_closest_elements, T3 Python/31 is_prime, T4 Python/46 fib4, T5 Python/74 total_match, T6 Python/75 is_multiply_prime, T7 Python/107 even_odd_palindrome, T8 Python/112 reverse_delete. Python/N is HumanEval/N.",
+      "check": "upstream block of each tasks/<id>/task.json; taskMap in provenance.json; compare against the dataset at that revision."
+    },
+    {
+      "id": "C3",
+      "category": "conversion",
+      "text": "Starting state: the upstream prompt plus buggy_solution, in hefix/<entry_point>.py. Reference solution: the upstream prompt plus canonical_solution. Hidden test: the upstream test field, unchanged except that the trailing check(<entry_point>) call is replaced by one pytest test function and import lines are added. Visible test: 1 or 2 asserts copied from the upstream example_test (the docstring examples). The only other change to upstream code is a 2-line header comment in each module.",
+      "check": "diff the files against the dataset rows; scripts/build_from_upstream.py."
+    },
+    {
+      "id": "C4",
+      "category": "selection",
+      "text": "Tasks were selected mechanically, not hand-picked. Eligibility rules E1 to E6 in scripts/build_from_upstream.py leave 132 of the 164 rows. random.Random(20260910).sample over the eligible rows draws 10: the first 8 are the purchased tasks, the last 2 the audit tasks. Rerunning the script regenerates src/, tasks/, audit-tasks/ and solutions/ byte for byte. The script checks the downloaded file against sha256 ed5f15d789156e21222bfcd556c425a39042355c84ae1e8b058abd6a3d7f8075.",
+      "check": "Run scripts/build_from_upstream.py and git diff the result (needs network and pyarrow at build time only)."
+    },
+    {
+      "id": "C5",
+      "category": "skills",
+      "text": "Every task is a single-function repair against a docstring specification. Upstream bug-type labels: operator misuse (T1, T2, T8), value misuse (T3, T4, T6, T7), variable misuse (T5). Each reference fix changes 1 or 2 lines of one file. The task statement names the function and quotes one failing docstring example. It does not reveal the bug type.",
+      "check": "upstream.bugType in each task.json; diff tasks/<id>/overlay against solutions/<id>; statement field of each task.json."
+    },
+    {
+      "id": "C6",
+      "category": "difficulty",
+      "text": "All 8 tasks carry the seller-assigned difficulty label easy.",
+      "check": "difficulty field of each task.json."
+    },
+    {
+      "id": "C7",
+      "category": "testCoverage",
+      "text": "Each hidden suite is exactly one pytest test (the upstream check function), so a graded episode reports passed/failed as 1/0 or 0/1. Each suite contains between 4 and 13 assert statements (T4 has 4, T3 has 13). The visible test of each task has 1 or 2 asserts.",
+      "check": "upstream.hiddenAssertCount in each task.json; PYTHONPATH=src python -m pytest --collect-only -q tasks/<id>/tests."
+    },
+    {
+      "id": "C8",
+      "category": "dependencies",
+      "text": "The hefix package and the environment driver (grader/) use only the Python 3.12 standard library. The only third-party packages are pytest 8.3.5, pluggy 1.6.0, iniconfig 2.3.0 and packaging 26.3. They are used only to run tests, and requirements.lock pins them by exact version and sha256 hash.",
+      "check": "imports in src/, tasks/*/overlay and grader/; requirements.lock."
+    },
+    {
+      "id": "C9",
+      "category": "runtime",
+      "text": "Runs on CPython 3.12. The runner image is built from Dockerfile.runner on python:3.12-slim pinned by digest sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea and runs as a non-root user. No GPU or accelerator is needed.",
+      "check": "Dockerfile.runner FROM line and USER line."
+    },
+    {
+      "id": "C10",
+      "category": "network",
+      "text": "Fully offline at run time. Resetting, stepping, running visible tests and grading need no network access. scripts/verify.sh --docker runs every task with --network none.",
+      "check": "Run scripts/verify.sh --docker."
+    },
+    {
+      "id": "C11",
+      "category": "determinism",
+      "text": "Deterministic. No task, hidden test or visible test uses randomness or the clock: rule E2 excludes upstream tests that use the random module. The reset seed is recorded but does not change task content. Grading runs with PYTHONHASHSEED=0 and TZ=UTC. Grading the same final workspace again gives the same score, passed and failed counts.",
+      "check": "grep for random/time in tasks/*/tests and src/; scripts/verify_tasks.py grades each solved task twice and compares."
+    },
+    {
+      "id": "C12",
+      "category": "budgets",
+      "text": "Each episode allows 12 tool actions (list_files, read_file, write_file, run_visible_tests) plus a final submit, which does not count against the budget, and 600 seconds of wall-clock time. A visible-test run times out after 60 s and hidden grading after 120 s. An episode that ends by budget exhaustion or timeout scores 0.",
+      "check": "actionBudget, timeBudgetSec and gradeTimeoutSec in each task.json; grader/env.py."
+    },
+    {
+      "id": "C13",
+      "category": "validity",
+      "text": "On each task's starting state the hidden test fails and at least one visible assert fails. With the reference solution applied, both the hidden test and the visible tests pass.",
+      "check": "Run scripts/verify.sh (native or --docker)."
+    },
+    {
+      "id": "C14",
+      "category": "isolation",
+      "text": "Hidden tests are never copied into the agent workspace. Grading rebuilds the starting state and copies in only the files matching the task's editable pattern (hefix/*.py, excluding conftest.py).",
+      "check": "grader/tasks.py materialize_workspace; grader/grade.py grade_workspace."
+    },
+    {
+      "id": "C15",
+      "category": "delivery",
+      "text": "Delivery includes src/hefix (the canonical function for each purchased task), all 8 purchased tasks (statement, starting-state overlay, visible test, hidden test), a reference solution for each in solutions/, the grader and environment driver, requirements.lock, Dockerfile.runner, the verification scripts and the conversion script.",
+      "check": "Contents of the delivered bundle."
+    },
+    {
+      "id": "C16",
+      "category": "resources",
+      "text": "Every task, including grading, runs inside a container limited to 1 CPU, 512 MB of memory and 128 processes, with a read-only root filesystem and a 256 MB tmpfs at /tmp.",
+      "check": "Run scripts/verify.sh --docker, which applies exactly these limits."
+    },
+    {
+      "id": "C17",
+      "category": "size",
+      "text": "src/hefix has 8 function modules plus __init__.py, with fewer than 300 lines of Python in total.",
+      "check": "wc -l src/hefix/*.py"
+    },
+    {
+      "id": "C18",
+      "category": "license",
+      "text": "The upstream material (function code, docstrings and tests from HumanEvalPack and OpenAI HumanEval) is MIT-licensed and stays MIT. The MIT notices ship in LICENSE-ENV.md and src/README.md, and this listing does not restrict that material. The seller's additions (grader, scripts, task statements, packaging) are licensed non-exclusively for internal training and evaluation.",
+      "check": "LICENSE-ENV.md; src/README.md."
+    },
+    {
+      "id": "C19",
+      "category": "provenance",
+      "text": "The upstream content is public and freely available at the URL and revision in C2. What this listing adds is the conversion into RL episodes, the grader and environment driver, verification and packaging. provenance.json records both upstream sources with their licenses, the exact revision, the file sha256 and the task mapping. No funders or related parties are declared, and there are no conflicts to disclose.",
+      "check": "provenance.json"
+    }
+  ],
+  "notClaimed": [
+    "No claim is made that training on these tasks improves model performance.",
+    "No claim of novelty or freedom from contamination: HumanEval (2021) and HumanEvalPack (2023) are public, and models may have seen these functions, solutions and tests during training.",
+    "Difficulty labels are the seller's judgment, not a measured property.",
+    "The upstream test functions are the only hidden tests. No claim is made that they catch every incorrect fix."
+  ]
+}

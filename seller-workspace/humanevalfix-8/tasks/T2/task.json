@@ -1,0 +1,37 @@
+{
+  "taskId": "T2",
+  "set": "purchased",
+  "title": "find_closest_elements() disagrees with its docstring",
+  "statement": "hefix.find_closest_elements.find_closest_elements() does not do what its docstring says. One of the docstring's own examples fails:\n\n    assert find_closest_elements([1.0, 2.0, 3.0, 4.0, 5.0, 2.2]) == (2.0, 2.2)\n\nThe docstring in hefix/find_closest_elements.py is the specification. Fix the implementation so the function matches the docstring for all valid inputs, not just this example. Keep the function name and signature unchanged. Only files matching hefix/*.py are graded.",
+  "targetSkill": "single-function bug repair against a docstring specification",
+  "difficulty": "easy",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": [
+    "hefix/*.py"
+  ],
+  "startingState": {
+    "mechanism": "overlay",
+    "base": "src/",
+    "overlayDir": "overlay/"
+  },
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass",
+  "upstream": {
+    "dataset": "bigcode/humanevalpack",
+    "revision": "9a41762f73a8cb23bb5811b73d5aab164efcf378",
+    "config": "python",
+    "split": "test",
+    "taskId": "Python/20",
+    "humanEvalId": "HumanEval/20",
+    "entryPoint": "find_closest_elements",
+    "bugType": "operator misuse",
+    "failureSymptoms": "incorrect output",
+    "hiddenAssertCount": 5,
+    "visibleExampleCount": 1,
+    "modified": "converted to repair-episode format"
+  }
+}

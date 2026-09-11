@@ -1,0 +1,120 @@
+{
+  "schemaVersion": "1",
+  "environmentType": "coding",
+  "environmentId": "humanevalfix-8",
+  "environmentVersion": "humanevalfix-8@1.0.0",
+  "bundleDigest": "<FILL: 0x sha256 of the canonical tar of the purchased payload WITHOUT manifest.json>",
+  "imageDigest": "<FILL: 0x sha256 image id of the runner image built from Dockerfile.runner (see IMAGE_DIGEST)>",
+  "image": {
+    "base": "python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea",
+    "dockerfile": "Dockerfile.runner",
+    "archive": "<FILL: sha256 of `docker save` archive shipped with the bundle, or null if referenced by digest>"
+  },
+  "taskRoot": "<FILL: 0x merkle root over envmarket.task.v1 leaves>",
+  "taskCount": 8,
+  "taskIds": ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"],
+  "taskMaskOrder": "bit i of an on-chain taskMask refers to taskIds[i]",
+  "auditRoot": "<FILL: 0x merkle root over envmarket.audit.v1 leaves>",
+  "auditTaskCount": 2,
+  "entrypoints": {
+    "reset": {"argv": ["python", "-m", "grader.env", "reset", "{taskId}", "--seed", "{seed}", "--workdir", "{workdir}"]},
+    "step": {"argv": ["python", "-m", "grader.env", "step", "--workdir", "{workdir}", "--action", "{actionJson}"]},
+    "grade": {"argv": ["python", "-m", "grader.env", "grade", "--workdir", "{workdir}"], "artifact": "the episode's final workspace directory"},
+    "close": {"argv": ["python", "-m", "grader.env", "close", "--workdir", "{workdir}"]},
+    "serve": {"argv": ["python", "-m", "grader.env", "serve"], "protocol": "JSON lines: {id, cmd: reset|step|grade|close|ping, ...} -> {id, ok, ...}"},
+    "gradeArtifact": {"argv": ["python", "-m", "grader.grade", "--task", "{taskId}", "--workspace", "{dir}", "--termination", "submitted"]},
+    "cwd": "bundle root",
+    "output": "exactly one JSON object per line on stdout"
+  },
+  "schemas": {
+    "observation.reset": {
+      "taskId": "string", "title": "string", "statement": "string (names the function and quotes one failing docstring example)",
+      "files": "string[] workspace-relative paths", "editable": "string[] glob patterns",
+      "visibleTestCmd": "string", "actionBudget": "int", "timeBudgetSec": "number", "actions": "object"
+    },
+    "action": {
+      "oneOf": [
+        {"type": "list_files", "path": "string? (default '.')"},
+        {"type": "read_file", "path": "string"},
+        {"type": "write_file", "path": "string (must match editable: hefix/*.py)", "content": "string (<= 256 KiB UTF-8)"},
+        {"type": "run_visible_tests"},
+        {"type": "submit"}
+      ]
+    },
+    "observation.step": {
+      "type": "string", "ok": "bool", "error": "string?", "errorCode": "string?",
+      "list_files": {"files": "string[]"},
+      "read_file": {"path": "string", "content": "string (<= 64 KiB)", "truncated": "bool", "bytes": "int"},
+      "write_file": {"path": "string", "bytes": "int"},
+      "run_visible_tests": {"command": "string", "exitCode": "int", "passed": "bool", "timedOut": "bool", "output": "string (tail, <= 8000 chars)"},
+      "envelope": {"done": "bool", "termination": "null|submitted|budget_exhausted|timeout", "actionsUsed": "int", "actionsRemaining": "int", "elapsedSec": "number"}
+    },
+    "gradeResult": {
+      "taskId": "string", "score": "0|1", "success": "bool", "termination": "submitted|budget_exhausted|timeout|incomplete",
+      "passed": "int (0 or 1: each hidden suite is one pytest test)", "failed": "int (0 or 1)", "diagnostics": "object (private; never shown to the agent or published)"
+    }
+  },
+  "grader": {
+    "entrypoint": "python -m grader.grade",
+    "version": "1.0.0",
+    "dependencies": "requirements.lock (pytest 8.3.5, pluggy 1.6.0, iniconfig 2.3.0, packaging 26.3; sha256-pinned)",
+    "successRule": "all hidden tests pass AND termination == submitted",
+    "method": "rebuild starting state (src/ + overlay) in a fresh temp dir, copy only editable files from the workspace, add hidden tests (the upstream HumanEvalPack check() wrapped as one pytest test), run pytest in a subprocess with a timeout, parse JUnit XML",
+    "externalJudge": null
+  },
+  "resources": {
+    "cpu": 1,
+    "memoryMB": 512,
+    "pids": 128,
+    "accelerator": null,
+    "diskMB": 256,
+    "rootFilesystem": "read-only; tmpfs at /tmp",
+    "episodeDurationSec": 600,
+    "actionBudget": 12,
+    "actionBudgetNote": "submit does not count; after 12 tool actions only submit is accepted",
+    "visibleTestTimeoutSec": 60,
+    "gradeTimeoutSec": 120,
+    "concurrency": "episodes are independent; one workdir per episode, safe to run in parallel"
+  },
+  "determinism": {
+    "randomnessSources": [],
+    "seedPolicy": "seed is recorded in episode state and grade diagnostics but does not alter task content",
+    "clocks": "no task or test reads the clock; wall-clock time only affects the episode time budget",
+    "environment": {"PYTHONHASHSEED": "0", "TZ": "UTC", "LC_ALL": "C.UTF-8"},
+    "supportedRuntime": "CPython 3.12 in the runner image (verified on linux/arm64 under Docker) and natively (verified on macOS arm64, CPython 3.12.14)",
+    "resultsVary": false
+  },
+  "networkPolicy": {"mode": "offline", "fixtures": [], "externalDependencies": []},
+  "referenceProtocol": {
+    "models": ["GLM 5.3", "Kimi K3", "Qwen 3.8"],
+    "harness": "<FILL: harness id + digest>",
+    "prompt": "<FILL: system prompt digest>",
+    "decoding": {"temperature": 0, "seed": 0, "maxTokens": "<FILL>"},
+    "taskSelection": "all purchased tasks, one episode each; audit tasks reported separately",
+    "actionBudget": 12,
+    "timeBudgetSec": 600,
+    "successRule": "all hidden tests pass"
+  },
+  "license": {
+    "id": "MIT (upstream material) + envmarket-internal-use-1.0 (seller additions)",
+    "file": "LICENSE-ENV.md",
+    "sha256": "<FILL>",
+    "summary": "Upstream HumanEvalPack/HumanEval material stays under MIT and is not restricted. The seller's additions (grader, scripts, task statements, packaging) are licensed non-exclusively for internal training and evaluation, and redistributing them requires permission (LICENSE-ENV.md).",
+    "exclusive": false,
+    "redistribution": false
+  },
+  "provenance": {
+    "file": "provenance.json",
+    "sha256": "<FILL>",
+    "summary": "converted from HumanEvalPack (bigcode/humanevalpack, python split, revision 9a41762f73a8cb23bb5811b73d5aab164efcf378, MIT), which derives from OpenAI HumanEval (MIT); modified: converted to repair-episode format"
+  },
+  "conflicts": {"funders": [], "relatedParties": [], "notes": "none declared; audit tasks come from the same seeded draw as the purchased tasks and are not independently curated"},
+  "commercialTerms": {
+    "price": "<FILL: USDC, 6 decimals>",
+    "perItemAllocation": "price / taskCount per purchased task",
+    "deliveryWindowSec": 600,
+    "challengeWindowSec": 300,
+    "refundCapBps": 5000,
+    "collateral": "<FILL: USDC>"
+  }
+}

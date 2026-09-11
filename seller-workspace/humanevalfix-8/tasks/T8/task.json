@@ -1,0 +1,37 @@
+{
+  "taskId": "T8",
+  "set": "purchased",
+  "title": "reverse_delete() disagrees with its docstring",
+  "statement": "hefix.reverse_delete.reverse_delete() does not do what its docstring says. One of the docstring's own examples fails:\n\n    assert reverse_delete(\"abcde\",\"ae\") == ('bcd',False)\n\nThe docstring in hefix/reverse_delete.py is the specification. Fix the implementation so the function matches the docstring for all valid inputs, not just this example. Keep the function name and signature unchanged. Only files matching hefix/*.py are graded.",
+  "targetSkill": "single-function bug repair against a docstring specification",
+  "difficulty": "easy",
+  "visibleTestCmd": "python -m pytest -q -p no:cacheprovider visible_tests",
+  "editableFiles": [
+    "hefix/*.py"
+  ],
+  "startingState": {
+    "mechanism": "overlay",
+    "base": "src/",
+    "overlayDir": "overlay/"
+  },
+  "hiddenTestsDir": "tests/",
+  "visibleTestsDir": "visible_tests/",
+  "actionBudget": 12,
+  "timeBudgetSec": 600,
+  "gradeTimeoutSec": 120,
+  "successRule": "all hidden tests pass",
+  "upstream": {
+    "dataset": "bigcode/humanevalpack",
+    "revision": "9a41762f73a8cb23bb5811b73d5aab164efcf378",
+    "config": "python",
+    "split": "test",
+    "taskId": "Python/112",
+    "humanEvalId": "HumanEval/112",
+    "entryPoint": "reverse_delete",
+    "bugType": "operator misuse",
+    "failureSymptoms": "incorrect output",
+    "hiddenAssertCount": 9,
+    "visibleExampleCount": 1,
+    "modified": "converted to repair-episode format"
+  }
+}
