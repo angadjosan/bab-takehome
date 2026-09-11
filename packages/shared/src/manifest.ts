@@ -1,7 +1,12 @@
 /**
- * manifest.json (schemaVersion "1") — fields per RL_ENV_MARKET.md "The environment interface",
- * plus `name`, `environmentVersion` (used in task leaves) and `imageRef` (immutable image reference).
- * Sub-objects are "loose" (unknown keys are preserved) so adapters can extend them.
+ * manifest.json (schemaVersion "1") — fields per RL_ENV_MARKET.md "The environment interface".
+ *
+ * Strict where other components depend on exact values (commitments, counts, digests);
+ * loose elsewhere: the interface table names the fields but not their inner shape, so
+ * sub-objects accept adapter-specific structure (unknown keys are preserved).
+ *
+ * Optional extras used by the demo: `environmentId`, `taskIds` (ASCII-sorted; bit i of an
+ * on-chain taskMask = taskIds[i] = leaf index i), `image`, `grader.digest` (graderDigest in leaves).
  *
  * bundleDigest = sha256(canonical tar of the payload WITHOUT manifest.json).
  * manifestHash = sha256(exact manifest.json bytes). Write it with `serializeManifest` (canonical JSON).
@@ -10,103 +15,72 @@ import type { Hex } from 'viem';
 import { z } from 'zod';
 import { canonicalJson, fromUtf8, sha256Hex } from './hash.ts';
 import { canonicalTarOfDir, type DirTarOptions } from './tar.ts';
-import { zBytes32, zNonNegInt, zPosInt, zUintString } from './schemas.ts';
+import { zBytes32, zNonNegInt, zUintString } from './schemas.ts';
 
 export const ENVIRONMENT_TYPES = ['coding', 'browser', 'tool-use', 'math', 'other'] as const;
 export const NETWORK_MODES = ['offline', 'recorded-fixtures', 'external'] as const;
 
-const zSchemaDoc = z.union([z.string(), z.record(z.string(), z.unknown())]);
+const zEntrypoint = z.union([z.string().min(1), z.looseObject({})]);
+const zDoc = z.union([z.string(), z.array(z.unknown()), z.record(z.string(), z.unknown())]);
+const zStrings = z.union([z.string(), z.array(z.string())]);
 
-export const manifestSchema = z.looseObject({
-  schemaVersion: z.literal('1'),
-  environmentType: z.enum(ENVIRONMENT_TYPES),
-  name: z.string().min(1),
-  environmentVersion: z.string().min(1),
+export const manifestSchema = z
+  .looseObject({
+    schemaVersion: z.literal('1'),
+    environmentType: z.enum(ENVIRONMENT_TYPES),
+    environmentId: z.string().min(1).optional(),
+    environmentVersion: z.string().min(1),
 
-  bundleDigest: zBytes32,
-  imageDigest: zBytes32,
-  imageRef: z.string().min(1), // e.g. "python:3.12-slim@sha256:<64hex>"
+    bundleDigest: zBytes32,
+    imageDigest: zBytes32,
 
-  taskRoot: zBytes32,
-  taskCount: z.number().int().min(1).max(256),
-  auditRoot: zBytes32,
-  auditTaskCount: zNonNegInt,
+    taskRoot: zBytes32,
+    taskCount: z.number().int().min(1).max(256),
+    taskIds: z.array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/)).optional(),
+    auditRoot: zBytes32,
+    auditTaskCount: zNonNegInt,
 
-  entrypoints: z.looseObject({
-    reset: z.string().min(1), // reset(taskId, seed)
-    step: z.string().min(1), // step(action)
-    grade: z.string().min(1), // grade(trajectoryOrArtifact)
-    close: z.string().min(1), // close()
-  }),
-  schemas: z.looseObject({
-    observation: zSchemaDoc,
-    action: zSchemaDoc,
-    gradeResult: zSchemaDoc, // score, success, termination, private diagnostics
-  }),
-  grader: z.looseObject({
-    entrypoint: z.string().min(1),
-    dependencies: z.array(z.string()),
-    version: z.string().min(1),
-    digest: zBytes32, // graderDigest used in task leaves
-    externalJudge: z.string().nullable(),
-  }),
-  resources: z.looseObject({
-    cpu: z.number().positive(),
-    memoryMb: zPosInt,
-    accelerator: z.string().nullable(),
-    diskMb: zPosInt,
-    episodeTimeoutSec: zPosInt,
-    actionBudget: zPosInt,
-    concurrency: zPosInt,
-  }),
-  determinism: z.looseObject({
-    randomnessSources: z.array(z.string()),
-    seedPolicy: z.string().min(1),
-    supportedRuntimes: z.array(z.string()).min(1),
-    resultsMayVary: z.boolean(),
-  }),
-  networkPolicy: z.looseObject({
-    mode: z.enum(NETWORK_MODES),
-    externalDependencies: z.array(z.string()),
-  }),
-  referenceProtocol: z.looseObject({
-    id: z.string().min(1),
-    models: z.array(z.looseObject({ requested: z.string().min(1), artifact: z.string().nullable() })).min(1),
-    harness: z.string().min(1),
-    harnessDigest: zBytes32.optional(),
-    promptDigest: zBytes32.optional(),
-    decoding: z.looseObject({ temperature: z.number().min(0), seed: z.number().int(), maxTokens: zPosInt }),
-    taskSelection: z.string().min(1),
-    actionBudget: zPosInt,
-    timeBudgetSec: zPosInt,
-    successRule: z.string().min(1),
-  }),
-  license: z.looseObject({
-    id: z.string().min(1),
-    summary: z.string().min(1),
-    exclusive: z.boolean(),
-    redistribution: z.boolean(),
-  }),
-  provenance: z.looseObject({
-    authors: z.array(z.string()).min(1),
-    upstreamSources: z.array(z.looseObject({ name: z.string().min(1), license: z.string().min(1), url: z.string().optional() })),
-    funders: z.array(z.string()),
-  }),
-  conflicts: z.looseObject({
-    relatedParties: z.array(z.string()),
-    disclosures: z.array(z.string()),
-  }),
-  commercialTerms: z.looseObject({
-    currency: z.string().min(1), // "tUSDC"
-    decimals: z.number().int().min(0).max(36),
-    price: zUintString, // base units
-    perTaskAllocation: z.union([z.literal('equal'), z.array(zUintString)]),
-    deliveryWindowSec: zPosInt,
-    challengeWindowSec: zPosInt,
-    refundCapBps: z.number().int().min(0).max(10000),
-    collateral: zUintString, // base units
-  }),
-});
+    entrypoints: z.looseObject({ reset: zEntrypoint, step: zEntrypoint, grade: zEntrypoint, close: zEntrypoint }),
+    schemas: z.record(z.string(), zDoc),
+    grader: z.looseObject({
+      entrypoint: z.string().min(1),
+      version: z.string().min(1),
+      dependencies: zStrings,
+      digest: zBytes32.optional(),
+      externalJudge: z.string().nullable(),
+    }),
+    resources: z.looseObject({ cpu: z.number().positive(), accelerator: z.string().nullable() }),
+    determinism: z.looseObject({ randomnessSources: z.array(z.string()), seedPolicy: z.string().min(1) }),
+    networkPolicy: z.looseObject({ mode: z.enum(NETWORK_MODES) }),
+    referenceProtocol: z.looseObject({
+      models: z.array(z.union([z.string().min(1), z.looseObject({ requested: z.string().min(1) })])).min(1),
+      decoding: z.looseObject({ temperature: z.number().min(0), seed: z.number().int() }),
+      taskSelection: z.string().min(1),
+      actionBudget: z.number().int().positive(),
+      timeBudgetSec: z.number().positive(),
+      successRule: z.string().min(1),
+    }),
+    license: z.looseObject({ id: z.string().min(1) }),
+    provenance: z.looseObject({}),
+    conflicts: z.looseObject({ relatedParties: z.array(z.string()) }),
+    commercialTerms: z.looseObject({
+      price: zUintString, // base units (6 decimals)
+      collateral: zUintString, // base units
+      deliveryWindowSec: z.number().int().positive(),
+      challengeWindowSec: z.number().int().positive(),
+      refundCapBps: z.number().int().min(0).max(10000),
+    }),
+  })
+  .superRefine((m, ctx) => {
+    if (m.taskIds) {
+      if (m.taskIds.length !== m.taskCount) ctx.addIssue({ code: 'custom', path: ['taskIds'], message: 'taskIds length != taskCount' });
+      const sorted = [...m.taskIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      if (new Set(m.taskIds).size !== m.taskIds.length) ctx.addIssue({ code: 'custom', path: ['taskIds'], message: 'duplicate taskIds' });
+      if (sorted.some((id, i) => id !== m.taskIds![i])) {
+        ctx.addIssue({ code: 'custom', path: ['taskIds'], message: 'taskIds must be in ASCII order (leaf index = taskMask bit)' });
+      }
+    }
+  });
 
 export type Manifest = z.infer<typeof manifestSchema>;
 
