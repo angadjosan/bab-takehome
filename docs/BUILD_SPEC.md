@@ -15,7 +15,7 @@ demo path.
 ## Deployment target (founder decision, 2026-09-10 — supersedes "Base Sepolia"/"TestUSDC" below)
 
 - **Contracts: Base mainnet (chainId 8453)**, explorer https://basescan.org. Payment token = **real
-  native USDC on Base** (`0x833589fCD6eDb6E08f4c7C32D19b0Ed1f2bD6E9`, 6 decimals — verify with
+  native USDC on Base** (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, 6 decimals — verify with
   `cast call <addr> "symbol()(string)" --rpc-url https://mainnet.base.org` before use). Amounts are
   tiny (see mainnet params). `TestUSDC` is kept ONLY for local anvil tests (chainId 31337); on
   8453 the deploy script takes `TOKEN_ADDR` and deploys no token. No faucet on mainnet.
@@ -32,6 +32,12 @@ demo path.
   GLM, Kimi and Qwen families (resolve at runtime from `GET /inference/v1/models`, record the exact ids in the report; the
   requested names "GLM 5.3 / Kimi K3 / Qwen 3.8" are recorded as `requested`). Validator = a
   different model family (e.g. a DeepSeek or gpt-oss model on Fireworks), recorded in the report.
+  **Verified available on Fireworks (2026-09-10):** the requested panel exists exactly —
+  `accounts/fireworks/models/glm-5p3` (GLM 5.3), `accounts/fireworks/models/kimi-k3` (Kimi K3),
+  `accounts/fireworks/models/qwen3p8-max` (Qwen 3.8). Pin these ids (resolver only as fallback).
+  Validator: `accounts/fireworks/models/deepseek-v4-pro`. Jurors (diverse, disclose shared bases):
+  juror1 `accounts/fireworks/models/deepseek-v4p1-flash`, juror2 `accounts/fireworks/models/gpt-oss-120b`,
+  juror3 `accounts/fireworks/models/glm-5p2`.
 - Env names: `BASE_RPC=https://mainnet.base.org`, `CHAIN_ID=8453`. Local tests: anvil 31337.
 
 Mainnet params (override the demo table below on 8453): price 2 USDC, collateral 2 USDC per sale,
@@ -286,6 +292,69 @@ Chain watcher loop: on `Purchased` → build wrapper, wrap key, sign `DeliveryRe
 
 ## Change log
 - (builders append here)
+- **contracts (2026-09-10):**
+  - *USDC address fixed.* The Base USDC address above was 39 hex digits. Corrected to
+    `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (Circle docs; on-chain `symbol()=USDC`, `decimals()=6`).
+  - *Size split, still one address.* EnvMarket exceeded EIP-170, so the read-only functions live in
+    `EnvMarketViews`. `EnvMarket.fallback()` delegatecalls them, and both inherit `EnvMarketStorage` as
+    their first base so the storage slots match. Clients call every view on the EnvMarket address,
+    using the merged ABI `packages/shared/src/abi/EnvMarket.json`. Constructor:
+    `EnvMarket(IERC20 token, address viewsModule, address initialOwner, Params p)`.
+  - *Pull payments (founder request).* Refunds, returned bonds, seller proceeds and juror rewards are
+    credited to `claimable(address)` (event `Credited(account, amount)`) and paid out by `withdraw()`
+    (event `Withdrawn`). The invariant adds `totalClaimable`:
+    `balanceOf(market) == totalEscrow + totalCollateral + totalBonds + totalJurorStake + treasury + reserve + totalClaimable`.
+    Owner `withdrawTreasury(to, amt)` / `withdrawReserve(to, amt)` push to `to`.
+  - *Params* is a struct (`params()` view, `setParams(Params)`), field order: challengeWindow,
+    deliveryWindow, refundCapBps, penaltyThresholdBps, penaltyBps, feeBps, bondFloor, bondCap, caseFee,
+    participationFee, jurorStake, minoritySlashBps, nonRevealSlashBps, commitWindow, revealWindow,
+    **verifierTimeout** (new, 1800 s). `setParams` requires `3 × participationFee ≤ caseFee`.
+  - *Version windows.* A `VersionInput` window of 0 takes the market default. Otherwise
+    `challengeWindow ≥ params.challengeWindow` (a floor) and `deliveryWindow ≤ params.deliveryWindow`
+    (a cap). `taskCount` must be 1..256; `price > 0`.
+  - *Collateral requirement.* `buy` requires `version.collateral ≥ caseFee + price × penaltyBps / 10000`
+    (error `CollateralBelowRequirement`), so the worst-case seller-side charge is always covered.
+    `caseFee` is snapshotted at purchase. Juror params (participationFee, jurorStake, slash bps,
+    windows) are snapshotted at `openDispute`.
+  - *Mechanical disputes.* While under review, status is `Voting`. Upheld requires
+    `confirmedMask != 0 && ⊆ taskMask`; rejected requires `confirmedMask == 0`. New
+    `timeoutMechanical(disputeId)`: after `verifierDeadline = openedAt + verifierTimeout`, anyone applies
+    the same no-fault fallback as `FallbackNoQuorum` (bond returned, no refund, normal settlement). This
+    keeps escrow from staying locked if the verifier is down.
+  - *Case fee vs bond.* When a Reject verdict's bond is smaller than caseFee (demo bondFloor 5 < caseFee 6),
+    the loser pays `min(caseFee, bond)`. Participation per revealer is
+    `min(participationFee, pot / reveals)`; the rest of the pot plus minority slashes is split among
+    majority seats, and the dust goes to the reserve.
+  - *Fallback recording.* The fallback sets `verdict = Reject` and `fallbackNoQuorum = true`, and emits
+    `FallbackNoQuorum(disputeId, purchaseId)`.
+  - *Jurors.*
+    - Reveal opens after `commitDeadline`, or as soon as all 3 seats of the round have committed.
+    - Selection: a partial Fisher–Yates draw over the eligible pool, using
+      `r_k = keccak256(abi.encode(seed, k))`.
+    - If fewer than 3 jurors are eligible, `selectJurors` reverts `NotEnoughJurors` until
+      `selectionDeadline` (arming time + commitWindow + revealWindow). After that it counts as a
+      failed round (round 2, then fallback).
+    - `SelectionArmed(disputeId, round, selectionBlock)` is emitted on open and on every re-arm.
+    - `JurorsSelected` has a trailing `bytes32 seed`.
+    - Juror registry is capped at 200 addresses. `depositJurorStake` requires approval;
+      `withdrawJurorStake` allows only free (unlocked) stake.
+  - *Ids.* `nextListingId / nextVersionId / nextPurchaseId / nextDisputeId` are the NEXT id to assign
+    (ids start at 1).
+  - *Views.* `getVersion`, `getPurchase`, `getDispute` (→ `(Dispute, Seat[6])`: seats 0–2 are round 1,
+    3–5 are round 2; each seat has `juror, vote, revealed, commitment, reward, slashed`),
+    `sellerStake`, `jurorInfo → (approved,total,locked,free)`, `jurorList`, `versionStats`,
+    `sellerStats`, `sellerScore`, `listingVersionIds`, `listVersionIdsBySeller`,
+    `listPurchaseIdsByBuyer/BySeller`, `quoteDispute(purchaseId, mask) → (requested, bond)`,
+    `commitmentFor(...)`, `domainSeparator()`, `previewReportDigest`, `deliveryReceiptDigest`,
+    `mechanicalFindingDigest`.
+  - *Extra events.* `VersionActiveSet`, `RunnerSet/RelaySet/VerifierSet`, `ParamsUpdated`, `JurorPaid`,
+    `JurorSlashed`, `RoundFailed`, `VerifierTimeout`, `TreasuryWithdrawn/ReserveWithdrawn`.
+    `VersionCreated`, `Purchased` and `Delivered` carry extra trailing args (seller/price/collateral,
+    relay).
+  - *Deploy.* `contracts/scripts/deploy.sh [anvil|base]` takes `TOKEN_ADDR` (required off-anvil;
+    TestUSDC only on 31337), `PARAM_SET=demo|mainnet` (defaults to mainnet on 8453), and
+    `CONFIRM_MAINNET=yes` (required for 8453). It writes `deployments/<chainId>.json` =
+    `{chainId, market, token, views, startBlock, deployer, owner, tokenSymbol, tokenDecimals, testToken, params, deployedAt, txs}`.
 - **packages/shared (2026-09-10)** — conventions fixed where the spec was silent; all implemented in `@envmarket/shared`:
   - **USDC address:** an earlier revision of "Deployment target" had a malformed address (39 hex digits); the corrected `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` was verified against Circle's published list and on-chain (`symbol()`="USDC", `decimals()`=6). Exported as `BASE_USDC`, and the default token on 8453.
   - **Canonical tar:** entries sorted byte-wise by UTF-8 path (the path without its trailing slash); implied parent dirs always added; archive ends with two zero blocks (no padding to a 10240-byte record); paths over 100 bytes use the ustar `prefix` field; no PAX/GNU headers; symlinks and special files rejected. `canonicalTarOfDir` excludes the basenames `.DS_Store`, `__pycache__`, `.pytest_cache`, `.mypy_cache` and `.git` by default (`excludeNames: []` disables this).
