@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { QUALIFY_THRESHOLD, useSellerScore, useSellerStake, type VersionStats } from "@/lib/market";
+import { useSellerScore, useSellerStake, type VersionStats } from "@/lib/market";
+import { useQualifyThreshold } from "@/lib/reads-listing";
 import { fmtDec, fmtUsdc, shortAddr } from "@/lib/format";
 import { Chip, Stars, cx } from "./ui";
 
@@ -24,6 +25,7 @@ export function EnvRating({ stats, className }: { stats?: VersionStats; classNam
 export function SellerLine({ seller }: { seller: `0x${string}` }) {
   const stake = useSellerStake(seller);
   const score = useSellerScore(seller);
+  const threshold = useQualifyThreshold().data;
   const n = score.data?.qualifyingTx;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted">
@@ -37,7 +39,8 @@ export function SellerLine({ seller }: { seller: `0x${string}` }) {
         <Chip tone="ok">{n?.toString()} completed sales</Chip>
       ) : (
         <Chip tone="neutral">
-          New seller · {n?.toString()}/{QUALIFY_THRESHOLD.toString()} sales
+          New seller · {n?.toString()}
+          {threshold ? `/${threshold.toString()}` : ""} sales
         </Chip>
       )}
       {stake.data && (

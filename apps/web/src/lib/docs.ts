@@ -2,10 +2,11 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { recoverTypedDataAddress, type Address, type Hex } from "viem";
-import { CHAIN_ID, deployment, TEE_URL } from "./config";
+import { deployment, TEE_URL } from "./config";
 import { eqHash, sha256Hex } from "./crypto";
 import { fetchBlob, getAttestation, getHealth, getReportBlob, getReportState, type PreviewReport, type SignedReport } from "./tee";
 import { fetchIsRunner, isZeroHash, useMarketEvents, type Version } from "./market";
+import { fetchEip712Domain } from "./reads-listing";
 
 /* ------------------------- hash-verified public documents ------------------------- */
 
@@ -117,10 +118,12 @@ export function useVerifiedReport(version: Version | undefined) {
       let recoveredSigner: Address | undefined;
       let signatureValid: boolean | undefined;
       let signerIsRunner: boolean | undefined;
-      if (s.signature && deployment) {
+      const domain = s.signature && deployment ? await fetchEip712Domain() : null;
+      if (s.signature && !domain) signatureValid = false;
+      if (s.signature && domain) {
         try {
           recoveredSigner = await recoverTypedDataAddress({
-            domain: { name: "EnvMarket", version: "1", chainId: CHAIN_ID, verifyingContract: deployment.market },
+            domain,
             types: {
               PreviewReport: [
                 { name: "versionId", type: "uint256" },
@@ -182,6 +185,18 @@ export function useHealth() {
 export function fmtPass(v: number | null | undefined) {
   if (v === null || v === undefined || Number.isNaN(v)) return "—";
   return `${Math.round(v)}%`;
+}
+
+/**
+ * A model's episodes as the report counts them: `attempted` (purchased + audit) includes episodes that
+ * failed on infrastructure, which score 0, and `infraFailures` counts those across both sets.
+ * `valid` is the episodes that actually ran; `infraMostly` means infra failures are at least half of them all.
+ */
+export function modelRuns(m: { status: string; purchased: { attempted: number }; audit: { attempted: number }; infraFailures: number }) {
+  const total = m.purchased.attempted + m.audit.attempted;
+  const infra = Math.min(m.infraFailures, total);
+  const valid = total - infra;
+  return { total, infra, valid, ran: m.status === "run" && valid > 0, infraMostly: infra > 0 && infra * 2 >= total };
 }
 
 export type { PreviewReport };

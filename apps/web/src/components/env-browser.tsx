@@ -42,9 +42,9 @@ export function EnvBrowser() {
   const totals = useMemo(() => {
     if (!events.data) return null;
     const rows = tradeRows(events.data);
-    const settledVol = rows.reduce((s, r) => s + (r.retained ?? 0n), 0n);
+    const toSellers = events.data.filter((e) => e.eventName === "PurchaseSettled").reduce((s, e) => s + BigInt((e.args.sellerProceeds as bigint | undefined) ?? 0n), 0n);
     const disputes = events.data.filter((e) => e.eventName === "DisputeOpened").length;
-    return { purchases: rows.length, settledVol, disputes };
+    return { purchases: rows.length, toSellers, disputes };
   }, [events.data]);
 
   const [facts, setFacts] = useState<Record<string, EnvFacts>>({});
@@ -116,7 +116,7 @@ export function EnvBrowser() {
           <p className="text-xs text-muted">
             <span className="font-mono text-ink tabular-nums">{totals.purchases}</span> purchase{totals.purchases === 1 ? "" : "s"} ·{" "}
             <span className="font-mono text-ink tabular-nums">{totals.disputes}</span> dispute{totals.disputes === 1 ? "" : "s"} ·{" "}
-            <span className="font-mono text-ink tabular-nums">{fmtUsdc(totals.settledVol)}</span> paid to sellers ·{" "}
+            <span className="font-mono text-ink tabular-nums">{fmtUsdc(totals.toSellers)}</span> paid to sellers ·{" "}
             <Link href="/activity" className="link">
               Activity
             </Link>

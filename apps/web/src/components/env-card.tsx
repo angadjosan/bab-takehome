@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, type ReactNode } from "react";
-import { describe, fmtPass, useDoc, useVerifiedReport } from "@/lib/docs";
+import { describe, fmtPass, modelRuns, useDoc, useVerifiedReport } from "@/lib/docs";
 import { isZeroHash, useSellerScore, useSellerStake, useVersionStats, type Version } from "@/lib/market";
 import type { ModelResult } from "@/lib/tee";
 import { fmtDec, fmtUsdc, fmtWindow, shortAddr } from "@/lib/format";
 import { useTokenInfo } from "./providers";
-import { Chip, IconShield, Skeleton, Stars, type Tone } from "./ui";
+import { Chip, IconShield, Skeleton, Stars, cx, type Tone } from "./ui";
 
 /** What the browser filters and sorts on, reported up by each card from the same queries it renders. */
 export type EnvFacts = {
@@ -30,15 +30,17 @@ function isoDate(d?: string) {
   return Number.isNaN(t.getTime()) ? undefined : t.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-/** Ran models first, highest purchased-task pass@1 first. */
+/** Models with valid (non-infra) runs first, highest purchased-task pass@1 first. */
 function rankModels(models: ModelResult[]) {
   return [...models].sort((a, b) => {
-    const ra = a.status === "run" ? 1 : 0;
-    const rb = b.status === "run" ? 1 : 0;
+    const ra = modelRuns(a).ran ? 1 : 0;
+    const rb = modelRuns(b).ran ? 1 : 0;
     if (ra !== rb) return rb - ra;
     return (b.purchased.pass1Rounded ?? -1) - (a.purchased.pass1Rounded ?? -1);
   });
 }
+
+const infraText = (r: { infra: number; total: number }) => `${r.infra}/${r.total} infra failures`;
 
 type Status = { label: string; tone: Tone; title?: string };
 
@@ -53,8 +55,10 @@ export function EnvCard({ v, hidden, onFacts }: { v: Version; hidden?: boolean; 
   const d = useMemo(() => describe(doc.data?.json), [doc.data]);
   const r = report.data?.report;
   const models = useMemo(() => (r ? rankModels(r.models) : []), [r]);
-  const best = models[0]?.status === "run" && models[0].purchased.pass1Rounded !== null ? models[0] : undefined;
+  const best = models[0] && modelRuns(models[0]).ran && models[0].purchased.pass1Rounded !== null ? models[0] : undefined;
+  const bestRuns = best ? modelRuns(best) : undefined;
   const topPass = best ? best.purchased.pass1Rounded : null;
+  const allRuns = models.map(modelRuns).reduce((s, x) => ({ infra: s.infra + x.infra, total: s.total + x.total }), { infra: 0, total: 0 });
 
   const noReport = isZeroHash(v.reportHash);
   const descBad = !!doc.error || doc.data?.ok === false;
@@ -71,7 +75,7 @@ export function EnvCard({ v, hidden, onFacts }: { v: Version; hidden?: boolean; 
           : report.error
             ? { label: "Report unavailable", tone: "warn" }
             : rv
-              ? { label: "Verified preview", tone: "ok", title: "TEE-signed preview report matches the on-chain reportHash and bundleHash" }
+              ? { label: "Verified preview", tone: "ok", title: ["sha256 = on-chain reportHash", "bundleHash matches", rv.signatureValid ? "EIP-712 signature valid" : null].filter(Boolean).join(" · ") }
               : { label: "Checking preview", tone: "neutral" };
 
   const s = stats.data;
@@ -142,7 +146,7 @@ export function EnvCard({ v, hidden, onFacts }: { v: Version; hidden?: boolean; 
           </div>
         ) : (
           <div className="space-y-2.5">
-            {best ? (
+            {best && bestRuns ? (
               <div className="flex items-end justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate font-mono text-[11px] text-muted" title={best.resolved ?? best.requested} translate="no">
@@ -152,8 +156,14 @@ export function EnvCard({ v, hidden, onFacts }: { v: Version; hidden?: boolean; 
                     pass@1 · n={best.purchased.attempted}
                     {v.auditTaskCount > 0 && best.audit.attempted > 0 && <> · audit {fmtPass(best.audit.pass1Rounded)}</>}
                   </div>
+                  {bestRuns.infra > 0 && <div className={cx("text-[11px]", bestRuns.infraMostly ? "text-warn" : "text-muted")}>{infraText(bestRuns)}</div>}
                 </div>
-                <div className="shrink-0 font-mono text-4xl leading-none font-semibold text-ink tabular-nums">{fmtPass(best.purchased.pass1Rounded)}</div>
+                <div className={cx("shrink-0 font-mono leading-none font-semibold tabular-nums", bestRuns.infraMostly ? "text-2xl text-faint" : "text-4xl text-ink")}>{fmtPass(best.purchased.pass1Rounded)}</div>
+              </div>
+            ) : models.length > 0 && allRuns.infra > 0 ? (
+              <div>
+                <div className="font-mono text-2xl font-medium text-warn">No valid runs</div>
+                <div className="text-[11px] text-muted">{infraText(allRuns)}</div>
               </div>
             ) : (
               <div className="font-mono text-2xl font-medium text-faint">—</div>
@@ -205,7 +215,7 @@ export function EnvCard({ v, hidden, onFacts }: { v: Version; hidden?: boolean; 
               · {s.disputesOpened} disputes{s.disputesOpened > 0 && ` (${s.disputesUpheld} upheld)`}
             </span>
           )}
-          {s && s.retainedVolume > 0n && <span>· {fmtUsdc(s.retainedVolume, { symbol: false })} paid out</span>}
+          {s && s.retainedVolume > 0n && <span>· {fmtUsdc(s.retainedVolume, { symbol: false })} retained</span>}
         </div>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[11px] text-muted tabular-nums" translate="no">
           <Link href={`/seller/${v.seller}`} className="link relative z-10" title={v.seller}>
@@ -229,17 +239,27 @@ function Stat({ children }: { children: ReactNode }) {
 }
 
 function ModelRow({ m }: { m: ModelResult }) {
-  const run = m.status === "run";
+  const runs = modelRuns(m);
   const pct = Math.min(100, m.purchased.pass1Rounded ?? 0);
+  const noValid = m.status === "run" && !runs.ran;
+  const label = runs.ran ? `${fmtPass(m.purchased.pass1Rounded)} solved` : noValid ? `no valid runs, ${infraText(runs)}` : m.status;
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)_3.5rem_2.75rem] items-center gap-x-2 text-xs">
+    <li className="grid grid-cols-[minmax(0,1fr)_3.5rem_auto] items-center gap-x-2 text-xs" title={runs.infra > 0 ? infraText(runs) : undefined}>
       <span className="truncate font-mono text-[11px] text-ink/85" title={m.resolved ?? m.requested} translate="no">
         {m.requested}
       </span>
-      <span className="h-1 overflow-hidden rounded-full bg-panel-2 group-hover:bg-bg" role="img" aria-label={run ? `${fmtPass(m.purchased.pass1Rounded)} solved` : "not run"}>
-        {run && <span className="block h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />}
+      <span className="h-1 overflow-hidden rounded-full bg-panel-2 group-hover:bg-bg" role="img" aria-label={label}>
+        {runs.ran && <span className={cx("block h-full rounded-full", runs.infraMostly ? "bg-faint" : "bg-accent")} style={{ width: `${pct}%` }} />}
       </span>
-      <span className="text-right font-mono text-[11px] tabular-nums">{run ? <span className="text-ink">{fmtPass(m.purchased.pass1Rounded)}</span> : <span className="text-faint">not run</span>}</span>
+      <span className="text-right font-mono text-[11px] tabular-nums">
+        {runs.ran ? (
+          <span className={runs.infraMostly ? "text-faint" : "text-ink"}>{fmtPass(m.purchased.pass1Rounded)}</span>
+        ) : noValid ? (
+          <span className="text-warn">{runs.infra}/{runs.total} infra</span>
+        ) : (
+          <span className="text-faint">{m.status}</span>
+        )}
+      </span>
     </li>
   );
 }

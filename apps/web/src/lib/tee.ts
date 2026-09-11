@@ -142,6 +142,9 @@ const KEYS: Record<string, string[]> = {
   runtime: ["imageDigest", "sandbox", "network"],
   attestation: ["kind", "appId", "signer", "quoteDigest", "verifyUrl"],
 };
+/** packages/shared report.ts EXPLANATION_MAX_WORDS / _BYTES: used only to validate, never displayed. */
+const EXPLANATION_MAX_WORDS = 120;
+const EXPLANATION_MAX_BYTES = 1000;
 const JOB_STATUSES = ["scheduled", "running", "succeeded", "failed", "infra_failure", "superseded", "cancelled"];
 const B32 = /^0x[0-9a-f]{64}$/;
 const ADDR = /^0x[0-9a-fA-F]{40}$/;
@@ -204,7 +207,7 @@ export function checkReportSchema(r: unknown): string[] {
     if (typeof x.validator.explanation !== "string") out.push("validator.explanation is not a string");
     else {
       const words = x.validator.explanation.trim() ? x.validator.explanation.trim().split(/\s+/).length : 0;
-      if (words > 120 || utf8(x.validator.explanation).length > 1000) out.push("validator.explanation exceeds 120 words / 1000 bytes");
+      if (words > EXPLANATION_MAX_WORDS || utf8(x.validator.explanation).length > EXPLANATION_MAX_BYTES) out.push("validator.explanation is over the report schema's length limit");
     }
   }
   if (!Array.isArray(x.jobs)) out.push("jobs is not an array");

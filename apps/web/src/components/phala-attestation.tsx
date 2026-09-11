@@ -5,12 +5,13 @@ import type { AttestationVerifyResult } from "@/app/api/attestation/verify/route
 import { eqHash } from "@/lib/crypto";
 import { Chip, IconExternal, Verified } from "./ui";
 
-/** Badge text per attestation kind. */
-export function teeBadge(kind: string): string {
-  return kind === "phala-dstack-tdx" ? "Phala Cloud · Intel TDX" : kind === "eigencompute-tdx" ? "EigenCompute · Intel TDX" : "none-local-dev: not a TEE";
-}
-
-export const phalaTrustUrl = (appId: string) => `https://trust.phala.com/app/${appId}`;
+const host = (u: string) => {
+  try {
+    return new URL(u).host;
+  } catch {
+    return u;
+  }
+};
 
 /**
  * Result of /api/attestation/verify: the Phala quote checked by Phala's public verifier on this app's
@@ -38,7 +39,7 @@ export function PhalaVerification({ versionId, reportHash }: { versionId?: strin
         <Verified ok={d.ok && hashOk !== false} okText="attestation checks passed" badText="an attestation check failed" />
         {d.trustUrl && (
           <a href={d.trustUrl} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1">
-            Phala Trust Center <IconExternal />
+            {host(d.trustUrl)} <IconExternal />
           </a>
         )}
       </div>
@@ -59,7 +60,10 @@ export function PhalaVerification({ versionId, reportHash }: { versionId?: strin
           </li>
         )}
       </ul>
-      <p className="text-faint">Checked on this app’s server at {new Date(d.checkedAt).toLocaleTimeString()} (Phala’s verifier API has no CORS). Re-run it yourself with the quote from /attestation.</p>
+      <p className="text-faint [overflow-wrap:anywhere]">
+        Checked {new Date(d.checkedAt).toLocaleTimeString()}
+        {d.verifyApi && <> via {d.verifyApi}</>}
+      </p>
     </div>
   );
 }

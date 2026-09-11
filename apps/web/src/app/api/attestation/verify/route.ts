@@ -2,8 +2,8 @@
  * GET /api/attestation/verify[?versionId=<id>]: third-party check of the TEE's Phala Cloud
  * (dstack, Intel TDX) attestation, run on this app's server.
  *
- * It runs server-side because Phala's public quote verifier
- * (POST https://cloud-api.phala.com/api/v1/attestations/verify {hex}) sends no CORS headers.
+ * It runs server-side because the public quote verifier (verifyApi in deployments/phala-tee.json,
+ * POST {hex}) sends no CORS headers.
  * Nothing here trusts the TEE's own claims. Every check recomputes from the raw quote, event log and
  * app-compose that the TEE serves at /attestation, from the chain, or from the published deployment record:
  *   1. quote: Phala's verifier checks the Intel DCAP signature chain and TCB (quote.verified).
@@ -29,8 +29,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const PHALA_VERIFY_API = "https://cloud-api.phala.com/api/v1/attestations/verify";
-const TRUST_CENTER = "https://trust.phala.com/app";
 /** TDX quote v4: 48-byte header + TD report; RTMR3 at 520..568, report_data at 568..632. */
 const RTMR3_OFF = 520;
 const RD_OFF = 568;
@@ -43,7 +41,7 @@ export type AttestationVerifyResult = {
   appId: string | null;
   signer: string | null;
   trustUrl: string | null;
-  verifyApi: string;
+  verifyApi: string | null;
   quoteDigest: string | null;
   composeHash: string | null;
   imageDigest: string | null;
@@ -71,8 +69,9 @@ async function getJson<T = Record<string, unknown>>(url: string, init?: RequestI
 }
 
 type Verdict = { verified: boolean; reportData: string | null; rtmr3: string | null };
-async function phalaVerify(quote: string): Promise<Verdict> {
-  const d = await getJson<{ quote?: { verified?: boolean; body?: { reportdata?: string; rtmr3?: string } } }>(PHALA_VERIFY_API, {
+async function phalaVerify(api: string | null, quote: string): Promise<Verdict> {
+  if (!api) throw new Error("no quote verifier URL in the published deployment record or the TEE's /attestation");
+  const d = await getJson<{ quote?: { verified?: boolean; body?: { reportdata?: string; rtmr3?: string } } }>(api, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ hex: quote }),
@@ -119,6 +118,11 @@ export async function GET(req: NextRequest): Promise<Response> {
   const add = (id: string, label: string, ok: boolean | null, detail?: string) => checks.push({ id, label, ok, detail });
   const kind = String(att.kind ?? "unknown");
   const appId = typeof att.appId === "string" ? att.appId.toLowerCase() : null;
+  const published = generatedDeployments["phala-tee"] as Record<string, unknown> | undefined;
+  const str = (x: unknown) => (typeof x === "string" && /^https:\/\//.test(x) ? x : null);
+  // The quote verifier and trust page come from the published deployment record; the TEE's own values only when there is none.
+  const verifyApi = str(published?.verifyApi) ?? str(att.verifyApi);
+  const trustUrl = (published && String(published.appId).toLowerCase() === appId ? str(published.trustUrl) : null) ?? str(att.verifyUrl);
   const result = (extra: Partial<AttestationVerifyResult>): Response =>
     Response.json(
       {
@@ -126,8 +130,8 @@ export async function GET(req: NextRequest): Promise<Response> {
         kind,
         appId,
         signer: (att.signer as string) ?? null,
-        trustUrl: appId ? `${TRUST_CENTER}/${appId}` : null,
-        verifyApi: PHALA_VERIFY_API,
+        trustUrl,
+        verifyApi,
         quoteDigest: (att.quoteDigest as string) ?? null,
         composeHash: (att.composeHash as string) ?? null,
         imageDigest: null,
@@ -150,11 +154,12 @@ export async function GET(req: NextRequest): Promise<Response> {
   const binding = String(att.binding ?? "");
   const expectedRd = sha("sha512", binding).toString("hex");
   let verdict: Verdict | null = null;
+  const quoteLabel = "Intel TDX quote verified by the public quote verifier (Intel DCAP signature chain and TCB)";
   try {
-    verdict = await phalaVerify(quote);
-    add("quote", "Intel TDX quote verified by Phala's public verifier (Intel DCAP signature chain and TCB)", verdict.verified, verdict.verified ? undefined : "quote.verified = false");
+    verdict = await phalaVerify(verifyApi, quote);
+    add("quote", quoteLabel, verdict.verified, verdict.verified ? (verifyApi ?? undefined) : "quote.verified = false");
   } catch (e) {
-    add("quote", "Intel TDX quote verified by Phala's public verifier (Intel DCAP signature chain and TCB)", false, `verifier error: ${errMsg(e)}`);
+    add("quote", quoteLabel, false, `verifier error: ${errMsg(e)}`);
   }
   const rawRd = slice(quote, RD_OFF, 64);
   const rdOk = rawRd === expectedRd && hex(att.reportData) === expectedRd && (!verdict?.reportData || verdict.reportData === expectedRd);
@@ -212,7 +217,6 @@ export async function GET(req: NextRequest): Promise<Response> {
   const images = [...dockerCompose.matchAll(/^\s*image:\s*(\S+)/gm)].map((m) => m[1]!.replace(/^["']|["']$/g, ""));
   const imageDigest = images[0]?.match(/@(sha256:[0-9a-f]{64})$/)?.[1] ?? null;
   add("imagePinned", "The attested compose pins every image by digest", images.length > 0 && images.every((i) => /@sha256:[0-9a-f]{64}$/.test(i)), images.join(", ") || "no image lines");
-  const published = generatedDeployments["phala-tee"] as Record<string, unknown> | undefined;
   if (published) {
     const ok = hex(published.composeHash) === composeHash && published.imageDigest === imageDigest && String(published.appId).toLowerCase() === appId;
     add("published", "Compose hash, image digest and app id match the published deployment (deployments/phala-tee.json)", ok, `published ${short(hex(published.composeHash))} · ${String(published.imageDigest)}`);
@@ -247,7 +251,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       if (!token || !r.reportHash) add("reportQuote", label, null, "this report carries no quote");
       else {
         const exp = sha("sha512", canonicalize({ type: "envmarket.report.attestation.v1", versionId: vid, reportHash: r.reportHash })!).toString("hex");
-        const pv = await phalaVerify(token);
+        const pv = await phalaVerify(verifyApi, token);
         const same = slice(token, RTMR3_OFF, 48) === quoteRtmr3;
         add("reportQuote", label, pv.verified && slice(token, RD_OFF, 64) === exp, `${pv.verified ? "verified" : "NOT verified"}; ${same ? "same" : "different"} RTMR3 as the running compose`);
       }

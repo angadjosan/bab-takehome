@@ -9,7 +9,7 @@ import { deployment } from "@/lib/config";
 import { useWalletEncKey } from "@/lib/enc-derive";
 import { fmtUsdc } from "@/lib/format";
 import { useEncKeys } from "@/lib/keys";
-import { isZeroHash, useSellerStake, type Version } from "@/lib/market";
+import { isZeroHash, useMarketParams, useSellerStake, type Version } from "@/lib/market";
 import { useTokenInfo, useWalletMode } from "./providers";
 import { friendlyError, RequireWallet, TxStatus, useTx } from "./tx";
 import { useApproveAndCall } from "./tx-sequence";
@@ -20,9 +20,13 @@ export function BuyPanel({ v }: { v: Version }) {
   const { address } = useAccount();
   const { mode } = useWalletMode();
   const stake = useSellerStake(v.seller);
+  const params = useMarketParams();
   const blockers: string[] = [];
   if (!v.active) blockers.push("The seller has paused sales of this version.");
   if (isZeroHash(v.reportHash)) blockers.push("No signed preview report is attached yet.");
+  // buy() requires collateral ≥ caseFee + price·penaltyBps/10000 (CollateralBelowRequirement)
+  const required = params.data ? params.data.caseFee + (v.price * BigInt(params.data.penaltyBps)) / 10000n : undefined;
+  if (required !== undefined && v.collateral < required) blockers.push(`This version’s collateral (${fmtUsdc(v.collateral)}) is below the ${fmtUsdc(required)} the market requires per sale.`);
   if (stake.data && stake.data.available < v.collateral)
     blockers.push(`The seller’s available stake (${fmtUsdc(stake.data.available)}) is below the ${fmtUsdc(v.collateral)} collateral each sale reserves.`);
   if (address && address.toLowerCase() === v.seller.toLowerCase()) blockers.push("This is your own listing.");
@@ -43,7 +47,7 @@ export function BuyPanel({ v }: { v: Version }) {
     );
 
   return (
-    <RequireWallet why={mode === "privy" ? "Sign in to buy, with your email or a wallet you already have." : "Connect a wallet to buy."}>
+    <RequireWallet why={mode === "privy" ? "Sign in to buy." : "Connect a wallet to buy."}>
       <BuyAction v={v} />
     </RequireWallet>
   );
@@ -99,9 +103,9 @@ function BuyAction({ v }: { v: Version }) {
   const buttonText = phase
     ? "Waiting for your signature…"
     : seq.step === "1/2"
-      ? "Allowing the payment… (1 of 2)"
+      ? `Allowing the payment… (${seq.step})`
       : seq.step === "2/2"
-        ? "Paying… (2 of 2)"
+        ? `Paying… (${seq.step})`
         : seq.busy
           ? "Paying…"
           : `Buy for ${fmtUsdc(v.price)}`;

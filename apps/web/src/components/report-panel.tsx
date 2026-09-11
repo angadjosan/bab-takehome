@@ -1,14 +1,13 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { fmtPass, useAttestation, useReportState, useVerifiedReport, type ReportVerification } from "@/lib/docs";
+import { fmtPass, modelRuns, useAttestation, useReportState, useVerifiedReport, type ReportVerification } from "@/lib/docs";
 import { eqHash } from "@/lib/crypto";
-import { IS_MAINNET } from "@/lib/config";
 import { isZeroHash, type Version } from "@/lib/market";
 import { fmtTime, fmtUsdc } from "@/lib/format";
 import type { Outcome } from "@/lib/tee";
-import { PhalaVerification, phalaTrustUrl, teeBadge } from "./phala-attestation";
-import { AddressLink, Chip, DetailSection, HashValue, IconExternal, Notice, Skeleton, Spinner, TxLink, Verified } from "./ui";
+import { PhalaVerification } from "./phala-attestation";
+import { AddressLink, Chip, cx, DetailSection, HashValue, IconExternal, Notice, Skeleton, Spinner, TxLink, Verified } from "./ui";
 
 const iso = (s?: string | null) => (s ? fmtTime(Date.parse(s) / 1000) : "—");
 
@@ -103,27 +102,27 @@ export function ReportScores({ v }: { v: Version }) {
               </tr>
             </thead>
             <tbody>
-              {r.models.map((m) => (
-                <tr key={m.requested + (m.resolved ?? "")}>
-                  <td>
-                    <div className="text-ink">{m.requested}</div>
-                    <div className="font-mono text-[11px] text-muted">
-                      {m.resolved ?? "—"}
-                      {m.provider ? ` · ${m.provider}` : ""}
-                    </div>
-                  </td>
-                  <td>
-                    <Chip tone={m.status === "run" ? "neutral" : "warn"}>{m.status}</Chip>
-                  </td>
-                  <td>
-                    <Score o={m.purchased} bar />
-                  </td>
-                  <td>
-                    <Score o={m.audit} />
-                  </td>
-                  <td className="font-mono">{m.infraFailures}</td>
-                </tr>
-              ))}
+              {r.models.map((m) => {
+                const runs = modelRuns(m);
+                const noValid = m.status === "run" && !runs.ran;
+                return (
+                  <tr key={m.requested + (m.resolved ?? "")}>
+                    <td>
+                      <div className="text-ink">{m.requested}</div>
+                      <div className="font-mono text-[11px] text-muted">
+                        {m.resolved ?? "—"}
+                        {m.provider ? ` · ${m.provider}` : ""}
+                      </div>
+                    </td>
+                    <td>{noValid ? <Chip tone="warn">no valid runs</Chip> : <Chip tone={m.status === "run" ? "neutral" : "warn"}>{m.status}</Chip>}</td>
+                    <td>{noValid ? <span className="font-mono text-faint">—</span> : <Score o={m.purchased} bar faint={runs.infraMostly} />}</td>
+                    <td>{noValid ? <span className="font-mono text-faint">—</span> : <Score o={m.audit} faint={runs.infraMostly} />}</td>
+                    <td className={cx("font-mono", runs.infraMostly ? "text-warn" : undefined)}>
+                      {runs.infra}/{runs.total}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -147,15 +146,15 @@ export function ReportScores({ v }: { v: Version }) {
   );
 }
 
-function Score({ o, bar }: { o: Outcome; bar?: boolean }) {
+function Score({ o, bar, faint }: { o: Outcome; bar?: boolean; faint?: boolean }) {
   return (
     <span className="inline-flex items-center gap-2 font-mono">
       {bar && (
         <span className="h-1.5 w-16 overflow-hidden rounded-full bg-panel-2" aria-hidden>
-          <span className="block h-full rounded-full bg-accent" style={{ width: `${Math.min(100, o.pass1Rounded ?? 0)}%` }} />
+          <span className={cx("block h-full rounded-full", faint ? "bg-faint" : "bg-accent")} style={{ width: `${Math.min(100, o.pass1Rounded ?? 0)}%` }} />
         </span>
       )}
-      <span className="text-ink">{fmtPass(o.pass1Rounded)}</span>
+      <span className={faint ? "text-faint" : "text-ink"}>{fmtPass(o.pass1Rounded)}</span>
       <span className="text-muted">
         {o.solved}/{o.attempted}
       </span>
@@ -184,7 +183,7 @@ export function ReportDetails({ v }: { v: Version }) {
       <DetailSection title="Report checks">
         <div className="flex flex-wrap gap-1.5">
           <Verified ok={d.hashMatchesChain} okText="sha256 = on-chain reportHash" badText="hash ≠ on-chain" title={`computed ${d.computedHash}`} />
-          {d.signature ? <Verified ok={!!d.signatureValid && d.signerIsRunner !== false} okText="EIP-712 signer is a runner" badText="signer not a runner" /> : <Chip>signature checked by the contract at attach</Chip>}
+          {d.signature ? <Verified ok={!!d.signatureValid && d.signerIsRunner !== false} okText="EIP-712 signer is a runner" badText="signer not a runner" /> : <Verified ok={null} title="The TEE served no signature for this report" />}
           <Verified ok={d.schemaProblems.length === 0 && d.canonical} okText="strict report schema" badText="schema problems" title={d.schemaProblems.join("\n")} />
           <Verified ok={d.versionMatches} okText="versionId matches" badText="versionId ≠ this version" />
           <Verified ok={d.bundleMatches} okText="bundleHash matches" badText="bundleHash ≠ on-chain" />
@@ -379,14 +378,14 @@ function AttestationBlock({ rv }: { rv: ReportVerification }) {
   const att = rv.report.attestation;
   const real = att.kind !== "none-local-dev";
   const phala = att.kind === "phala-dstack-tdx";
-  // att.verifyUrl when the report has one; otherwise the Phala Trust Center or EigenCloud page for att.appId
-  const verifyUrl = att.verifyUrl ?? (phala && att.appId ? phalaTrustUrl(att.appId) : real && att.appId ? `https://${IS_MAINNET ? "verify" : "verify-sepolia"}.eigencloud.xyz/app/${att.appId}` : null);
+  // the report's own verifyUrl; else the one the TEE serves now for the same app id
+  const verifyUrl = att.verifyUrl ?? (att.appId && live.data?.appId === att.appId ? (live.data.verifyUrl ?? null) : null);
   const roles = live.data?.signerRoles;
   return (
     <DetailSection title="attestation">
       <dl className="kv">
         <Row k="kind">
-          <Chip tone={real ? "ok" : "warn"}>{teeBadge(att.kind)}</Chip>
+          <Chip tone={real ? "ok" : "warn"}>{att.kind}</Chip>
         </Row>
         <Row k="appId">
           <Mono>{att.appId ?? "null"}</Mono>
