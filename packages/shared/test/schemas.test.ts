@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ATTESTATION_KINDS,
   descriptionHash,
   manifestHash,
   parseDescription,
@@ -168,8 +169,26 @@ describe('report', () => {
     const kind = structuredClone(sampleReport) as any;
     kind.attestation.kind = 'mock';
     expect(() => parseReport(kind)).toThrow();
+    kind.attestation.kind = 'phala-dstack';
+    expect(() => parseReport(kind)).toThrow();
     const extra = { ...sampleReport, extra: 1 };
     expect(() => parseReport(extra)).toThrow();
+  });
+  it('accepts every TEE attestation kind (EigenCompute JWT, Phala dstack TDX quote)', () => {
+    const phala = structuredClone(sampleReport);
+    phala.attestation = {
+      kind: 'phala-dstack-tdx',
+      appId: 'ea549f02e1a25fabd1cb788380e033ec5461b2ff',
+      signer: sampleReport.signer,
+      quoteDigest: h('tdx quote bytes'),
+      verifyUrl: 'https://trust.phala.com/app/ea549f02e1a25fabd1cb788380e033ec5461b2ff',
+    };
+    expect(parseReport(serializeReport(phala))).toEqual(phala);
+    expect(reportHash(phala)).not.toBe(reportHash(sampleReport));
+    const eigen = structuredClone(phala);
+    eigen.attestation.kind = 'eigencompute-tdx';
+    expect(parseReport(eigen).attestation.kind).toBe('eigencompute-tdx');
+    expect(ATTESTATION_KINDS).toEqual(['eigencompute-tdx', 'phala-dstack-tdx', 'none-local-dev']);
   });
   it('accepts the optional TEE fields and stays strict about their shape', () => {
     const full: Report = {

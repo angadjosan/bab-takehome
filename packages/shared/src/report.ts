@@ -13,7 +13,11 @@ export const SUCCESS_RULE_ALL_TESTS = 'all hidden tests pass';
 export const WITHHELD_EXPLANATION = 'Explanation withheld by output screening.';
 export const EXPLANATION_MAX_WORDS = 120;
 export const EXPLANATION_MAX_BYTES = 1000;
-export const ATTESTATION_KINDS = ['eigencompute-tdx', 'none-local-dev'] as const;
+/**
+ * eigencompute-tdx: EigenCompute KMS-issued attestation JWT; phala-dstack-tdx: Phala Cloud dstack
+ * Intel TDX DCAP quote (quoteDigest = sha256 of the quote bytes); none-local-dev: no TEE.
+ */
+export const ATTESTATION_KINDS = ['eigencompute-tdx', 'phala-dstack-tdx', 'none-local-dev'] as const;
 export const JOB_STATUSES = ['scheduled', 'running', 'succeeded', 'failed', 'infra_failure', 'superseded', 'cancelled'] as const;
 
 /** Round a pass rate in [0,1] to the nearest 5 percentage points (half up). Returns integer percent. */
