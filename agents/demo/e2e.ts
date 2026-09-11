@@ -18,7 +18,8 @@
  *
  * Env: LISTING_PRICE / LISTING_COLLATERAL (token units; defaults: TestUSDC 100/100 — anvil and Base Sepolia —
  *   else 0.5/0.5; collateral is raised to the contract floor caseFee + penalty if below),
- * BUYER_BUDGET, BUYER2_BUDGET, FAST_FORWARD=1 (anvil time travel), TEE_URL, E2E_DISPUTE_TIMEOUT_SEC.
+ * BUYER_BUDGET, BUYER2_BUDGET, FAST_FORWARD=1 (anvil time travel), TEE_URL, E2E_DISPUTE_TIMEOUT_SEC,
+ * MIN_ACTOR_ETH (per-actor gas ETH floor off anvil; default 0.00002).
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -104,7 +105,9 @@ const needs: Record<string, bigint> = {
   juror3: jurorStake,
   deployer: 0n,
 };
-const gasNeed = onAnvil ? parseEther('10') : ctx.chainId === 84532 ? parseEther('0.0003') : parseEther('0.00002');
+// Per-actor minimum gas ETH off anvil. A full run costs each actor < ~0.000015 ETH at Base Sepolia
+// prices (~0.006 gwei, <=12 txs), so the default is 0.00002; override with MIN_ACTOR_ETH.
+const gasNeed = onAnvil ? parseEther('10') : parseEther(env.MIN_ACTOR_ETH ?? '0.00002');
 let missing = false;
 for (const r of roles) {
   const a = addr(r);

@@ -103,6 +103,8 @@ export interface SendReq {
   functionName: string;
   args?: readonly unknown[];
   label?: string;
+  /** Explicit nonce (for back-to-back sends from one account behind a load-balanced RPC). */
+  nonce?: number;
 }
 
 export interface Sent {
@@ -127,7 +129,7 @@ export async function send(c: Clients, req: SendReq): Promise<Sent> {
     args: req.args,
     account: c.account,
   } as never);
-  const hash = await c.walletClient.writeContract(request as never);
+  const hash = await c.walletClient.writeContract((req.nonce === undefined ? request : { ...(request as object), nonce: req.nonce }) as never);
   const receipt = await c.publicClient.waitForTransactionReceipt({ hash, timeout: 180_000 });
   const url = explorerTx(c.chain.id, hash);
   const label = req.label ?? req.functionName;

@@ -96,23 +96,31 @@ if (!yes) {
 if (!([ANVIL, BASE_SEPOLIA] as number[]).includes(ctx.chainId)) process.env.ALLOW_LIVE_TX = '1'; // --yes is the explicit consent off the default chains
 assertTxAllowed(ctx.chainId);
 
+// Nonce safety: the public (load-balanced) RPC can report a stale pending nonce between back-to-back
+// sends from the DEPLOYER, so its nonce is read once and assigned explicitly; every tx also waits
+// for its receipt before the next one. Anvil keeps viem's automatic nonces.
+let deployerNonce: number | undefined =
+  ctx.chainId === ANVIL ? undefined : await pc.getTransactionCount({ address: deployer.account.address, blockTag: 'pending' });
+const nextNonce = (): number | undefined => (deployerNonce === undefined ? undefined : deployerNonce++);
+
 for (const r of rows) {
   if (r.sendEth > 0n) {
     if (ctx.chainId === ANVIL) {
       await pc.request({ method: 'anvil_setBalance' as never, params: [r.address, `0x${(r.sendEth + (await pc.getBalance({ address: r.address }))).toString(16)}`] as never });
       console.log(`  ⛽ anvil_setBalance(${r.role})`);
     } else {
-      const hash = await deployer.walletClient.sendTransaction({ to: r.address, value: r.sendEth });
-      const rc = await pc.waitForTransactionReceipt({ hash });
+      const hash = await deployer.walletClient.sendTransaction({ to: r.address, value: r.sendEth, nonce: nextNonce() } as never);
+      const rc = await pc.waitForTransactionReceipt({ hash, timeout: 180_000 });
       const url = explorerTx(ctx.chainId, hash);
       console.log(`  ⛓  fund.eth(${r.role}) ${url ?? hash} [${rc.status}]`);
       TX_LOG.push({ label: `fund.eth(${r.role})`, from: deployer.account.address, hash, url, block: rc.blockNumber, gasUsed: rc.gasUsed });
+      if (rc.status !== 'success') throw new Error(`fund.eth(${r.role}) reverted: ${hash}`);
     }
   }
   if (r.sendTok > 0n) {
-    if (r.how === 'mint') await send(deployer, { address: ctx.token, abi: testAbi, functionName: 'mint', args: [r.address, r.sendTok], label: `fund.mint(${r.role})` });
+    if (r.how === 'mint') await send(deployer, { address: ctx.token, abi: testAbi, functionName: 'mint', args: [r.address, r.sendTok], label: `fund.mint(${r.role})`, nonce: nextNonce() });
     else if (r.how === 'faucet') await send(signer(ctx, r.role as Role), { address: ctx.token, abi: testAbi, functionName: 'faucet', args: [], label: `${r.role}.faucet()` });
-    else if (r.how === 'transfer') await send(deployer, { address: ctx.token, abi: erc20Abi as Abi, functionName: 'transfer', args: [r.address, r.sendTok], label: `fund.transfer(${r.role})` });
+    else if (r.how === 'transfer') await send(deployer, { address: ctx.token, abi: erc20Abi as Abi, functionName: 'transfer', args: [r.address, r.sendTok], label: `fund.transfer(${r.role})`, nonce: nextNonce() });
   }
 }
 console.log(`done: ${TX_LOG.length} transaction(s)`);
