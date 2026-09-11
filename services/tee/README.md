@@ -166,11 +166,11 @@ If any check fails it returns HTTP 402 (or 409 for the deadline). `attachReport`
 
 The harness enforces the per-model `fullBudgetIn`/`fullBudgetOut` token bound. It never starts a call that could push cumulative prompt tokens past `fullBudgetIn` (estimated at 3 chars/token), and it caps `max_tokens` at the remaining `fullBudgetOut`. So `worstCase` is a real bound. An episode stopped this way counts as failed.
 
-Actual usage (prompt, cached prompt and completion tokens) and USD cost are stored per episode and for the validator in the private run records. `/preview` and `/reports` return `inferenceCostUsd` (actual; 0 when a cached run is reused) and `feePaidUsdc`. They go into `report.json` too once the shared schema has those fields.
+Actual usage (prompt, cached prompt and completion tokens) and USD cost are stored per episode and for the validator in the private run records. `/preview` and `/reports` return `inferenceCostUsd` (actual; 0 when a cached run is reused) and `feePaidUsdc`. `report.json` carries them too (`feePaidUsdc` only for a paid preview).
 
 **Inference runs once per environment.** A completed run (with no infra failures) is stored as a signed, encrypted cache entry. Its key is `(bundleHash, auditRoot, protocol id, harnessDigest, promptDigest, validator promptHash, panel model ids, validator model)`; versionId, market and chain are not part of it. Any later version with the same key, on any listing, contract or chain, is served from it:
 - `report.json` is rebuilt for the new `versionId` with the original jobs, run dates and scores, and freshly signed;
-- it records `cachedFrom {originalRunAt, originalVersionId, originalChainId}` once shared's schema has the field, and a disclosure note in `uncertainty` until then;
+- it records `cachedFrom {originalRunAt, originalVersionId, originalChainId}` and `inferenceCostUsd: 0`;
 - reuse never upgrades trust: a run made in local dev yields reports labeled `none-local-dev`, even when an EigenCompute deployment re-signs them.
 
 To seed another deployment, run:

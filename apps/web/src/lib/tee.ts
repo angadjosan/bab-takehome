@@ -110,6 +110,8 @@ export type PreviewReport = {
     actionBudget: number;
     timeBudgetSec: number;
     successRule: string;
+    toolsDigest?: Hex;
+    tokenBoundEnforced?: boolean;
   };
   models: ModelResult[];
   uncertainty: string;
@@ -119,6 +121,15 @@ export type PreviewReport = {
   attestation: { kind: "eigencompute-tdx" | "none-local-dev"; appId: string | null; signer: Address; quoteDigest: string | null; verifyUrl: string | null };
   signer: Address;
   createdAt: string;
+  cachedFrom?: { originalRunAt: string; originalVersionId: string; originalChainId: number };
+  inferenceCostUsd?: number;
+  feePaidUsdc?: string;
+};
+
+/** Keys reportSchema allows but does not require (absent in older reports). */
+const OPTIONAL_KEYS: Record<string, string[]> = {
+  report: ["cachedFrom", "inferenceCostUsd", "feePaidUsdc"],
+  protocol: ["toolsDigest", "tokenBoundEnforced"],
 };
 
 const KEYS: Record<string, string[]> = {
@@ -153,7 +164,8 @@ export function checkReportSchema(r: unknown): string[] {
       return false;
     }
     const have = Object.keys(v);
-    const extra = have.filter((k) => !keys.includes(k));
+    const optional = OPTIONAL_KEYS[name] ?? [];
+    const extra = have.filter((k) => !keys.includes(k) && !optional.includes(k));
     const missing = keys.filter((k) => !have.includes(k));
     if (extra.length) out.push(`${name} has unknown keys: ${extra.join(", ")}`);
     if (missing.length) out.push(`${name} is missing: ${missing.join(", ")}`);
@@ -167,7 +179,15 @@ export function checkReportSchema(r: unknown): string[] {
   if (obj(x.protocol, "protocol", KEYS.protocol)) {
     if (!B32.test(String(x.protocol.harnessDigest))) out.push("protocol.harnessDigest is not bytes32");
     if (!B32.test(String(x.protocol.promptDigest))) out.push("protocol.promptDigest is not bytes32");
+    if (x.protocol.toolsDigest !== undefined && !B32.test(String(x.protocol.toolsDigest))) out.push("protocol.toolsDigest is not bytes32");
+    if (x.protocol.tokenBoundEnforced !== undefined && typeof x.protocol.tokenBoundEnforced !== "boolean") out.push("protocol.tokenBoundEnforced is not a boolean");
   }
+  if (x.cachedFrom !== undefined && obj(x.cachedFrom, "cachedFrom", ["originalRunAt", "originalVersionId", "originalChainId"])) {
+    if (!/^[0-9]+$/.test(String(x.cachedFrom.originalVersionId))) out.push("cachedFrom.originalVersionId is not a decimal string");
+    if (!Number.isInteger(x.cachedFrom.originalChainId) || x.cachedFrom.originalChainId <= 0) out.push("cachedFrom.originalChainId is not a positive integer");
+  }
+  if (x.inferenceCostUsd !== undefined && !(typeof x.inferenceCostUsd === "number" && Number.isFinite(x.inferenceCostUsd) && x.inferenceCostUsd >= 0)) out.push("inferenceCostUsd is not a non-negative number");
+  if (x.feePaidUsdc !== undefined && !/^(0|[1-9][0-9]*)$/.test(String(x.feePaidUsdc))) out.push("feePaidUsdc is not a decimal string");
   if (!Array.isArray(x.models) || x.models.length === 0) out.push("models is empty");
   else
     x.models.forEach((m, i) => {

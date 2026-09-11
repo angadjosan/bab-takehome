@@ -72,6 +72,10 @@ export const reportSchema = z.strictObject({
     actionBudget: z.number().int().positive(),
     timeBudgetSec: z.number().int().positive(),
     successRule: z.string().min(1),
+    /** harness digest of the tool interface generated from this bundle's manifest (committed inside harnessDigest) */
+    toolsDigest: zBytes32.optional(),
+    /** true when every run panel model had a cumulative per-episode token cap (--max-episode-tokens) */
+    tokenBoundEnforced: z.boolean().optional(),
   }),
   models: z.array(reportModelSchema).min(1),
   uncertainty: z.string().min(1),
@@ -100,6 +104,18 @@ export const reportSchema = z.strictObject({
   }),
   signer: zAddress,
   createdAt: zIsoDate,
+  /** set when episodes were not re-run: the report reuses the preview cache entry of an earlier run */
+  cachedFrom: z
+    .strictObject({
+      originalRunAt: zIsoDate,
+      originalVersionId: zUintString,
+      originalChainId: z.number().int().positive(),
+    })
+    .optional(),
+  /** actual inference spend for this report in USD (0 when a cached run was reused) */
+  inferenceCostUsd: z.number().nonnegative().finite().optional(),
+  /** preview fee the seller escrowed on-chain (USDC base units, decimal string) */
+  feePaidUsdc: zUintString.optional(),
 });
 
 export type Report = z.infer<typeof reportSchema>;

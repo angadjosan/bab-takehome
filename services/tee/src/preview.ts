@@ -33,7 +33,7 @@ import { loadUpload, openAudit, openBundle, type UploadRecord } from './bundle.t
 import { getCacheEntry, previewCacheKey, putCacheEntry, signEntry, type PreviewCacheEntry, type PreviewCacheKeyInput } from './cache.ts';
 import { abiHas, ZERO32, type VersionTerms } from './chain.ts';
 import { domainOf, requireChain, type Ctx } from './context.ts';
-import { COST_MODEL_VERSION, feeUsdcBaseUnits, quotePreviewCost, type CostQuote } from './cost.ts';
+import { COST_MODEL_VERSION, feeUsdcBaseUnits, quotePreviewCost, tokenBudgetFor, type CostQuote } from './cost.ts';
 import { bundleDigest, missingEpisode, runHarness, toEpisodeResult, type EpisodeResult } from './harnessRunner.ts';
 import { errMsg, logger } from './log.ts';
 import { llmClient, resolveModels, type ResolvedModels } from './models.ts';
@@ -347,36 +347,9 @@ export async function previewPreconditions(ctx: Ctx, versionId: bigint): Promise
   return { terms, upload, models, cacheKey, keyInput, hit, payment };
 }
 
-const reportShape = (reportSchema as unknown as { shape: Record<string, unknown> }).shape;
-
-/**
- * Add optional report fields (cachedFrom, inferenceCostUsd, feePaidUsdc) only if the shared strict
- * schema knows them and accepts the values; otherwise fall back to a disclosure note.
- */
-function withOptionalFields(base: Record<string, unknown>, extra: Record<string, unknown>, fallbackNote: string): Record<string, unknown> {
-  const r = { ...base };
-  const added: string[] = [];
-  for (const [k, v] of Object.entries(extra)) if (k in reportShape && v !== undefined && v !== null) (r[k] = v), added.push(k);
-  for (;;) {
-    try {
-      reportSchema.parse(r);
-      break;
-    } catch {
-      const k = added.pop();
-      if (!k) throw new Error('report does not match the shared schema');
-      delete r[k];
-    }
-  }
-  if (fallbackNote && !added.includes('cachedFrom')) r.uncertainty = String(r.uncertainty) + fallbackNote;
-  return r;
-}
-
 function reportFromEntry(ctx: Ctx, e: PreviewCacheEntry, terms: VersionTerms, versionId: bigint, payment: Payment | null): Report {
   const att = ctx.attestor.reportBlock();
-  const note =
-    ` Reused preview: originally run at ${e.original.runAt} for version ${e.original.versionId} on chain ${e.original.chainId}` +
-    ` (${e.original.attestationKind}); episodes were not re-run for this version.`;
-  const base: Record<string, unknown> = {
+  return reportSchema.parse({
     type: REPORT_TYPE,
     versionId: versionId.toString(),
     environmentVersion: e.environmentVersion,
@@ -394,16 +367,10 @@ function reportFromEntry(ctx: Ctx, e: PreviewCacheEntry, terms: VersionTerms, ve
     attestation: { ...att, kind: e.original.attestationKind === 'eigencompute-tdx' ? att.kind : 'none-local-dev' },
     signer: ctx.keys.account.address,
     createdAt: nowIso(),
-  };
-  return withOptionalFields(
-    base,
-    {
-      cachedFrom: { originalRunAt: e.original.runAt, originalVersionId: e.original.versionId, originalChainId: e.original.chainId },
-      inferenceCostUsd: 0,
-      feePaidUsdc: payment ? payment.fee.toString() : undefined,
-    },
-    note,
-  ) as unknown as Report;
+    cachedFrom: { originalRunAt: e.original.runAt, originalVersionId: e.original.versionId, originalChainId: e.original.chainId },
+    inferenceCostUsd: 0,
+    ...(payment ? { feePaidUsdc: payment.fee.toString() } : {}),
+  });
 }
 
 interface FreshRun {
@@ -508,6 +475,8 @@ function freshReport(ctx: Ctx, versionId: bigint, terms: VersionTerms, upload: U
       actionBudget: cfg.preview.actionBudget,
       timeBudgetSec: cfg.preview.episodeTimeSec,
       successRule: SUCCESS_RULE_ALL_TESTS,
+      ...(fresh.toolsDigest ? { toolsDigest: fresh.toolsDigest } : {}),
+      tokenBoundEnforced: models.panel.every((m) => m.status !== 'run' || !m.resolved || tokenBudgetFor(m.resolved) !== null),
     },
     models: reportModels,
     uncertainty:
@@ -525,8 +494,10 @@ function freshReport(ctx: Ctx, versionId: bigint, terms: VersionTerms, upload: U
     attestation: ctx.attestor.reportBlock(),
     signer: ctx.keys.account.address,
     createdAt: nowIso(),
+    inferenceCostUsd: fresh.inferenceCostUsd,
+    ...(payment ? { feePaidUsdc: payment.fee.toString() } : {}),
   };
-  return withOptionalFields(base, { inferenceCostUsd: fresh.inferenceCostUsd, feePaidUsdc: payment ? payment.fee.toString() : undefined }, '') as unknown as Report;
+  return reportSchema.parse(base);
 }
 
 async function runPreview(ctx: Ctx, versionId: bigint): Promise<StoredReport> {

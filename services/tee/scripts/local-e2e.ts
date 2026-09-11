@@ -312,8 +312,7 @@ async function preview(versionId: bigint, pkg: PackageResult, reuseOf?: { versio
   check(again.status === 200 && again.json.cached === true && again.json.reportHash === done.reportHash, 'second preview request served from cache');
   if (reuseOf) {
     check(JSON.stringify(report.jobs) === JSON.stringify(reuseOf.report.jobs) && JSON.stringify(report.models) === JSON.stringify(reuseOf.report.models), 'reused report keeps the original jobIds, run dates and scores');
-    const cf = (report as unknown as { cachedFrom?: { originalVersionId: string } }).cachedFrom;
-    check(cf ? cf.originalVersionId === reuseOf.versionId.toString() : report.uncertainty.includes(`version ${reuseOf.versionId}`), `report marks reuse (${cf ? 'cachedFrom' : 'disclosure note; shared schema has no cachedFrom yet'})`);
+    check(report.cachedFrom?.originalVersionId === reuseOf.versionId.toString() && report.inferenceCostUsd === 0, 'report marks reuse (cachedFrom.originalVersionId, inferenceCostUsd 0)');
     check(report.createdAt !== reuseOf.report.createdAt && done.reportHash !== undefined, 'reused report is freshly signed for the new versionId');
   }
   return report;

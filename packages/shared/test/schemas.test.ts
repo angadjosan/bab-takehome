@@ -171,6 +171,32 @@ describe('report', () => {
     const extra = { ...sampleReport, extra: 1 };
     expect(() => parseReport(extra)).toThrow();
   });
+  it('accepts the optional TEE fields and stays strict about their shape', () => {
+    const full: Report = {
+      ...sampleReport,
+      protocol: { ...sampleReport.protocol, toolsDigest: h('tools'), tokenBoundEnforced: true },
+      cachedFrom: { originalRunAt: '2026-09-09T10:00:00.000Z', originalVersionId: '7', originalChainId: 84532 },
+      inferenceCostUsd: 0,
+      feePaidUsdc: '5000000',
+    };
+    expect(parseReport(serializeReport(full))).toEqual(full);
+    expect(reportHash(full)).not.toBe(reportHash(sampleReport));
+    const bad = (patch: (r: any) => void) => {
+      const r = structuredClone(full) as any;
+      patch(r);
+      return () => parseReport(r);
+    };
+    expect(bad((r) => (r.cachedFrom.originalVersionID = '7'))).toThrow(); // typo key
+    expect(bad((r) => delete r.cachedFrom.originalChainId)).toThrow();
+    expect(bad((r) => (r.cachedFrom.originalVersionId = 7))).toThrow();
+    expect(bad((r) => (r.cachedFrom.originalRunAt = 'yesterday'))).toThrow();
+    expect(bad((r) => (r.inferenceCostUsd = -1))).toThrow();
+    expect(bad((r) => (r.feePaidUsdc = 5000000))).toThrow();
+    expect(bad((r) => (r.feePaidUsdc = '5.0'))).toThrow();
+    expect(bad((r) => (r.protocol.toolsDigest = '0xABC'))).toThrow();
+    expect(bad((r) => (r.protocol.tokenBoundEnforced = 'yes'))).toThrow();
+    expect(bad((r) => (r.inferenceCostUSD = 0))).toThrow(); // typo key
+  });
 });
 
 describe('description', () => {
